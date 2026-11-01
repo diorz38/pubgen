@@ -99,8 +99,16 @@ fn cover_style_indices() -> impl Iterator<Item = usize> {
     (0..super::ai_cover::AI_STYLE_BASE).chain(ai_style_indices())
 }
 
-/// The names a style's thumbnail may be filed under: the sample names it shipped with, plus its
-/// `COVER_STYLES` label.
+/// The sample names an AI preset ships with. Only the base preset has one: handing `ai_base` to
+/// every AI style made all five preview the same picture, so each preset now names itself instead
+/// (its own `AI_PRESETS` name, plus the numeric prefix `100_…` / `style100`).
+fn ai_sample_aliases(style: usize) -> &'static [&'static str] {
+    if style == super::ai_cover::AI_STYLE_BASE { &["ai_base", "ai_base_template"] } else { &[] }
+}
+
+/// The names a style's thumbnail may be filed under: the sample names it shipped with, its
+/// `COVER_STYLES` label, and — for an AI preset — the preset's own name (`retro_waves.png`,
+/// `ai_retro_waves.png`, `100_retro_waves.png`…).
 fn style_aliases(style: usize) -> impl Iterator<Item = &'static str> {
     let samples: &[&'static str] = match style {
         0 => &["wave_curves", "karawang_timur_cover_2026"],
@@ -112,10 +120,11 @@ fn style_aliases(style: usize) -> impl Iterator<Item = &'static str> {
         6 => &["diagonal_arrow", "karawang_timur_diagonal_cover"],
         7 => &["modern_horizon", "karawang_timur_modern_horizon_cover"],
         8 => &["business_report", "karawang_timur_business_cover"],
-        s if s >= super::ai_cover::AI_STYLE_BASE => &["ai_base", "ai_base_template"],
+        s if s >= super::ai_cover::AI_STYLE_BASE => ai_sample_aliases(s),
         _ => &[],
     };
-    samples.iter().copied().chain(style_labels().get(style).copied())
+    let preset_name = super::ai_cover::preset(style).map(|p| p.name);
+    samples.iter().copied().chain(preset_name).chain(style_labels().get(style).copied())
 }
 
 /// The style a thumbnail file name shows, and how strongly: a numeric prefix (`0_`, `style0`) is
@@ -201,6 +210,22 @@ fn style_thumbnail_texture(ctx: &egui::Context, style_idx: usize) -> Option<egui
     let tex = ctx.load_texture(format!("pubgen_cover_thumb_{style_idx}"), fitted, egui::TextureOptions::LINEAR);
     ctx.data_mut(|d| d.insert_temp(key, tex.clone()));
     Some(tex)
+}
+
+/// Paint a band whose centre follows `centre_at` (a fraction of the width to a fraction of the
+/// height) as narrow slices, so concave waves and S-curves fill correctly instead of relying on
+/// convex-polygon tessellation.
+fn paint_band(p: &egui::Painter, rect: egui::Rect, thickness: f32, color: Color32, centre_at: impl Fn(f32) -> f32) {
+    const COLUMNS: usize = 48;
+    let half = rect.height() * thickness * 0.5;
+    for i in 0..COLUMNS {
+        let t0 = i as f32 / COLUMNS as f32;
+        let t1 = (i + 1) as f32 / COLUMNS as f32;
+        let centre = rect.min.y + rect.height() * centre_at((t0 + t1) * 0.5);
+        let x0 = rect.min.x + rect.width() * t0;
+        let x1 = rect.min.x + rect.width() * t1;
+        p.rect_filled(egui::Rect::from_min_max(egui::pos2(x0, centre - half), egui::pos2(x1, centre + half)), 0.0, color);
+    }
 }
 
 fn paint_fallback_cover_thumb(ui: &mut Ui, style_idx: usize, w: f32, h: f32, t: &Tokens) {
@@ -626,6 +651,108 @@ fn paint_fallback_cover_thumb(ui: &mut Ui, style_idx: usize, w: f32, h: f32, t: 
                 egui::Stroke::NONE,
             ));
         }
+        100 => {
+            // AI Retro Waves: warm mid-century wave bands under the house typography.
+            let cream = Color32::from_rgb(243, 234, 217);
+            let clay = Color32::from_rgb(181, 84, 59);
+            let mustard = Color32::from_rgb(232, 163, 77);
+            let sage = Color32::from_rgb(147, 169, 140);
+            let ink = Color32::from_rgb(62, 44, 35);
+            p.rect_filled(rect, 4.0, cream);
+            p.circle_filled(rect.min + vec2(w * 0.72, h * 0.26), w * 0.15, mustard);
+            paint_band(p, rect, 0.22, sage, |t| 0.58 + 0.10 * (t * std::f32::consts::TAU + 0.7).sin());
+            paint_band(p, rect, 0.18, clay, |t| 0.60 + 0.10 * (t * std::f32::consts::TAU + 1.9).sin());
+            paint_band(p, rect, 0.12, mustard, |t| 0.62 + 0.10 * (t * std::f32::consts::TAU + 3.1).sin());
+            p.rect_filled(egui::Rect::from_min_max(rect.min + vec2(w * 0.08, h * 0.10), rect.min + vec2(w * 0.50, h * 0.135)), 2.0, clay);
+            p.rect_filled(egui::Rect::from_min_max(rect.min + vec2(w * 0.08, h * 0.155), rect.min + vec2(w * 0.66, h * 0.195)), 2.0, ink);
+        }
+        101 => {
+            // AI Geometric Business: a hero hexagon and micro-hexagons over diagonal stripes.
+            let navy = Color32::from_rgb(10, 25, 49);
+            let blue = Color32::from_rgb(0, 51, 153);
+            let cyan = Color32::from_rgb(0, 168, 255);
+            let silver = Color32::from_rgb(224, 230, 237);
+            let hex = |cx: f32, cy: f32, r: f32| -> Vec<egui::Pos2> {
+                (0..6)
+                    .map(|k| {
+                        let a = std::f32::consts::FRAC_PI_3 * k as f32 - std::f32::consts::FRAC_PI_6;
+                        rect.min + vec2(cx + r * a.cos(), cy + r * a.sin())
+                    })
+                    .collect()
+            };
+            p.rect_filled(rect, 4.0, Color32::WHITE);
+            for i in 0..4 {
+                let x = w * (0.52 + i as f32 * 0.12);
+                p.add(egui::Shape::convex_polygon(
+                    vec![
+                        rect.min + vec2(x, 0.0),
+                        rect.min + vec2(x + w * 0.05, 0.0),
+                        rect.min + vec2(x - w * 0.10, h),
+                        rect.min + vec2(x - w * 0.15, h),
+                    ],
+                    if i % 2 == 0 { cyan } else { blue },
+                    egui::Stroke::NONE,
+                ));
+            }
+            p.add(egui::Shape::convex_polygon(hex(w * 0.40, h * 0.46, w * 0.27), blue, egui::Stroke::NONE));
+            p.add(egui::Shape::convex_polygon(hex(w * 0.40, h * 0.46, w * 0.20), silver, egui::Stroke::NONE));
+            p.add(egui::Shape::convex_polygon(hex(w * 0.74, h * 0.24, w * 0.09), cyan, egui::Stroke::NONE));
+            p.add(egui::Shape::convex_polygon(hex(w * 0.20, h * 0.74, w * 0.06), navy, egui::Stroke::NONE));
+            p.rect_filled(egui::Rect::from_min_max(rect.min + vec2(w * 0.08, h * 0.84), rect.min + vec2(w * 0.60, h * 0.875)), 2.0, navy);
+        }
+        102 => {
+            // AI Minimal Sci-Fi: a glowing sun disc over a geometric horizon in a night sky.
+            let night = Color32::from_rgb(28, 37, 44);
+            let slate = Color32::from_rgb(83, 97, 108);
+            let silver = Color32::from_rgb(159, 177, 188);
+            let gold = Color32::from_rgb(232, 163, 77);
+            p.rect_filled(rect, 4.0, night);
+            for (x, y) in [(0.12, 0.14), (0.30, 0.09), (0.58, 0.12), (0.80, 0.20), (0.22, 0.28), (0.90, 0.08)] {
+                p.circle_filled(rect.min + vec2(w * x, h * y), 1.2, silver);
+            }
+            p.circle_filled(rect.min + vec2(w * 0.50, h * 0.44), w * 0.27, gold);
+            p.circle_stroke(rect.min + vec2(w * 0.50, h * 0.44), w * 0.33, egui::Stroke::new(1.0, slate));
+            p.rect_filled(
+                egui::Rect::from_min_max(rect.min + vec2(0.0, h * 0.44), rect.max),
+                egui::CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 },
+                night,
+            );
+            for i in 0..5 {
+                let y = h * (0.46 + i as f32 * 0.055);
+                p.line_segment([rect.min + vec2(0.0, y), rect.min + vec2(w, y)], egui::Stroke::new(1.0, slate));
+            }
+            p.rect_filled(egui::Rect::from_min_max(rect.min + vec2(w * 0.08, h * 0.80), rect.min + vec2(w * 0.52, h * 0.835)), 2.0, silver);
+            p.rect_filled(egui::Rect::from_min_max(rect.min + vec2(w * 0.08, h * 0.855), rect.min + vec2(w * 0.40, h * 0.885)), 1.0, gold);
+        }
+        103 => {
+            // AI Dynamic Waves Spread: one broad corporate sweep across a two-page spread.
+            let cream = Color32::from_rgb(246, 241, 231);
+            let forest = Color32::from_rgb(47, 93, 80);
+            let moss = Color32::from_rgb(106, 138, 110);
+            let gold = Color32::from_rgb(201, 162, 39);
+            p.rect_filled(rect, 4.0, cream);
+            paint_band(p, rect, 0.46, moss, |t| 0.62 - 0.34 * t + 0.06 * (t * std::f32::consts::TAU * 0.5).sin());
+            paint_band(p, rect, 0.24, forest, |t| 0.66 - 0.34 * t + 0.06 * (t * std::f32::consts::TAU * 0.5 + 0.8).sin());
+            paint_band(p, rect, 0.05, gold, |t| 0.72 - 0.34 * t);
+            p.line_segment([rect.min + vec2(w * 0.5, 0.0), rect.min + vec2(w * 0.5, h)], egui::Stroke::new(1.0, Color32::from_gray(205)));
+            p.rect_filled(egui::Rect::from_min_max(rect.min + vec2(w * 0.08, h * 0.12), rect.min + vec2(w * 0.44, h * 0.15)), 2.0, forest);
+            p.rect_filled(egui::Rect::from_min_max(rect.min + vec2(w * 0.08, h * 0.17), rect.min + vec2(w * 0.56, h * 0.205)), 2.0, gold);
+        }
+        104 => {
+            // AI Vibrant S-Curve Spread: a thick S ribbon crossing the spread with accent ribbons.
+            let paper = Color32::from_rgb(247, 249, 245);
+            let teal = Color32::from_rgb(0, 109, 111);
+            let pine = Color32::from_rgb(10, 46, 40);
+            let lime = Color32::from_rgb(132, 204, 22);
+            let s_curve = |t: f32| 0.78 - 0.52 * (t * t * (3.0 - 2.0 * t));
+            p.rect_filled(rect, 4.0, paper);
+            paint_band(p, rect, 0.30, teal, s_curve);
+            paint_band(p, rect, 0.10, lime, |t| s_curve(t) + 0.17);
+            paint_band(p, rect, 0.05, pine, |t| s_curve(t) - 0.16);
+            p.line_segment([rect.min + vec2(w * 0.5, 0.0), rect.min + vec2(w * 0.5, h)], egui::Stroke::new(1.0, Color32::from_gray(205)));
+            p.rect_filled(egui::Rect::from_min_max(rect.min + vec2(w * 0.08, h * 0.10), rect.min + vec2(w * 0.46, h * 0.135)), 2.0, pine);
+            p.rect_filled(egui::Rect::from_min_max(rect.min + vec2(w * 0.08, h * 0.155), rect.min + vec2(w * 0.58, h * 0.19)), 2.0, lime);
+        }
         _ => {
             // Style 8 (Business Report, traced from design-10): white base, orange top band and
             // bottom-right corner, arrow-shaped photograph with its chevron sliver across a thin
@@ -789,6 +916,36 @@ mod tests {
         }
     }
 
+    /// Every AI preset has its own thumbnail names, so the five AI styles never share one picture:
+    /// the base sample names only the first preset, and each preset answers to its own name.
+    #[test]
+    fn each_ai_preset_has_its_own_thumbnail() {
+        let base = super::super::ai_cover::AI_STYLE_BASE;
+        for (name, offset) in [
+            ("ai_base.png", 0),
+            ("ai_retro_waves.png", 0),
+            ("retro_waves.png", 0),
+            ("100_retro_waves.png", 0),
+            ("ai_geometric_business.png", 1),
+            ("geometric_business.png", 1),
+            ("101_geometric_business.png", 1),
+            ("ai_minimal_scifi.png", 2),
+            ("minimal_sci_fi.png", 2),
+            ("ai_dynamic_waves_spread.png", 3),
+            ("ai_vibrant_scurve_spread.png", 4),
+            ("style104.png", 4),
+        ] {
+            assert_eq!(style_of(name), Some(base + offset), "{name}");
+        }
+
+        let aliases: Vec<Vec<String>> = (0..super::super::ai_cover::AI_PRESETS.len()).map(|i| style_aliases(base + i).map(slug).collect()).collect();
+        for (i, a) in aliases.iter().enumerate() {
+            for (j, b) in aliases.iter().enumerate().skip(i + 1) {
+                assert!(a.iter().all(|name| !b.contains(name)), "AI presets {i} and {j} share a thumbnail name");
+            }
+        }
+    }
+
     /// A name the user makes up still lands: a numeric prefix, a style label, or spaces/case.
     #[test]
     fn user_file_names_pick_a_style() {
@@ -828,6 +985,27 @@ mod tests {
         assert_eq!(thumb_path_in(&[first.clone(), second.clone()], 5), Some(elsewhere));
         assert_eq!(thumb_path_in(&[first], 0), None, "no file, so the painted fallback shows");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Opt-in evidence (`CRAFT_UI_VISUAL_FIXTURES=dir cargo test --features pubgen`): the five AI
+    /// preset fallbacks side by side, so they can be checked for being distinct and on-brand.
+    #[test]
+    fn capture_ai_cover_thumbnails_fixture() {
+        let Some(directory) = std::env::var_os("CRAFT_UI_VISUAL_FIXTURES").map(std::path::PathBuf::from) else { return };
+        std::fs::create_dir_all(&directory).unwrap();
+        let t = Tokens::for_brightness(crate::theme::Brightness::MediumDark);
+        let mut harness =
+            egui_kittest::Harness::builder().with_size(vec2(5.0 * 160.0, 220.0)).with_accessibility_check(false).wgpu().build_ui(|ui| {
+                crate::theme::install_fonts(ui.ctx(), "en");
+                crate::theme::apply(ui.ctx(), &t);
+                ui.horizontal(|ui| {
+                    for i in 0..super::super::ai_cover::AI_PRESETS.len() {
+                        paint_fallback_cover_thumb(ui, super::super::ai_cover::AI_STYLE_BASE + i, 150.0, 212.0, &t);
+                    }
+                });
+            });
+        harness.run_steps(2);
+        harness.render().unwrap().save(directory.join("pubgen-ai-thumbnails.png")).unwrap();
     }
 
     /// The checked-in samples still resolve through the folder itself (they are local-only, so a

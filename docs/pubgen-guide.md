@@ -407,9 +407,10 @@ You can specify AI Base styles directly in your Excel workbook:
 ---
 
 ### Hover Thumbnail Previews
-- **Quick Preview Pills**: Under the style dropdown, you will see quick-switch pills for all 13 vector corporate styles plus the 3 AI Base styles.
+- **Quick Preview Pills**: Under the style dropdown, you will see quick-switch pills for all 13 vector corporate styles plus the 5 AI styles.
 - **Hover to Preview**: Simply move your mouse over any pill (or click the small eye icon `👁` next to the dropdown). A floating tooltip instantly displays the actual rendered cover thumbnail so you can choose your favorite look before generating.
 - **Thumbnail images found anywhere**: the preview lists every image in the app image folder and the per-user thumbnail folder instead of a fixed set of filenames, so your own preview PNGs and JPGs show up.
+- **Every AI style previews itself**: each of the five AI styles shows its own painted preview (mid-century waves, geometric hexagons, sci-fi sun, spread sweep, S-curve ribbon) instead of all sharing one AI image. To use your own picture, drop a PNG/JPG named after the style in the per-user thumbnail folder — `ai_retro_waves.png`, `retro_waves.png` or `100_retro_waves.png` all match the first AI style; `style104.png` or `ai_vibrant_scurve_spread.png` match the last.
 
 ---
 
