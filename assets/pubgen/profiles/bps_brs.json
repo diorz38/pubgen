@@ -9,8 +9,8 @@
     "margins_mm": {
       "top": 18.0,
       "bottom": 18.0,
-      "inside": 18.0,
-      "outside": 18.0
+      "inside": 20.0,
+      "outside": 20.0
     }
   },
   "structure": {

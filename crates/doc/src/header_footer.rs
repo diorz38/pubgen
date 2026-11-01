@@ -221,7 +221,7 @@ impl HeaderFooterTemplate {
             },
             Self {
                 name: "hf-brs".into(),
-                description: "BPS Berita Resmi Statistik running footer with publication title, release number, and prominent folio.".into(),
+                description: "BPS Berita Resmi Statistik running footer: title and release number right-aligned on verso / left-aligned on recto in Raleway Thin 10, with a Lato Regular 25 page number on the spine side.".into(),
                 sided: Sided::Double,
                 header_offset: 24.0,
                 footer_offset: 24.0,

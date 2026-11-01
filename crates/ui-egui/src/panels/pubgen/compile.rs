@@ -2214,7 +2214,8 @@ mod tests {
         m.profile = Some("bps_brs".into());
         let plan = CompilePlan::from_manifest(&manifest_path, m).unwrap();
         assert_eq!(plan.manifest.document.margins_mm.top, 18.0);
-        assert_eq!(plan.manifest.document.margins_mm.inside, 18.0);
+        assert_eq!(plan.manifest.document.margins_mm.inside, 20.0);
+        assert_eq!(plan.manifest.document.margins_mm.outside, 20.0);
         assert!(plan.manifest.document.facing_pages);
     }
 

@@ -756,7 +756,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                 let f_text = expand_tokens(&hf.footer.single, d);
                 if is_hf_brs {
                     let folio_w = 34.0;
-                    let gap = 8.0;
+                    let gap = 4.0;
                     let f_top = f_rect.y0;
                     let f_h = 28.0;
                     let folio_rect = Rect::new(f_rect.x0, f_top, f_rect.x0 + folio_w, f_top + f_h);
@@ -773,9 +773,9 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                         &style_to_use,
                         text_swatch.as_deref(),
                         Some(designcraft_doc::Align::Left),
-                        Some("Raleway"),
-                        Some(20.0),
-                        Some("Bold"),
+                        Some("Lato"),
+                        Some(25.0),
+                        Some("Regular"),
                         6, // Bottom
                     )?;
 
@@ -790,8 +790,8 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                         text_swatch.as_deref(),
                         Some(designcraft_doc::Align::Left),
                         Some("Raleway"),
-                        Some(8.0),
-                        Some("Regular"),
+                        Some(10.0),
+                        Some("Thin"),
                         6, // Bottom
                     )?;
                 } else {
@@ -871,7 +871,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                 let lf_text = expand_tokens(&hf.footer.left, d);
                 if is_hf_brs {
                     let folio_w = 34.0;
-                    let gap = 8.0;
+                    let gap = 4.0;
                     let f_top = lf_rect.y0;
                     let f_h = 28.0;
                     let text_rect = Rect::new(lf_rect.x0, f_top, lf_rect.x1, f_top + f_h);
@@ -888,8 +888,8 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                         text_swatch.as_deref(),
                         Some(designcraft_doc::Align::Right),
                         Some("Raleway"),
-                        Some(8.0),
-                        Some("Regular"),
+                        Some(10.0),
+                        Some("Thin"),
                         6, // Bottom
                     )?;
 
@@ -904,9 +904,9 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                         &style_to_use,
                         text_swatch.as_deref(),
                         Some(designcraft_doc::Align::Right),
-                        Some("Raleway"),
-                        Some(20.0),
-                        Some("Bold"),
+                        Some("Lato"),
+                        Some(25.0),
+                        Some("Regular"),
                         6, // Bottom
                     )?;
                 } else {
@@ -963,7 +963,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                 let rf_text = expand_tokens(&hf.footer.right, d);
                 if is_hf_brs {
                     let folio_w = 34.0;
-                    let gap = 8.0;
+                    let gap = 4.0;
                     let f_top = rf_rect.y0;
                     let f_h = 28.0;
                     let folio_rect = brs_folio_rect(&right_pg, f_top, f_h, folio_w, gap);
@@ -980,9 +980,9 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                         &style_to_use,
                         text_swatch.as_deref(),
                         Some(designcraft_doc::Align::Left),
-                        Some("Raleway"),
-                        Some(20.0),
-                        Some("Bold"),
+                        Some("Lato"),
+                        Some(25.0),
+                        Some("Regular"),
                         6, // Bottom
                     )?;
 
@@ -997,8 +997,8 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                         text_swatch.as_deref(),
                         Some(designcraft_doc::Align::Left),
                         Some("Raleway"),
-                        Some(8.0),
-                        Some("Regular"),
+                        Some(10.0),
+                        Some("Thin"),
                         6, // Bottom
                     )?;
                 } else {
@@ -1832,6 +1832,23 @@ mod tests {
         assert!((rh_bounds2.x1 - expected_rh_x1_new).abs() < 1e-4, "updated rh x1: {}", rh_bounds2.x1);
     }
 
+    /// The BRS footer typography contract: Raleway Thin 10 text with a Lato Regular 25 folio,
+    /// never bold — verso frames right-aligned, recto frames left-aligned.
+    fn assert_brs_footer_typography(
+        doc: &Document,
+        verso: &[(&str, ItemId, &str, &str, f64, designcraft_doc::Align)],
+        recto: &[(&str, ItemId, &str, &str, f64, designcraft_doc::Align)],
+    ) {
+        for (name, id, family, style, size, align) in verso.iter().chain(recto) {
+            let sid = doc.item(*id).unwrap().text_frame().unwrap().story;
+            let para = doc.story(sid).unwrap().paras.first().cloned().unwrap();
+            assert_eq!(para.chars.font_family.as_deref(), Some(*family), "{name} family");
+            assert_eq!(para.chars.size, Some(*size), "{name} size");
+            assert_eq!(para.chars.font_style.as_deref(), Some(*style), "{name} style");
+            assert_eq!(para.para.align, Some(*align), "{name} alignment");
+        }
+    }
+
     #[test]
     fn test_apply_hf_brs_double_sided() {
         let mut s = session_with_doc(true, 4);
@@ -1887,6 +1904,21 @@ mod tests {
         // Verify folio content is the page marker
         let left_folio_story = doc.story(doc.item(left_folio_id).unwrap().text_frame().unwrap().story).unwrap();
         assert_eq!(left_folio_story.text, format!("{}", story::PAGE_NUMBER));
+
+        // BRS typography and alignment: Raleway Thin 10 text, Lato Regular 25 folio (closer to
+        // the text than before: a 4pt gap past the inner margin edge); verso text right-aligned
+        // with the folio to its right, recto text left-aligned with the folio to its left.
+        assert_brs_footer_typography(
+            doc,
+            &[
+                ("left text", left_text_id, "Raleway", "Thin", 10.0, designcraft_doc::Align::Right),
+                ("left folio", left_folio_id, "Lato", "Regular", 25.0, designcraft_doc::Align::Right),
+            ],
+            &[
+                ("right text", right_text_id, "Raleway", "Thin", 10.0, designcraft_doc::Align::Left),
+                ("right folio", right_folio_id, "Lato", "Regular", 25.0, designcraft_doc::Align::Left),
+            ],
+        );
 
         assert_eq!(parent_spread.page_at_x(left_text_b.center().x), Some(0));
         assert_eq!(parent_spread.page_at_x(left_folio_b.center().x), Some(0));

@@ -3665,15 +3665,29 @@ pub(crate) mod tests {
                 false
             }
         });
-        let has_c1_chart = p2_sp.items.iter().any(|it| {
-            if let designcraft_doc::Content::Text(tf) = &it.content {
-                final_doc.story(tf.story).is_some_and(|s| s.text.contains("Gambar 1") || s.text.contains("150,77"))
-            } else {
-                false
-            }
-        });
         assert!(has_u1_text, "Page 2 must contain U1 narrative");
-        assert!(has_c1_chart, "Page 2 must contain C1 chart below U1 on the same page");
+        // The C1 chart follows the U1 narrative: on the same page when the text leaves room
+        // (smaller body sizes), else on the page the narrative ends on or the one after.
+        let spread_with = |needles: &[&str]| {
+            final_doc
+                .spreads
+                .iter()
+                .position(|sp| {
+                    sp.items.iter().any(|it| {
+                        if let designcraft_doc::Content::Text(tf) = &it.content {
+                            final_doc.story(tf.story).is_some_and(|s| needles.iter().any(|n| s.text.contains(n)))
+                        } else {
+                            false
+                        }
+                    })
+                })
+                .unwrap_or(usize::MAX)
+        };
+        let u1_si = spread_with(&["Nilai Tukar Petani (NTP) diperoleh"]);
+        let c1_si = spread_with(&["Gambar 1", "150,77"]);
+        assert_ne!(u1_si, usize::MAX, "U1 narrative must exist in the document");
+        assert_ne!(c1_si, usize::MAX, "C1 chart must exist in the document");
+        assert!(c1_si >= u1_si, "C1 chart (spread {c1_si}) must not precede the U1 narrative (spread {u1_si})");
 
         let (last_si, _) = final_doc.page_loc(final_count - 1).unwrap();
         let last_sp = &final_doc.spreads[last_si];
@@ -3751,12 +3765,30 @@ pub(crate) mod tests {
                 table_count += 1;
                 assert_eq!(table.footer_rows(), 0, "BRS table must have 0 footer rows");
                 assert!(!table.rows.iter().any(|r| r.kind == designcraft_doc::RowKind::Footer), "BRS table rows must not be RowKind::Footer");
-                // Verify column numbers row (1) exists in row 1 with fill #FBBF91
-                if table.nrows() > 1 {
-                    let col_num_cell = table.cell(1, 0).expect("Col num cell must exist");
-                    assert_eq!(col_num_cell.text.text.trim(), "(1)", "Row 1 must be column number row");
-                    assert_eq!(col_num_cell.fill, "#FBBF91", "Row 1 must be styled with #FBBF91");
-                }
+                // Verify the column numbers row exists (first cell "(1)", fill #FBBF91), however
+                // deep the stacked header above it is (single-row, or with a months sub-header).
+                let colnum_row = (0..table.nrows()).find(|&r| table.cell(r, 0).is_some_and(|c| c.text.text.trim().starts_with("(1)")));
+                let Some(colnum_row) = colnum_row else {
+                    let mut rows = Vec::new();
+                    for r in 0..table.nrows() {
+                        let mut cols = Vec::new();
+                        for c in 0..4 {
+                            cols.push(table.cell(r, c).map(|cc| cc.text.text.trim().to_string()).unwrap_or_default());
+                        }
+                        rows.push(cols.join(" | "));
+                    }
+                    panic!("BRS table must carry a column number row; table rows: {rows:?}");
+                };
+                assert_eq!(
+                    table.cell(colnum_row, 0).map(|c| c.text.text.trim().to_string()),
+                    Some("(1)".to_string()),
+                    "Column number row first cell"
+                );
+                assert_eq!(
+                    table.cell(colnum_row, 0).map(|c| c.fill.clone()),
+                    Some("#FBBF91".to_string()),
+                    "Column number row must be styled with #FBBF91"
+                );
             }
         }
         assert!(table_count > 0, "Doc2 must contain at least 1 table");

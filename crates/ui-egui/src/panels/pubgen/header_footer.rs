@@ -129,7 +129,7 @@ fn show_hf_preview_tooltip(ui: &mut Ui, st: &PubgenState, name: &str, t: &Tokens
                 ui.painter().line_segment([pos2(spine_x + 8.0, by), pos2(rect.max.x - 8.0, by)], egui::Stroke::new(1.0, Color32::from_gray(230)));
             }
 
-            // Verso (Left page): 2-line text on left (right-aligned), large folio on right in footer
+            // Verso (Left page): 2-line text on left (right-aligned), folio on right in footer
             let left_text_x = spine_x - 32.0;
             ui.painter().text(
                 pos2(left_text_x, footer_y),
@@ -138,10 +138,10 @@ fn show_hf_preview_tooltip(ui: &mut Ui, st: &PubgenState, name: &str, t: &Tokens
                 egui::FontId::proportional(7.0),
                 t.text_dim,
             );
-            ui.painter().text(pos2(spine_x - 10.0, footer_y - 2.0), egui::Align2::RIGHT_TOP, "9", egui::FontId::proportional(16.0), brs_orange);
+            ui.painter().text(pos2(spine_x - 10.0, footer_y), egui::Align2::RIGHT_TOP, "9", egui::FontId::proportional(8.5), brs_orange);
 
-            // Recto (Right page): large folio on left, 2-line text on right (left-aligned) in footer
-            ui.painter().text(pos2(spine_x + 10.0, footer_y - 2.0), egui::Align2::LEFT_TOP, "10", egui::FontId::proportional(16.0), brs_orange);
+            // Recto (Right page): folio on left, 2-line text on right (left-aligned) in footer
+            ui.painter().text(pos2(spine_x + 10.0, footer_y), egui::Align2::LEFT_TOP, "10", egui::FontId::proportional(8.5), brs_orange);
             let right_text_x = spine_x + 32.0;
             ui.painter().text(
                 pos2(right_text_x, footer_y),
@@ -153,9 +153,11 @@ fn show_hf_preview_tooltip(ui: &mut Ui, st: &PubgenState, name: &str, t: &Tokens
 
             ui.add_space(3.0);
             ui.label(
-                RichText::new("BPS Berita Resmi Statistik running footer with prominent folios and two-line metadata (blank header).")
-                    .size(10.0)
-                    .color(t.text_dim),
+                RichText::new(
+                    "BPS Berita Resmi Statistik running footer in Raleway Thin 10 with a Lato Regular 25 folio on the spine side (blank header).",
+                )
+                .size(10.0)
+                .color(t.text_dim),
             );
             return;
         }

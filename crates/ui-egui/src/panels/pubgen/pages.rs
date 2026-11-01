@@ -635,9 +635,9 @@ pub(crate) fn format_brs_narrative_story(app: &mut DesignApp, fid: u64, font: &s
         return;
     }
 
-    // Default font Lato
+    // Default font Lato, body/narrative 12pt with 15pt leading
     let _ = app.run("text.select", json!({"story": sid.0, "anchor": 0, "focus": story_len}));
-    let _ = app.run("type.char", json!({"fontFamily": font, "size": 10.0}));
+    let _ = app.run("type.char", json!({"fontFamily": font, "size": 12.0, "leading": {"kind": "points", "value": 15.0}}));
 
     // Inspect paragraphs and determine styling without holding borrow during app.run
     #[derive(Clone, Copy)]
