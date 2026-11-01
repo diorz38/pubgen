@@ -182,7 +182,8 @@ Beyond the front cover, **Add Inside cover and Back Cover** inserts a greyscale 
 ### Overview & Position
 - **Always Page 1 (Front Cover)**: When you click **Generate Cover Page**, Pubgen automatically inserts a new page before the existing Page 1 and navigates to it. Your existing layout and content are preserved.
 - **Proportional Scaling**: Whether your document is **A4**, **A5**, or **B5**, all polygons, frames, and typography scale proportionally (`sx`, `sy`, `s_avg`) so the layout always looks balanced.
-- **Back Cover on a Left Page**: with Facing Pages on, the back cover sits on a left (verso) page of its own spread, mirroring the front cover on page 1; a cover that would land on a right page gains one blank page first (both the generic and the BRS back cover, and the BRS run reports any error instead of swallowing it).
+- **Back Cover on a Left Page**: with Facing Pages on, the back cover sits on a left (verso) page of its own spread, mirroring the front cover on page 1. The blank page that reserves that slot is inserted *before* the front cover is copied, so the decorative shapes copied from the front cover land on the back cover itself — not on the last body page (an even page count used to put the copy on the right page of the last body spread). A cover that would still land on a right page gains one blank page first (both the generic and the BRS back cover, and the BRS run reports any error instead of swallowing it).
+- **Back Cover Completeness Check**: after generating the back cover, Pubgen verifies that its logo, agency name, address, ISSN/ISBN code, centre image, camera frame and three top-right images are on the page, plus at least one copied front-cover shape when the front cover has artwork. If anything is missing it reports `The back cover is incomplete (missing: …)` rather than leaving a bare page.
 
 ---
 

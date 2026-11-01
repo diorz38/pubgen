@@ -507,6 +507,20 @@ pub fn resolve_agency_swatch(doc: &mut designcraft_doc::Document, color_spec: &s
     ensure_swatch(doc, clean)
 }
 
+/// Reserve the back cover's own page *before* the cover spread is duplicated. In a facing document
+/// with an even page count the last page is a lone left page, so appending the copy would put it on
+/// the right page of that spread: the copied shapes land over the last body page and stay behind
+/// when the parity blank page is inserted afterwards. One blank page first makes the copy land on a
+/// lone left page of its own from the start, so every copied shape stays on the back cover.
+fn ensure_back_cover_slot(app: &mut DesignApp) -> Result<(), String> {
+    let needs_blank = app.session.active().is_some_and(|s| s.doc.settings.facing_pages && s.doc.page_count() % 2 == 0);
+    if !needs_blank {
+        return Ok(());
+    }
+    app.run("layout.pages.insert", json!({ "count": 1 })).map_err(|e| format!("Failed to add the blank page before the back cover: {e}"))?;
+    Ok(())
+}
+
 /// A facing document keeps the back cover on a left (verso) page of a spread of its own, mirroring
 /// the front cover on page 1. A cover that lands on a right page (sharing the spread after the last
 /// body page) is shifted onto the left by one blank page inserted before it.
@@ -527,6 +541,21 @@ fn ensure_back_cover_on_left(app: &mut DesignApp) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether the back cover keeps this item: `transform_back_cover_item` drops text frames and the
+/// old logo and keeps the decorative shapes (graphics, groups and plain shapes).
+fn keeps_on_back_cover(it: &designcraft_doc::Item) -> bool {
+    let lbl = it.label.to_lowercase();
+    let nm = it.name.to_lowercase();
+    if lbl.contains("logo") || nm.contains("logo") {
+        return false;
+    }
+    match &it.content {
+        designcraft_doc::Content::Text(_) => false,
+        designcraft_doc::Content::Graphic(_) | designcraft_doc::Content::Unassigned => true,
+        designcraft_doc::Content::Group { items } => items.iter().any(|sub| keeps_on_back_cover(sub)),
+    }
+}
+
 pub fn execute_generate_back_cover(app: &mut DesignApp, st: &PubgenState) -> Result<(), String> {
     let branding = {
         let active = app.session.active().ok_or("No active document")?;
@@ -539,6 +568,17 @@ pub fn execute_generate_back_cover(app: &mut DesignApp, st: &PubgenState) -> Res
         let active = app.session.active().ok_or("No active document")?;
         active.doc.spreads.iter().flat_map(|sp| sp.items.iter().map(|it| it.id)).collect()
     };
+
+    // Whether the front cover carries artwork worth copying. A blank front cover legitimately
+    // yields a bare back cover, but a front cover with shapes must never lose them (see step 9).
+    let front_has_art = {
+        let active = app.session.active().ok_or("No active document")?;
+        active.doc.spreads.first().is_some_and(|sp| sp.items.iter().any(|it| keeps_on_back_cover(it)))
+    };
+
+    // 0. Reserve the back cover's own page before copying (facing documents with an even page
+    // count would otherwise place the copy on the last body spread).
+    ensure_back_cover_slot(app)?;
 
     // 1. Copy all shapes from main cover by duplicating spread 0 at the end of document
     app.run("layout.pages.duplicateSpread", json!({ "spread": 0, "atEnd": true }))
@@ -889,6 +929,45 @@ pub fn execute_generate_back_cover(app: &mut DesignApp, st: &PubgenState) -> Res
     });
 
     ensure_back_cover_at_end(app);
+
+    // 9. Verify the back cover is complete: the branding objects created here must all be on the
+    // page, and a front cover with artwork must have contributed at least one copied shape. A
+    // silently bare back cover is a wrong publication, so report it instead of returning Ok.
+    let missing = {
+        let active = app.session.active().ok_or("No active document")?;
+        let doc = &active.doc;
+        let last = doc.page_count().saturating_sub(1);
+        let (si, pi) = doc.page_loc(last).ok_or("Back cover page location missing")?;
+        let sp = &doc.spreads[si];
+        let on_page: Vec<&designcraft_doc::Item> =
+            sp.items.iter().map(std::sync::Arc::as_ref).filter(|it| sp.page_at_x(it.bounds().center().x) == Some(pi)).collect();
+        let has_slot = |slot: &str| on_page.iter().any(|it| it.label.contains(slot) || it.name.contains(slot));
+        let mut missing = Vec::new();
+        for slot in [
+            "#slot:back_cover:logo",
+            "#slot:back_cover:agency",
+            "#slot:back_cover:address",
+            "#slot:back_cover:code",
+            "#slot:back_cover:center",
+            "#slot:back_cover:camera",
+        ] {
+            if !has_slot(slot) {
+                missing.push(slot);
+            }
+        }
+        if on_page.iter().filter(|it| it.label.contains("#slot:back_cover:top_right")).count() < 3 {
+            missing.push("#slot:back_cover:top_right (3 images)");
+        }
+        let copied_art =
+            on_page.iter().any(|it| !it.label.contains("#slot:back_cover:") && !it.name.contains("#slot:back_cover:") && keeps_on_back_cover(it));
+        if front_has_art && !copied_art {
+            missing.push("the front-cover artwork");
+        }
+        missing
+    };
+    if !missing.is_empty() {
+        return Err(format!("The back cover is incomplete (missing: {}).", missing.join(", ")));
+    }
 
     Ok(())
 }
@@ -2667,6 +2746,34 @@ pub(crate) mod tests {
                 Some(1),
                 "{pages} pages: the back cover has a spread of its own"
             );
+        }
+    }
+
+    /// The back cover copies the front cover's shapes on every page count, not only the odd ones:
+    /// a facing document with an even page count used to leave the copies on the last body page.
+    #[test]
+    fn the_back_cover_copies_the_front_cover_shapes_on_any_page_count() {
+        for pages in 2..=6usize {
+            let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+            app.run("file.new", json!({ "preset": "A4", "pages": pages, "facingPages": true })).unwrap();
+            app.run("frame.create", json!({ "spread": 0, "rect": [36.0, 36.0, 300.0, 200.0] })).unwrap();
+            execute_generate_back_cover(&mut app, &PubgenState::default()).unwrap();
+            let active = app.session.active().unwrap();
+            let doc = &active.doc;
+            let last = doc.page_count() - 1;
+            assert_eq!(doc.page(last).map(|p| p.side), Some(designcraft_doc::PageSide::Left), "{pages} pages: the back cover is page {}", last + 1);
+            assert_eq!(
+                doc.page_loc(last).map(|(si, _)| doc.spreads[si].pages.len()),
+                Some(1),
+                "{pages} pages: the back cover has a spread of its own"
+            );
+            let (si, pi) = doc.page_loc(last).unwrap();
+            let sp = &doc.spreads[si];
+            let copied = sp.items.iter().any(|it| {
+                let b = it.bounds();
+                sp.page_at_x(b.center().x) == Some(pi) && (b.width() - 264.0).abs() < 2.0 && (b.height() - 164.0).abs() < 2.0
+            });
+            assert!(copied, "{pages} pages: the back cover (page {}) has no copy of the front-cover shape", last + 1);
         }
     }
 
