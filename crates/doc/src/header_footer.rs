@@ -245,6 +245,34 @@ impl HeaderFooterTemplate {
                     text_color: "#f68839".into(),
                 },
             },
+            Self {
+                name: "hf-dda".into(),
+                description: "BPS Daerah Dalam Angka header & footer: running header (chapter title) with folio and two-line bilingual publication title footer.".into(),
+                sided: Sided::Double,
+                header_offset: 24.0,
+                footer_offset: 24.0,
+                header: SidedText {
+                    single: "{section}\u{e006}{page}".into(),
+                    left: "{section}\u{e006}{page}".into(),
+                    right: "{page}\u{e006}{section}".into(),
+                },
+                footer: SidedText {
+                    single: "{static_text}".into(),
+                    left: "{static_text}".into(),
+                    right: "{static_text}".into(),
+                },
+                style: "[Basic Paragraph]".into(),
+                objects: HeaderFooterObjects {
+                    header_rule: false,
+                    header_rule_weight: 0.5,
+                    footer_rule: false,
+                    footer_rule_weight: 0.5,
+                    top_accent_bar: false,
+                    top_accent_bar_height: 4.0,
+                    top_accent_bar_bleed: true,
+                },
+                colors: HeaderFooterColors::default(),
+            },
         ]
     }
 
@@ -451,7 +479,7 @@ mod tests {
     #[test]
     fn built_in_templates_serde_roundtrip() {
         let templates = HeaderFooterTemplate::built_in_templates();
-        assert_eq!(templates.len(), 4);
+        assert_eq!(templates.len(), 5);
         assert_eq!(templates[0].name, "Modern Minimal");
         assert_eq!(templates[1].name, "Editorial Book");
         assert_eq!(templates[2].name, "Corporate Report");
@@ -459,6 +487,8 @@ mod tests {
         assert_eq!(templates[3].name, "hf-brs");
         assert_eq!(templates[3].sided, Sided::Double);
         assert!(!templates[3].objects.header_rule);
+        assert_eq!(templates[4].name, "hf-dda");
+        assert_eq!(templates[4].sided, Sided::Double);
 
         let json = serde_json::to_string(&templates).unwrap();
         let de: Vec<HeaderFooterTemplate> = serde_json::from_str(&json).unwrap();

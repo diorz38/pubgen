@@ -1031,6 +1031,21 @@ impl CompileJob {
             params["startNumber"] = serde_json::json!(1);
         }
         app.run("layout.section", params)?;
+
+        for (i, &page_idx) in self.chapter_ranges.iter().enumerate() {
+            if let Some(ch) = self.plan.chapters.get(i) {
+                let marker = ch.title.trim();
+                if !marker.is_empty() {
+                    let _ = app.run(
+                        "layout.section",
+                        serde_json::json!({
+                            "page": page_idx + 1,
+                            "marker": marker,
+                        }),
+                    );
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1612,7 +1627,8 @@ impl NewProjectDialog {
 /// A new-project dialog that inherits the active profile's language mode: a BPS BRS panel is
 /// single-language, so it must not create a bilingual manifest by default.
 fn new_project_dialog_for(st: &PubgenState) -> NewProjectDialog {
-    NewProjectDialog { bilingual: st.bilingual_output, ..Default::default() }
+    let default_hf = if let Some(ref hf) = st.active_profile().structure.header_footer_preset { hf.clone() } else { "book".into() };
+    NewProjectDialog { bilingual: st.bilingual_output, header_footer_preset: default_hf, ..Default::default() }
 }
 
 /// The Publication card at the top of the Pubgen panel.
@@ -2000,7 +2016,7 @@ fn render_new_project_toc_tab(ui: &mut Ui, dialog: &mut NewProjectDialog, t: &To
     ui.label(RichText::new(crate::i18n::tr(lang, "Running Headers & Footers:")).strong().size(12.0).color(t.text));
     ui.horizontal(|ui| {
         ui.label(RichText::new("Preset:").size(11.0).color(t.text));
-        let presets = ["book", "standard", "minimal"];
+        let presets = ["hf-dda", "book", "standard", "minimal", "hf-brs"];
         craft_ui::ComboBox::from_id_salt("new_proj_hf_preset").selected_text(&dialog.header_footer_preset).width(120.0).show_ui(ui, |ui| {
             for p in presets {
                 ui.selectable_value(&mut dialog.header_footer_preset, p.into(), p);

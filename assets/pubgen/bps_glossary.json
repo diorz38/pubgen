@@ -251,6 +251,198 @@
       "ai": "",
       "official": "No",
       "count": 0
+    },
+    {
+      "id": "Tingkat Pendidikan",
+      "ai": "Educational Attainment",
+      "official": "Educational Attainment",
+      "count": 0
+    },
+    {
+      "id": "Sekolah Dasar (SD)",
+      "ai": "Primary School",
+      "official": "Primary School",
+      "count": 0
+    },
+    {
+      "id": "Sekolah Dasar",
+      "ai": "Primary School",
+      "official": "Primary School",
+      "count": 0
+    },
+    {
+      "id": "SD/Sederajat",
+      "ai": "Primary School / Equivalent",
+      "official": "Primary School / Equivalent",
+      "count": 0
+    },
+    {
+      "id": "SD / Sederajat",
+      "ai": "Primary School / Equivalent",
+      "official": "Primary School / Equivalent",
+      "count": 0
+    },
+    {
+      "id": "SMP/Sederajat",
+      "ai": "Junior High School / Equivalent",
+      "official": "Junior High School / Equivalent",
+      "count": 0
+    },
+    {
+      "id": "SMP / Sederajat",
+      "ai": "Junior High School / Equivalent",
+      "official": "Junior High School / Equivalent",
+      "count": 0
+    },
+    {
+      "id": "SMA/Sederajat",
+      "ai": "Senior High School / Equivalent",
+      "official": "Senior High School / Equivalent",
+      "count": 0
+    },
+    {
+      "id": "SMA / Sederajat",
+      "ai": "Senior High School / Equivalent",
+      "official": "Senior High School / Equivalent",
+      "count": 0
+    },
+    {
+      "id": "SMK/Sederajat",
+      "ai": "Vocational High School / Equivalent",
+      "official": "Vocational High School / Equivalent",
+      "count": 0
+    },
+    {
+      "id": "SMK / Sederajat",
+      "ai": "Vocational High School / Equivalent",
+      "official": "Vocational High School / Equivalent",
+      "count": 0
+    },
+    {
+      "id": "Diploma I/Akta I",
+      "ai": "Diploma I / Certificate I",
+      "official": "Diploma I / Certificate I",
+      "count": 0
+    },
+    {
+      "id": "Diploma I / Akta I",
+      "ai": "Diploma I / Certificate I",
+      "official": "Diploma I / Certificate I",
+      "count": 0
+    },
+    {
+      "id": "Diploma II/Akta II",
+      "ai": "Diploma II / Certificate II",
+      "official": "Diploma II / Certificate II",
+      "count": 0
+    },
+    {
+      "id": "Diploma II / Akta II",
+      "ai": "Diploma II / Certificate II",
+      "official": "Diploma II / Certificate II",
+      "count": 0
+    },
+    {
+      "id": "Diploma III/Akta III",
+      "ai": "Diploma III / Certificate III",
+      "official": "Diploma III / Certificate III",
+      "count": 0
+    },
+    {
+      "id": "Diploma III / Akta III",
+      "ai": "Diploma III / Certificate III",
+      "official": "Diploma III / Certificate III",
+      "count": 0
+    },
+    {
+      "id": "Diploma IV/Akta IV",
+      "ai": "Diploma IV / Certificate IV",
+      "official": "Diploma IV / Certificate IV",
+      "count": 0
+    },
+    {
+      "id": "Diploma IV / Akta IV",
+      "ai": "Diploma IV / Certificate IV",
+      "official": "Diploma IV / Certificate IV",
+      "count": 0
+    },
+    {
+      "id": "Diploma IV/S1",
+      "ai": "Diploma IV / Bachelor's Degree",
+      "official": "Diploma IV / Bachelor's Degree",
+      "count": 0
+    },
+    {
+      "id": "Diploma IV / S1",
+      "ai": "Diploma IV / Bachelor's Degree",
+      "official": "Diploma IV / Bachelor's Degree",
+      "count": 0
+    },
+    {
+      "id": "S1/Sarjana",
+      "ai": "Bachelor's Degree",
+      "official": "Bachelor's Degree",
+      "count": 0
+    },
+    {
+      "id": "S1 / Sarjana",
+      "ai": "Bachelor's Degree",
+      "official": "Bachelor's Degree",
+      "count": 0
+    },
+    {
+      "id": "S2/Pasca Sarjana",
+      "ai": "Master's Degree",
+      "official": "Master's Degree",
+      "count": 0
+    },
+    {
+      "id": "S2 / Pasca Sarjana",
+      "ai": "Master's Degree",
+      "official": "Master's Degree",
+      "count": 0
+    },
+    {
+      "id": "S3/Doktor/Ph.D",
+      "ai": "Doctorate Degree / Ph.D",
+      "official": "Doctorate Degree / Ph.D",
+      "count": 0
+    },
+    {
+      "id": "S3 / Doktor / Ph.D",
+      "ai": "Doctorate Degree / Ph.D",
+      "official": "Doctorate Degree / Ph.D",
+      "count": 0
+    },
+    {
+      "id": "S3/Doktor",
+      "ai": "Doctorate Degree",
+      "official": "Doctorate Degree",
+      "count": 0
+    },
+    {
+      "id": "Tidak/Belum Pernah Sekolah",
+      "ai": "No / Not Yet Attended School",
+      "official": "No / Not Yet Attended School",
+      "count": 0
+    },
+    {
+      "id": "Belum Tamat SD/Sederajat",
+      "ai": "Not Yet Completed Primary School",
+      "official": "Not Yet Completed Primary School",
+      "count": 0
+    },
+    {
+      "id": "Tamat SD/Sederajat",
+      "ai": "Completed Primary School",
+      "official": "Completed Primary School",
+      "count": 0
+    },
+    {
+      "id": "Pendidikan Tertinggi yang Ditamatkan",
+      "ai": "Highest Educational Attainment",
+      "official": "Highest Educational Attainment",
+      "count": 0
     }
   ]
 }

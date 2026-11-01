@@ -10,8 +10,8 @@ use crate::dialogs::Dialog;
 use crate::theme::Tokens;
 
 /// Preset identifiers and UI labels.
-pub const PRESETS: [(&str, &str); 5] =
-    [("minimal", "Minimal"), ("book", "Book"), ("editorial", "Editorial"), ("hf-brs", "hf-brs"), ("custom", "Custom")];
+pub const PRESETS: [(&str, &str); 6] =
+    [("minimal", "Minimal"), ("book", "Book"), ("editorial", "Editorial"), ("hf-brs", "hf-brs"), ("hf-dda", "hf-dda"), ("custom", "Custom")];
 
 /// The options height for the modal window.
 #[allow(dead_code)]
@@ -209,6 +209,18 @@ fn apply_preset(d: &mut Dialog, preset: &str, facing: bool) {
             d.fields.insert("footerSingle".into(), json!("{title}\n{nopub}"));
             d.fields.insert("footerLeft".into(), json!("{title}\n{nopub}"));
             d.fields.insert("footerRight".into(), json!("{title}\n{nopub}"));
+            d.fields.insert("rule".into(), json!(false));
+        }
+        "hf-dda" | "dda" | "bps-dda" => {
+            d.fields.insert("sided".into(), json!("double"));
+            d.fields.insert("headerOffset".into(), json!("24.0"));
+            d.fields.insert("footerOffset".into(), json!("24.0"));
+            d.fields.insert("headerSingle".into(), json!("{section}"));
+            d.fields.insert("headerLeft".into(), json!("{section}"));
+            d.fields.insert("headerRight".into(), json!("{tab}{section}"));
+            d.fields.insert("footerSingle".into(), json!("{static_text}{tab}{page}"));
+            d.fields.insert("footerLeft".into(), json!("{page}{tab}{static_text}"));
+            d.fields.insert("footerRight".into(), json!("{static_text}{tab}{page}"));
             d.fields.insert("rule".into(), json!(false));
         }
         _ => {}

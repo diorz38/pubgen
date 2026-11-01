@@ -1155,6 +1155,158 @@ fn execute_generate_pages_brs(
     ))
 }
 
+pub(crate) fn format_chapter_marker(title_id: &str, title_en: &str) -> String {
+    let t_id = title_id.trim();
+    let t_en = title_en.trim();
+    if t_id.is_empty() {
+        return t_en.to_string();
+    }
+    if t_en.is_empty() || t_id.contains('/') {
+        return t_id.to_string();
+    }
+    format!("{t_id} / {t_en}")
+}
+
+pub(crate) fn extract_catalog_chapter_id(num_val: &str, type_val: &str, file_val: &str, title_val: &str) -> Option<String> {
+    if let Some(ch) = super::excel::extract_first_two_digit_number(num_val) {
+        return Some(ch);
+    }
+    if let Some(ch) = super::excel::extract_first_two_digit_number(type_val) {
+        return Some(ch);
+    }
+    if let Some(ch) = super::excel::extract_first_two_digit_number(file_val) {
+        return Some(ch);
+    }
+    super::excel::extract_first_two_digit_number(title_val)
+}
+
+fn ensure_even_start_page_before_row(app: &mut DesignApp) -> Result<(), String> {
+    let (next_page_1based, has_back_cover) = {
+        let active = app.session.active().ok_or("No active document")?;
+        let total = active.doc.page_count();
+        let bc = super::covers::find_back_cover_page(&active.doc);
+        let next_p = if let Some(bc_idx) = bc { bc_idx + 1 } else { total + 1 };
+        (next_p, bc)
+    };
+
+    if next_page_1based % 2 != 0 {
+        if let Some(bc_idx) = has_back_cover {
+            app.run("layout.pages.insert", json!({ "before": bc_idx, "count": 1 }))?;
+        } else {
+            let active_pc = app.session.active().map(|s| s.doc.page_count()).unwrap_or(0);
+            app.run("layout.pages.insert", json!({ "after": active_pc.saturating_sub(1), "count": 1 }))?;
+        }
+        let _ = app.session.edit(|doc, _| {
+            let blank_idx = if let Some(bc_idx) = super::covers::find_back_cover_page(doc) {
+                bc_idx.saturating_sub(1)
+            } else {
+                doc.page_count().saturating_sub(1)
+            };
+            if let Some((si, pi)) = doc.page_loc(blank_idx) {
+                let sp = std::sync::Arc::make_mut(&mut doc.spreads[si]);
+                sp.pages[pi].parent = None;
+                sp.pages[pi].margins = designcraft_doc::Margins::uniform(0.0);
+            }
+            Ok(serde_json::Value::Null)
+        });
+    }
+    Ok(())
+}
+
+fn is_front_matter_type(type_val: &str, title_val: &str) -> bool {
+    let t = type_val.trim();
+    if t.eq_ignore_ascii_case("toc") || t.to_uppercase().starts_with("TOC") {
+        return true;
+    }
+    let lower_title = title_val.to_lowercase();
+    if lower_title.contains("daftar isi") || lower_title.contains("table of contents") {
+        return true;
+    }
+    // GXX or BXX: G or B followed immediately by digits, e.g. G01, G02, B01, B02
+    if (t.starts_with('G') || t.starts_with('g') || t.starts_with('B') || t.starts_with('b'))
+        && t.len() >= 2
+        && t[1..].chars().all(|c| c.is_ascii_digit())
+    {
+        return true;
+    }
+    false
+}
+
+fn apply_row_section_and_styles(
+    app: &mut DesignApp,
+    row_chapter_id: Option<&str>,
+    page_before: usize,
+    cur_sec_chapter: &mut Option<String>,
+    cur_sec_start_page: &mut usize,
+    front_matter_sec_created: &mut bool,
+    body_sec_created: &mut bool,
+    chapter_titles: &std::collections::HashMap<String, String>,
+    title_val: &str,
+    title_en_val: &str,
+    type_val: &str,
+    is_preface_row: bool,
+    is_dda: bool,
+) {
+    let page_after = app.session.active().map(|s| s.doc.page_count()).unwrap_or(0);
+    if page_after <= page_before {
+        return;
+    }
+
+    let is_front_matter = is_preface_row || is_front_matter_type(type_val, title_val);
+
+    if is_dda && is_front_matter {
+        if !*front_matter_sec_created {
+            let start_page = page_before + 1;
+            let _ = app.run(
+                "layout.section",
+                serde_json::json!({
+                    "page": start_page,
+                    "startNumber": 1,
+                    "style": "lowerRoman",
+                    "marker": "",
+                }),
+            );
+            *front_matter_sec_created = true;
+        }
+        return;
+    }
+
+    if let Some(ch_id) = row_chapter_id {
+        if cur_sec_chapter.as_deref() != Some(ch_id) {
+            let start_page = page_before + 1;
+            let marker = chapter_titles.get(ch_id).cloned().unwrap_or_else(|| {
+                let m = format_chapter_marker(title_val, title_en_val);
+                if !m.is_empty() { m } else { format!("BAB {ch_id}") }
+            });
+            let mut params = serde_json::json!({
+                "page": start_page,
+                "marker": marker,
+            });
+            if is_dda {
+                params["style"] = serde_json::json!("arabic");
+                if !*body_sec_created {
+                    params["startNumber"] = serde_json::json!(1);
+                    *body_sec_created = true;
+                }
+            }
+            let _ = app.run("layout.section", params);
+            *cur_sec_chapter = Some(ch_id.to_string());
+            *cur_sec_start_page = start_page;
+        } else if is_ulasan_type(type_val) && *cur_sec_start_page > 0 {
+            let rxx_marker = format_chapter_marker(title_val, title_en_val);
+            if !rxx_marker.is_empty() {
+                let _ = app.run(
+                    "layout.section",
+                    serde_json::json!({
+                        "page": *cur_sec_start_page,
+                        "marker": rxx_marker,
+                    }),
+                );
+            }
+        }
+    }
+}
+
 pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> Result<String, String> {
     if st.card1_records.is_empty() {
         return Err("No records to generate".into());
@@ -1197,6 +1349,54 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
     let file_en_col = effective_col(st.card1_file_en_col, &st.card1_headers, &["file_en", "fileen"], 6);
     let theme_col = effective_col(999, &st.card1_headers, &["theme", "themes", "table_theme", "tabletheme", "color", "colortheme", "warna"], 999);
 
+    let mut chapter_titles: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for r in &st.card1_records {
+        let t_val = r.get(st.card1_type_col.min(2)).map(String::as_str).unwrap_or("").trim();
+        let n_val = r.get(st.card1_num_col.min(2)).map(String::as_str).unwrap_or("").trim();
+        let title_v = r.get(st.card1_title_col.min(2)).map(String::as_str).unwrap_or("").trim();
+        let title_en_v = r.get(title_en_col).map(String::as_str).unwrap_or("").trim();
+        let en_str = if !title_en_v.is_empty() { title_en_v } else { st.translations.get(title_v).map(String::as_str).unwrap_or("") };
+        let file_v = r.get(file_col).map(String::as_str).unwrap_or("").trim();
+        if is_ulasan_type(t_val) {
+            if let Some(ch) = extract_catalog_chapter_id(n_val, t_val, file_v, title_v) {
+                let marker = format_chapter_marker(title_v, en_str);
+                if !marker.is_empty() {
+                    chapter_titles.insert(ch, marker);
+                }
+            }
+        }
+    }
+    for r in &st.card1_records {
+        let t_val = r.get(st.card1_type_col.min(2)).map(String::as_str).unwrap_or("").trim();
+        let n_val = r.get(st.card1_num_col.min(2)).map(String::as_str).unwrap_or("").trim();
+        let title_v = r.get(st.card1_title_col.min(2)).map(String::as_str).unwrap_or("").trim();
+        let title_en_v = r.get(title_en_col).map(String::as_str).unwrap_or("").trim();
+        let en_str = if !title_en_v.is_empty() { title_en_v } else { st.translations.get(title_v).map(String::as_str).unwrap_or("") };
+        let file_v = r.get(file_col).map(String::as_str).unwrap_or("").trim();
+        if is_divider_type(t_val) {
+            if let Some(ch) = extract_catalog_chapter_id(n_val, t_val, file_v, title_v) {
+                if let std::collections::hash_map::Entry::Vacant(e) = chapter_titles.entry(ch) {
+                    let marker = format_chapter_marker(title_v, en_str);
+                    if !marker.is_empty() {
+                        e.insert(marker);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut cur_sec_chapter: Option<String> = None;
+    let mut cur_sec_start_page: usize = 0;
+    let mut front_matter_sec_created: bool = false;
+    let mut body_sec_created: bool = false;
+
+    let is_facing = app.session.active().is_some_and(|s| s.doc.settings.facing_pages);
+    let is_dda = is_facing
+        && (st.hf_style.eq_ignore_ascii_case("hf-dda")
+            || st.hf_style.eq_ignore_ascii_case("dda")
+            || st.hf_style.eq_ignore_ascii_case("bps-dda")
+            || st.excel_cover.is_some());
+
     for row in slice {
         let type_val = row.get(st.card1_type_col.min(2)).map(String::as_str).unwrap_or("").trim();
         let num_val = row.get(st.card1_num_col.min(2)).map(String::as_str).unwrap_or("").trim();
@@ -1205,6 +1405,21 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
         let file_en_val = row.get(file_en_col).map(String::as_str).unwrap_or("").trim();
         let theme_val = row.get(theme_col).map(String::as_str).unwrap_or("").trim();
         let file_val = row.get(file_col).map(String::as_str).unwrap_or("").trim();
+
+        let is_div_row = is_divider_type(type_val)
+            || type_val.eq_ignore_ascii_case("div")
+            || type_val.to_uppercase().starts_with("DIV")
+            || file_val.to_uppercase().starts_with("DIV");
+
+        let is_rxx_row = is_ulasan_type(type_val)
+            || (type_val.to_uppercase().starts_with('R') && type_val[1..].chars().next().is_some_and(|c| c.is_ascii_digit()))
+            || (file_val.to_uppercase().starts_with('R') && file_val[1..].chars().next().is_some_and(|c| c.is_ascii_digit()));
+
+        if is_dda && (is_div_row || is_rxx_row) {
+            let _ = ensure_even_start_page_before_row(app);
+        }
+
+        let page_before = app.session.active().map(|s| s.doc.page_count()).unwrap_or(0);
         let (clean_id_title, clean_en_title) = if let Some((id_t, en_t)) = locale::split_pair(title_val) {
             (id_t, if title_en_val.is_empty() { en_t } else { title_en_val })
         } else {
@@ -1218,6 +1433,10 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
         // The narrative sheets: `GXX` (the front matter) and `RXX` (the chapter reviews). Their
         // pages are the ones the paragraph table of contents lists.
         let is_narrative_row = type_val.eq_ignore_ascii_case("Ulasan") || type_val.eq_ignore_ascii_case("G");
+
+        let is_cover = type_val.eq_ignore_ascii_case("COVER") || type_val.eq_ignore_ascii_case("SAMPUL");
+        let is_preface_row = is_preface || type_val.eq_ignore_ascii_case("G") || type_val.eq_ignore_ascii_case("PREFACE");
+        let row_chapter_id = if !is_cover && !is_preface_row { extract_catalog_chapter_id(num_val, type_val, file_val, title_val) } else { None };
 
         let row_tpl_spec = row.get(template_col).map(String::as_str).unwrap_or("").trim();
         let explicit_tpl_path = if !row_tpl_spec.is_empty() { resolve_template_path_spec(&st.card1_path, row_tpl_spec) } else { None };
@@ -1416,6 +1635,22 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                         }
                     }
 
+                    apply_row_section_and_styles(
+                        app,
+                        row_chapter_id.as_deref(),
+                        page_before,
+                        &mut cur_sec_chapter,
+                        &mut cur_sec_start_page,
+                        &mut front_matter_sec_created,
+                        &mut body_sec_created,
+                        &chapter_titles,
+                        title_val,
+                        title_en_val,
+                        type_val,
+                        is_preface_row,
+                        is_dda,
+                    );
+
                     continue;
                 }
             }
@@ -1533,6 +1768,21 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                 if img_str.is_some() {
                     inserted_images_count = inserted_images_count.saturating_add(1);
                 }
+                apply_row_section_and_styles(
+                    app,
+                    row_chapter_id.as_deref(),
+                    page_before,
+                    &mut cur_sec_chapter,
+                    &mut cur_sec_start_page,
+                    &mut front_matter_sec_created,
+                    &mut body_sec_created,
+                    &chapter_titles,
+                    title_val,
+                    title_en_val,
+                    type_val,
+                    is_preface_row,
+                    is_dda,
+                );
                 generated_count = generated_count.saturating_add(1);
                 continue;
             }
@@ -2919,6 +3169,21 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                 }
             }
         }
+        apply_row_section_and_styles(
+            app,
+            row_chapter_id.as_deref(),
+            page_before,
+            &mut cur_sec_chapter,
+            &mut cur_sec_start_page,
+            &mut front_matter_sec_created,
+            &mut body_sec_created,
+            &chapter_titles,
+            title_val,
+            title_en_val,
+            type_val,
+            is_preface_row,
+            is_dda,
+        );
         generated_count = generated_count.saturating_add(1);
     }
 
@@ -2937,6 +3202,42 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
     }
     let tbl_msg = if !details.is_empty() { format!(" (with {})", details.join(", ")) } else { String::new() };
     ensure_back_cover_at_end(app);
+
+    let is_dda = is_facing
+        && (st.hf_style.eq_ignore_ascii_case("hf-dda")
+            || st.hf_style.eq_ignore_ascii_case("dda")
+            || st.hf_style.eq_ignore_ascii_case("bps-dda")
+            || st.excel_cover.is_some());
+    let is_brs = st.hf_style.eq_ignore_ascii_case("hf-brs") || st.hf_style.eq_ignore_ascii_case("brs") || st.active_profile().id == "bps_brs";
+
+    if is_dda || is_brs {
+        let mut hf_st = st.clone();
+        if is_dda {
+            hf_st.hf_style = "hf-dda".into();
+            hf_st.hf_sided = 0;
+            hf_st.hf_header_single = "{section}\u{e006}{page}".into();
+            hf_st.hf_header_left = "{section}\u{e006}{page}".into();
+            hf_st.hf_header_right = "{page}\u{e006}{section}".into();
+            let dda_footer = super::header_footer::resolve_dda_footer_text(&hf_st);
+            hf_st.hf_footer_single = dda_footer.clone();
+            hf_st.hf_footer_left = dda_footer.clone();
+            hf_st.hf_footer_right = dda_footer;
+            hf_st.hf_header_rule = false;
+            hf_st.hf_footer_rule = false;
+            hf_st.hf_top_accent_bar = false;
+        } else if is_brs {
+            hf_st.hf_style = "hf-brs".into();
+            hf_st.hf_sided = 0;
+            hf_st.hf_header_single.clear();
+            hf_st.hf_header_left.clear();
+            hf_st.hf_header_right.clear();
+            hf_st.hf_footer_single = "{title}\n{nopub}".into();
+            hf_st.hf_footer_left = "{title}\n{nopub}".into();
+            hf_st.hf_footer_right = "{title}\n{nopub}".into();
+        }
+        let _ = super::header_footer::execute_apply_header_footer(app, &hf_st);
+    }
+
     Ok(format!("Successfully generated {generated_count} pages{tbl_msg}!"))
 }
 
@@ -5702,5 +6003,65 @@ Narrative;3;Catatan Akhir;narrative3.rtf\n";
             let b = it.bounds();
             assert!(b.x0 >= page.x0 - 0.5 && b.x1 <= page.x1 + 0.5, "divider art {:?} must stay on its right page {page:?}, got {b:?}", it.id);
         }
+    }
+
+    #[test]
+    fn test_execute_generate_pages_groups_chapters_into_sections() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"facingPages": true, "pages": 1})).unwrap();
+
+        let st = PubgenState {
+            hf_style: "hf-dda".into(),
+            card1_records: vec![
+                // Chapter 1: DIV01, R01, 01_01 (table), M01_01 (map), C01_01 (chart), 01_02 (table)
+                vec!["Divider".into(), "01".into(), "BAB 01".into(), "".into(), "missing.designcraft".into()],
+                vec!["Ulasan".into(), "01".into(), "BAB 01 Keadaan Geografi".into(), "".into(), "".into(), "Chapter 01 Geography".into()],
+                vec!["Tabel".into(), "01.01.".into(), "Luas Wilayah Menurut Kecamatan".into()],
+                vec!["Peta".into(), "01.01".into(), "Peta Wilayah Administrasi".into(), "M01_01.csv".into()],
+                vec!["Grafik".into(), "01.01".into(), "Grafik Ketinggian Wilayah".into(), "C01_01.png".into()],
+                vec!["Tabel".into(), "01.02.".into(), "Tinggi Wilayah Menurut Kecamatan".into()],
+                // Chapter 2: DIV02, R02, 02_01 (table), C02_01 (chart)
+                vec!["Divider".into(), "02".into(), "BAB 02".into(), "".into(), "missing.designcraft".into()],
+                vec!["Ulasan".into(), "02".into(), "BAB 02 Penduduk".into(), "".into(), "".into(), "Chapter 02 Population".into()],
+                vec!["Tabel".into(), "02.01.".into(), "Jumlah Penduduk Menurut Kecamatan".into()],
+                vec!["Grafik".into(), "02.01".into(), "Piramida Penduduk".into(), "C02_01.png".into()],
+            ],
+            card1_headers: vec!["type".into(), "number".into(), "title".into(), "file".into(), "template".into(), "title_en".into()],
+            card1_type_col: 0,
+            card1_num_col: 1,
+            card1_title_col: 2,
+            card1_file_col: 3,
+            card1_template_col: 4,
+            card1_title_en_col: 5,
+            card1_range_all: true,
+            ..Default::default()
+        };
+
+        let res = execute_generate_pages(&mut app, &st);
+        assert!(res.is_ok(), "execute_generate_pages should succeed: {res:?}");
+
+        let active = app.session.active().unwrap();
+        let doc = &active.doc;
+
+        // Sections: page 1 (initial doc), then Chapter 1 section on page 2, and Chapter 2 section on page 8.
+        // DIV01, R01, 01_01, M01_01, C01_01, 01_02 are grouped into ONE section (Chapter 1).
+        // DIV02, R02, 02_01, C02_01 are grouped into ONE section (Chapter 2).
+        let ch1_sec = doc.sections.iter().find(|s| s.marker.contains("Keadaan Geografi"));
+        assert!(ch1_sec.is_some(), "Chapter 1 section must exist: {:?}", doc.sections);
+        let ch1 = ch1_sec.unwrap();
+        assert_eq!(ch1.marker, "BAB 01 Keadaan Geografi / Chapter 01 Geography");
+
+        let ch2_sec = doc.sections.iter().find(|s| s.marker.contains("Penduduk"));
+        assert!(ch2_sec.is_some(), "Chapter 2 section must exist: {:?}", doc.sections);
+        let ch2 = ch2_sec.unwrap();
+        assert_eq!(ch2.marker, "BAB 02 Penduduk / Chapter 02 Population");
+
+        // Exactly 3 sections in total: initial page 1 section, Chapter 1, and Chapter 2.
+        assert_eq!(doc.sections.len(), 3, "Sections in doc: {:?}", doc.sections);
+
+        // Header & footer should be automatically applied for DDA
+        let hf = doc.header_footer.as_ref().expect("header_footer must be applied");
+        assert_eq!(hf.preset, "hf-dda");
+        assert_eq!(hf.sided, designcraft_doc::Sided::Double);
     }
 }

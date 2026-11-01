@@ -822,6 +822,21 @@ impl PubgenState {
             self.hf_top_accent_bar = false;
             self.hf_color_primary = "#f68839".into();
             self.hf_color_text = "#f68839".into();
+        } else if profile.id == "bps_dda" || self.hf_style == "hf-dda" {
+            self.hf_style = "hf-dda".into();
+            self.hf_sided = 0;
+            self.hf_header_offset = 24.0;
+            self.hf_footer_offset = 24.0;
+            self.hf_header_single = "{section}\u{e006}{page}".into();
+            self.hf_header_left = "{section}\u{e006}{page}".into();
+            self.hf_header_right = "{page}\u{e006}{section}".into();
+            let dda_footer = super::header_footer::resolve_dda_footer_text(self);
+            self.hf_footer_single = dda_footer.clone();
+            self.hf_footer_left = dda_footer.clone();
+            self.hf_footer_right = dda_footer;
+            self.hf_header_rule = false;
+            self.hf_footer_rule = false;
+            self.hf_top_accent_bar = false;
         }
         if profile.id == "custom" {
             self.profile_custom = Some(profile);

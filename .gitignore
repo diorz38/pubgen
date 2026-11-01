@@ -12,6 +12,7 @@
 /scratch/
 /plan/pubgen/samples/**/*.csv
 /plan/pubgen/samples/*.csv
+/plan/pubgen/**/*.designcraft
 /plan/pubgen/*.designcraft
 *.key
 ~$*

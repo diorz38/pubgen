@@ -3834,6 +3834,7 @@ pub fn execute_excel_and_generate(app: &mut DesignApp, st: &mut PubgenState, pat
     }
 
     let is_brs = st.active_profile().id == "bps_brs" || st.cover_style == 13;
+    let is_dda = st.active_profile().id == "bps_dda" || st.hf_style.eq_ignore_ascii_case("hf-dda") || st.hf_style.eq_ignore_ascii_case("dda");
 
     // Ensure an active document exists
     if app.session.active().is_none() {
@@ -3915,6 +3916,21 @@ pub fn execute_excel_and_generate(app: &mut DesignApp, st: &mut PubgenState, pat
                 st.hf_footer_single = "{title}\n{nopub}".into();
                 st.hf_footer_left = "{title}\n{nopub}".into();
                 st.hf_footer_right = "{title}\n{nopub}".into();
+                super::header_footer::execute_apply_header_footer(app, st)?;
+            } else if is_dda {
+                st.hf_style = "hf-dda".into();
+                st.hf_sided = 0;
+                st.hf_scope = 0;
+                st.hf_header_single = "{section}\u{e006}{page}".into();
+                st.hf_header_left = "{section}\u{e006}{page}".into();
+                st.hf_header_right = "{page}\u{e006}{section}".into();
+                let dda_footer = super::header_footer::resolve_dda_footer_text(st);
+                st.hf_footer_single = dda_footer.clone();
+                st.hf_footer_left = dda_footer.clone();
+                st.hf_footer_right = dda_footer;
+                st.hf_header_rule = false;
+                st.hf_footer_rule = false;
+                st.hf_top_accent_bar = false;
                 super::header_footer::execute_apply_header_footer(app, st)?;
             }
             let count = st.card2_sheet_tables.len();

@@ -44,9 +44,111 @@ pub fn resolve_brs_header_texts(st: &PubgenState) -> (String, String) {
     (title_line, nopub_line)
 }
 
+/// Helper to extract a 4-digit year like 2026 from date or month strings.
+fn extract_year_from_text(s: &str) -> Option<String> {
+    let bytes = s.as_bytes();
+    if bytes.len() < 4 {
+        return None;
+    }
+    for i in 0..=bytes.len() - 4 {
+        let chunk = &s[i..i + 4];
+        if chunk.chars().all(|c| c.is_ascii_digit()) {
+            if let Ok(y) = chunk.parse::<u32>() {
+                if (1900..=2100).contains(&y) {
+                    return Some(chunk.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Resolves the two lines for BPS DDA footer:
+/// Line 1: Indonesian title (e.g. "KECAMATAN KARAWANG TIMUR DALAM ANGKA")
+/// Line 2: English title with optional right-indent tab and year (e.g. "EAST KARAWANG DISTRICT IN FIGURES\u{e006}2026")
+pub fn resolve_dda_footer_lines(st: &PubgenState) -> (String, String) {
+    let (raw_title, raw_title2, raw_title_en, raw_year, raw_rel_date, raw_rel_month) = if let Some(ref cov) = st.excel_cover {
+        (cov.title1.as_str(), cov.title2.as_str(), cov.title_en.as_str(), cov.year.as_str(), cov.release_date.as_str(), cov.release_month.as_str())
+    } else {
+        (st.cover_title.as_str(), st.cover_title2.as_str(), st.cover_title_en.as_str(), st.cover_year.as_str(), "", "")
+    };
+
+    let title1 = raw_title.trim();
+    let title2 = raw_title2.trim();
+    let title_en = raw_title_en.trim();
+
+    // Line 1: Indonesian Title
+    let line1 = if !title1.is_empty() {
+        if !title2.is_empty() && title2 != title_en && title_en.is_empty() { format!("{title1} {title2}") } else { title1.to_string() }
+    } else if !title2.is_empty() && title2 != title_en {
+        title2.to_string()
+    } else {
+        "Kabupaten Dalam Angka".to_string()
+    };
+
+    // Line 2: English Title and Year
+    let en = if !title_en.is_empty() {
+        title_en
+    } else if !title2.is_empty() && title2 != title1 {
+        title2
+    } else {
+        ""
+    };
+
+    let mut year = raw_year.trim().to_string();
+    if year.is_empty() {
+        for s in [raw_rel_date, raw_rel_month] {
+            if let Some(y) = extract_year_from_text(s) {
+                year = y;
+                break;
+            }
+        }
+    }
+
+    let line2 = if !en.is_empty() && !year.is_empty() {
+        format!("{en}\u{e006}{year}")
+    } else if !en.is_empty() {
+        en.to_string()
+    } else if !year.is_empty() {
+        format!("\u{e006}{year}")
+    } else {
+        String::new()
+    };
+
+    (line1, line2)
+}
+
+/// Resolves complete two-line footer text for BPS DDA.
+pub fn resolve_dda_footer_text(st: &PubgenState) -> String {
+    let (line1, line2) = resolve_dda_footer_lines(st);
+    if !line2.is_empty() { format!("{line1}\n{line2}") } else { line1 }
+}
+
+pub fn resolve_dda_publication_title(st: &PubgenState) -> String {
+    let (line1, line2) = resolve_dda_footer_lines(st);
+    let en_part = line2.split('\u{e006}').next().unwrap_or("").trim();
+    if !en_part.is_empty() && en_part != line1 { format!("{line1} / {en_part}") } else { line1 }
+}
+
 fn load_hf_template_to_state(st: &mut PubgenState, tpl: &Value) {
     if let Some(name) = tpl.get("name").and_then(Value::as_str) {
         st.hf_style = name.to_string();
+        if name.eq_ignore_ascii_case("hf-dda") || name.eq_ignore_ascii_case("dda") || name.eq_ignore_ascii_case("bps-dda") {
+            st.hf_sided = 0;
+            st.hf_header_offset = tpl.get("headerOffset").and_then(Value::as_f64).unwrap_or(24.0);
+            st.hf_footer_offset = tpl.get("footerOffset").and_then(Value::as_f64).unwrap_or(24.0);
+            st.hf_header_single = "{section}\u{e006}{page}".into();
+            st.hf_header_left = "{section}\u{e006}{page}".into();
+            st.hf_header_right = "{page}\u{e006}{section}".into();
+            let dda_footer = resolve_dda_footer_text(st);
+            st.hf_footer_single = dda_footer.clone();
+            st.hf_footer_left = dda_footer.clone();
+            st.hf_footer_right = dda_footer;
+            st.hf_header_rule = false;
+            st.hf_footer_rule = false;
+            st.hf_top_accent_bar = false;
+            return;
+        }
         if name.eq_ignore_ascii_case("hf-brs") || name.eq_ignore_ascii_case("brs") {
             st.hf_sided = 0;
             st.hf_header_offset = tpl.get("headerOffset").and_then(Value::as_f64).unwrap_or(24.0);
@@ -162,6 +264,79 @@ fn show_hf_preview_tooltip(ui: &mut Ui, st: &PubgenState, name: &str, t: &Tokens
             return;
         }
 
+        if name.eq_ignore_ascii_case("hf-dda") || name.eq_ignore_ascii_case("dda") || name.eq_ignore_ascii_case("bps-dda") {
+            let spine_x = rect.center().x;
+            ui.painter().line_segment([pos2(spine_x, rect.min.y), pos2(spine_x, rect.max.y)], egui::Stroke::new(1.0, Color32::from_gray(210)));
+
+            let top_y = rect.min.y + 10.0;
+            let footer_y = rect.max.y - 12.0;
+
+            let top_body_y = rect.min.y + 24.0;
+            for i in 0..5 {
+                let by = top_body_y + (i as f32) * 8.0;
+                ui.painter().line_segment([pos2(rect.min.x + 8.0, by), pos2(spine_x - 8.0, by)], egui::Stroke::new(1.0, Color32::from_gray(230)));
+                ui.painter().line_segment([pos2(spine_x + 8.0, by), pos2(rect.max.x - 8.0, by)], egui::Stroke::new(1.0, Color32::from_gray(230)));
+            }
+
+            // Verso: Running header ({section} ... {page}), footer: 2 lines
+            ui.painter().text(
+                pos2(rect.min.x + 8.0, top_y),
+                egui::Align2::LEFT_TOP,
+                "BAB 01 ...",
+                egui::FontId::proportional(7.5),
+                Color32::from_gray(100),
+            );
+            ui.painter().text(pos2(spine_x - 8.0, top_y), egui::Align2::RIGHT_TOP, "2", egui::FontId::proportional(7.5), Color32::from_gray(100));
+            ui.painter().text(
+                pos2(rect.min.x + 8.0, footer_y - 6.0),
+                egui::Align2::LEFT_TOP,
+                "Judul Indonesia\nEnglish Title",
+                egui::FontId::proportional(6.0),
+                Color32::from_gray(120),
+            );
+            ui.painter().text(
+                pos2(spine_x - 8.0, footer_y),
+                egui::Align2::RIGHT_BOTTOM,
+                "2026",
+                egui::FontId::proportional(6.5),
+                Color32::from_gray(120),
+            );
+
+            // Recto: Running header ({page} ... {section}), footer: 2 lines
+            ui.painter().text(pos2(spine_x + 8.0, top_y), egui::Align2::LEFT_TOP, "3", egui::FontId::proportional(7.5), Color32::from_gray(100));
+            ui.painter().text(
+                pos2(rect.max.x - 8.0, top_y),
+                egui::Align2::RIGHT_TOP,
+                "BAB 01 ...",
+                egui::FontId::proportional(7.5),
+                Color32::from_gray(100),
+            );
+            ui.painter().text(
+                pos2(spine_x + 8.0, footer_y - 6.0),
+                egui::Align2::LEFT_TOP,
+                "Judul Indonesia\nEnglish Title",
+                egui::FontId::proportional(6.0),
+                Color32::from_gray(120),
+            );
+            ui.painter().text(
+                pos2(rect.max.x - 8.0, footer_y),
+                egui::Align2::RIGHT_BOTTOM,
+                "2026",
+                egui::FontId::proportional(6.5),
+                Color32::from_gray(120),
+            );
+
+            ui.add_space(3.0);
+            ui.label(
+                RichText::new(
+                    "BPS Daerah Dalam Angka running header (chapter title with page number) and 2-line publication title footer with year.",
+                )
+                .size(10.0)
+                .color(t.text_dim),
+            );
+            return;
+        }
+
         let parse_color = |s: &str, def: Color32| {
             if let Some(c) = designcraft_color::Color::from_hex(s) {
                 let [r, g, b, _] = c.to_rgba8(1.0);
@@ -216,6 +391,7 @@ fn show_hf_preview_tooltip(ui: &mut Ui, st: &PubgenState, name: &str, t: &Tokens
             "Modern Minimal" => "Clean, understated page number with subtle footer divider.",
             "Editorial Book" => "Refined running headers with hairline rule, ideal for magazines and books.",
             "Corporate Report" => "Full-width top accent bar, running headers, and confidentiality footer.",
+            "hf-dda" => "BPS Daerah Dalam Angka running header (chapter title) and footer with publication title and page number.",
             _ => "Custom user header & footer template.",
         };
         ui.label(RichText::new(desc).size(10.0).color(t.text_dim));
@@ -544,7 +720,8 @@ pub fn execute_apply_header_footer(app: &mut DesignApp, st: &PubgenState) -> Res
         app.run("layout.documentSetup", json!({ "facingPages": true })).map_err(|e| format!("Failed to switch the document to facing pages: {e}"))?;
     }
 
-    let is_brs = st.hf_style.eq_ignore_ascii_case("hf-brs") || st.active_profile().id == "bps_brs";
+    let is_brs = st.hf_style.eq_ignore_ascii_case("hf-brs") || st.hf_style.eq_ignore_ascii_case("brs");
+    let is_dda = st.hf_style.eq_ignore_ascii_case("hf-dda") || st.hf_style.eq_ignore_ascii_case("dda") || st.hf_style.eq_ignore_ascii_case("bps-dda");
 
     // Same shapes the Header/Footer… dialog sends: "all", {"section": 0-based index}, {"range": [first, last]}.
     let scope = match st.hf_scope {
@@ -555,14 +732,28 @@ pub fn execute_apply_header_footer(app: &mut DesignApp, st: &PubgenState) -> Res
             json!({ "range": [start, end] })
         }
         _ => {
-            // For BRS, running headers should not land on cover (page 1) or back cover (last page)
-            if is_brs {
+            // For BRS and DDA, running headers should not land on cover (page 1) or back cover (last page)
+            if is_brs || is_dda {
                 if let Some(active) = app.session.active() {
                     let total = active.doc.page_count();
                     if total > 1 {
-                        let has_bc = super::covers::find_back_cover_page(&active.doc).is_some();
-                        let last = if has_bc && total > 2 { total - 1 } else { total };
-                        json!({ "range": [2, last as u64] })
+                        let (front, inside, back) = super::covers::find_existing_covers(&active.doc);
+                        let mut start = 1u64;
+                        if is_dda && (front.is_some() || inside.is_some()) {
+                            // DDA rule: page cover (1), 2nd cover (2), A02 (3) [none]
+                            start = 4;
+                        } else if inside.is_some() {
+                            start = 3;
+                        } else if front.is_some() || is_brs {
+                            start = 2;
+                        }
+                        let mut last = total as u64;
+                        if let Some(b) = back {
+                            if b > 0 {
+                                last = b as u64;
+                            }
+                        }
+                        if start <= last { json!({ "range": [start, last] }) } else { json!("all") }
                     } else {
                         json!("all")
                     }
@@ -576,6 +767,15 @@ pub fn execute_apply_header_footer(app: &mut DesignApp, st: &PubgenState) -> Res
     };
 
     let (brs_title, brs_nopub) = resolve_brs_header_texts(st);
+    let (dda_title_line, dda_sub_line) = resolve_dda_footer_lines(st);
+    let dda_footer = resolve_dda_footer_text(st);
+    let dda_title = resolve_dda_publication_title(st);
+    let (dda_en, dda_year) = {
+        let mut parts = dda_sub_line.split('\u{e006}');
+        let en = parts.next().unwrap_or("").trim().to_string();
+        let yr = parts.next().unwrap_or("").trim().to_string();
+        (en, yr)
+    };
     if is_brs {
         let _ = app.session.edit(|doc, _| {
             if let Some(pos) = doc.text_variables.iter().position(|v| v.name == "Title") {
@@ -592,15 +792,41 @@ pub fn execute_apply_header_footer(app: &mut DesignApp, st: &PubgenState) -> Res
             }
             Ok(serde_json::Value::Null)
         });
+    } else if is_dda {
+        let _ = app.session.edit(|doc, _| {
+            if let Some(pos) = doc.text_variables.iter().position(|v| v.name == "Title") {
+                doc.text_variables[pos].kind = designcraft_doc::vars::VarKind::Custom { text: dda_title.clone() };
+            } else {
+                doc.text_variables
+                    .push(designcraft_doc::vars::TextVariable::new("Title", designcraft_doc::vars::VarKind::Custom { text: dda_title.clone() }));
+            }
+            Ok(serde_json::Value::Null)
+        });
     }
 
-    let expand_brs_vars = |text: &str, is_footer: bool| -> String {
+    let expand_vars = |text: &str, is_footer: bool| -> String {
         let mut s = text.to_string();
         if (s.is_empty() || s == "{page}") && is_brs && is_footer {
             return format!("{brs_title}\n{brs_nopub}");
         }
         if s.contains("{title}") {
-            s = s.replace("{title}", &brs_title);
+            let t = if is_brs { &brs_title } else { &dda_title_line };
+            s = s.replace("{title}", t);
+        }
+        if s.contains("{title_en}") {
+            s = s.replace("{title_en}", &dda_en);
+        }
+        if s.contains("{year}") {
+            s = s.replace("{year}", &dda_year);
+        }
+        if s.contains("{static_text}") {
+            s = s.replace("{static_text}", &dda_footer);
+        }
+        if s.contains("{tab}") {
+            s = s.replace("{tab}", "\u{e006}");
+        }
+        if s.contains("{running_header}") {
+            s = s.replace("{running_header}", "{section}");
         }
         if s.contains("{nopub}") {
             s = s.replace("{nopub}", &brs_nopub);
@@ -613,23 +839,44 @@ pub fn execute_apply_header_footer(app: &mut DesignApp, st: &PubgenState) -> Res
 
     let header_single = if is_brs && (st.hf_header_single == "{title}\n{nopub}" || st.hf_header_single.is_empty()) {
         String::new()
+    } else if is_dda && (st.hf_header_single.is_empty() || st.hf_header_single == "{running_header}" || st.hf_header_single == "{section}") {
+        "{section}\u{e006}{page}".to_string()
     } else {
-        expand_brs_vars(&st.hf_header_single, false)
+        expand_vars(&st.hf_header_single, false)
     };
     let header_left = if is_brs && (st.hf_header_left == "{title}\n{nopub}" || st.hf_header_left.is_empty()) {
         String::new()
+    } else if is_dda && (st.hf_header_left.is_empty() || st.hf_header_left == "{running_header}" || st.hf_header_left == "{section}") {
+        "{section}\u{e006}{page}".to_string()
     } else {
-        expand_brs_vars(&st.hf_header_left, false)
+        expand_vars(&st.hf_header_left, false)
     };
     let header_right = if is_brs && (st.hf_header_right == "{title}\n{nopub}" || st.hf_header_right.is_empty()) {
         String::new()
+    } else if is_dda
+        && (st.hf_header_right.is_empty()
+            || st.hf_header_right == "{tab}{running_header}"
+            || st.hf_header_right == "\u{e006}{running_header}"
+            || st.hf_header_right == "\u{e006}{section}"
+            || st.hf_header_right == "{running_header}")
+    {
+        "{page}\u{e006}{section}".to_string()
     } else {
-        expand_brs_vars(&st.hf_header_right, false)
+        expand_vars(&st.hf_header_right, false)
     };
 
-    let footer_single = expand_brs_vars(&st.hf_footer_single, true);
-    let footer_left = expand_brs_vars(&st.hf_footer_left, true);
-    let footer_right = expand_brs_vars(&st.hf_footer_right, true);
+    let footer_single = if is_dda && (st.hf_footer_single.is_empty() || st.hf_footer_single == "{page}") {
+        dda_footer.clone()
+    } else {
+        expand_vars(&st.hf_footer_single, true)
+    };
+    let footer_left = if is_dda && (st.hf_footer_left.is_empty() || st.hf_footer_left == "{page}") {
+        dda_footer.clone()
+    } else {
+        expand_vars(&st.hf_footer_left, true)
+    };
+    let footer_right =
+        if is_dda && (st.hf_footer_right.is_empty() || st.hf_footer_right == "{page}") { dda_footer } else { expand_vars(&st.hf_footer_right, true) };
 
     let mut params = json!({
         "preset": st.hf_style,
@@ -681,6 +928,39 @@ pub fn execute_apply_header_footer(app: &mut DesignApp, st: &PubgenState) -> Res
     }
 
     app.run("layout.headerFooter.apply", params)?;
+
+    if is_dda {
+        let _ = app.session.edit(|doc, _| {
+            let total = doc.page_count();
+            // Pages 0, 1, 2 (Cover, 2nd Cover, A02) always have [none]
+            for p in 0..3.min(total) {
+                if let Some((si, pi)) = doc.page_loc(p) {
+                    let sp = std::sync::Arc::make_mut(&mut doc.spreads[si]);
+                    sp.pages[pi].parent = None;
+                }
+            }
+            // Back cover -> [none]
+            if let Some(b) = super::covers::find_back_cover_page(doc) {
+                if let Some((si, pi)) = doc.page_loc(b) {
+                    let sp = std::sync::Arc::make_mut(&mut doc.spreads[si]);
+                    sp.pages[pi].parent = None;
+                }
+            }
+            // Inserted blank pages (0 margins and no items) -> [none]
+            for p in 0..total {
+                if let Some(pg) = doc.page(p) {
+                    if pg.margins.top == 0.0 && pg.margins.bottom == 0.0 && !doc.page_has_items(p) {
+                        if let Some((si, pi)) = doc.page_loc(p) {
+                            let sp = std::sync::Arc::make_mut(&mut doc.spreads[si]);
+                            sp.pages[pi].parent = None;
+                        }
+                    }
+                }
+            }
+            Ok(serde_json::Value::Null)
+        });
+    }
+
     Ok(format!("Header & footer template '{}' applied successfully", st.hf_style))
 }
 
@@ -959,5 +1239,77 @@ pub(crate) mod tests {
         assert!(hf.footer_items.right.is_some(), "right footer text item exists");
         assert!(hf.folio_items.left.is_some(), "left folio item exists");
         assert!(hf.folio_items.right.is_some(), "right folio item exists");
+    }
+
+    #[test]
+    fn test_resolve_dda_footer_lines_no_duplication() {
+        let mut st = PubgenState::default();
+        st.excel_cover = Some(super::excel::ExcelCoverData {
+            title1: "KECAMATAN KARAWANG TIMUR DALAM ANGKA".into(),
+            title2: "EAST KARAWANG DISTRICT IN FIGURES".into(),
+            title_en: "EAST KARAWANG DISTRICT IN FIGURES".into(),
+            year: "2026".into(),
+            ..Default::default()
+        });
+
+        let (line1, line2) = resolve_dda_footer_lines(&st);
+        assert_eq!(line1, "KECAMATAN KARAWANG TIMUR DALAM ANGKA");
+        assert_eq!(line2, "EAST KARAWANG DISTRICT IN FIGURES\u{e006}2026");
+
+        let pub_title = resolve_dda_publication_title(&st);
+        assert_eq!(pub_title, "KECAMATAN KARAWANG TIMUR DALAM ANGKA / EAST KARAWANG DISTRICT IN FIGURES");
+
+        let full_footer = resolve_dda_footer_text(&st);
+        assert_eq!(full_footer, "KECAMATAN KARAWANG TIMUR DALAM ANGKA\nEAST KARAWANG DISTRICT IN FIGURES\u{e006}2026");
+    }
+
+    #[test]
+    fn test_execute_apply_header_footer_hf_dda_preset() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({ "pages": 6, "facingPages": true })).unwrap();
+        app.run("layout.section", json!({ "page": 1, "marker": "BAB 01 Geografi / Chapter 01 Geography" })).unwrap();
+
+        let mut st = PubgenState {
+            hf_style: "hf-dda".into(),
+            hf_sided: 0,
+            hf_scope: 0,
+            cover_title: "Kabupaten Pasuruan Dalam Angka 2026".into(),
+            cover_title2: String::new(),
+            cover_title_en: "Pasuruan Regency in Figures 2026".into(),
+            cover_year: "2026".into(),
+            ..Default::default()
+        };
+        load_hf_template_to_state(&mut st, &json!({ "name": "hf-dda" }));
+
+        let res = execute_apply_header_footer(&mut app, &st);
+        assert!(res.is_ok(), "apply hf-dda should succeed: {res:?}");
+
+        let doc = &app.session.active().unwrap().doc;
+        let hf = doc.header_footer.as_ref().expect("header_footer present");
+        assert_eq!(hf.preset, "hf-dda");
+        assert_eq!(hf.sided, designcraft_doc::Sided::Double);
+
+        // Verify "Title" variable was populated with bilingual title
+        let title_var = doc.text_variables.iter().find(|v| v.name.eq_ignore_ascii_case("Title"));
+        assert!(title_var.is_some(), "Title variable should be created/updated");
+        match &title_var.unwrap().kind {
+            designcraft_doc::vars::VarKind::Custom { text } => {
+                assert_eq!(text, "Kabupaten Pasuruan Dalam Angka 2026 / Pasuruan Regency in Figures 2026");
+            }
+            other => panic!("expected Custom VarKind, got {other:?}"),
+        }
+
+        // Verify parent spread was created and has 2 pages
+        let parent_sp = doc.parents.iter().find(|p| Some(p.id) == hf.parent).expect("parent spread exists");
+        assert_eq!(parent_sp.pages.len(), 2, "facing parent spread has 2 pages");
+
+        // Verify pages 0, 1, 2 (Cover, 2nd Cover, A02) have parent == None
+        for p in 0..3 {
+            assert_eq!(doc.page(p).unwrap().parent, None, "Page {p} must have parent [none]");
+        }
+        // Verify pages 3..6 have the header/footer parent
+        for p in 3..6 {
+            assert_eq!(doc.page(p).unwrap().parent, hf.parent, "Page {p} must have header/footer parent");
+        }
     }
 }

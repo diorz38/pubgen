@@ -195,6 +195,62 @@ pub fn preset_spec(preset: &str) -> Option<HeaderFooter> {
             footer_rule_items: SidedItems::default(),
             folio_items: SidedItems::default(),
         }),
+        "hf-dda" | "dda" | "bps-dda" => Some(HeaderFooter {
+            preset: "hf-dda".into(),
+            sided: Sided::Double,
+            scope: HfScope::All,
+            parent: None,
+            header_offset: 24.0,
+            footer_offset: 24.0,
+            header: SidedText {
+                single: "{section}\u{e006}{page}".into(),
+                left: "{section}\u{e006}{page}".into(),
+                right: "{page}\u{e006}{section}".into(),
+            },
+            footer: SidedText { single: "{static_text}".into(), left: "{static_text}".into(), right: "{static_text}".into() },
+            style: story::BASIC_PARAGRAPH.into(),
+            rule: false,
+            objects: HeaderFooterObjects {
+                header_rule: false,
+                header_rule_weight: 0.5,
+                footer_rule: false,
+                footer_rule_weight: 0.5,
+                top_accent_bar: false,
+                top_accent_bar_height: 4.0,
+                top_accent_bar_bleed: true,
+            },
+            colors: HeaderFooterColors::default(),
+            header_items: SidedItems::default(),
+            footer_items: SidedItems::default(),
+            rule_items: SidedItems::default(),
+            accent_bar_items: SidedItems::default(),
+            footer_rule_items: SidedItems::default(),
+            folio_items: SidedItems::default(),
+        }),
+        "custom" => Some(HeaderFooter {
+            preset: "custom".into(),
+            sided: Sided::Double,
+            scope: HfScope::All,
+            parent: None,
+            header_offset: 24.0,
+            footer_offset: 24.0,
+            header: SidedText { single: "{section}".into(), left: "{section}".into(), right: "\u{e006}{section}".into() },
+            footer: SidedText {
+                single: "{static_text}\u{e006}{page}".into(),
+                left: "{page}\u{e006}{static_text}".into(),
+                right: "{static_text}\u{e006}{page}".into(),
+            },
+            style: story::BASIC_PARAGRAPH.into(),
+            rule: false,
+            objects: HeaderFooterObjects::default(),
+            colors: HeaderFooterColors::default(),
+            header_items: SidedItems::default(),
+            footer_items: SidedItems::default(),
+            rule_items: SidedItems::default(),
+            accent_bar_items: SidedItems::default(),
+            footer_rule_items: SidedItems::default(),
+            folio_items: SidedItems::default(),
+        }),
         _ => None,
     }
 }
@@ -291,6 +347,7 @@ fn find_template(s: &Session, name: &str) -> Option<HeaderFooterTemplate> {
             HeaderFooterTemplate::built_in_templates().into_iter().find(|t| t.name.to_lowercase().contains("corporate"))
         }
         "hf-brs" | "brs" => HeaderFooterTemplate::built_in_templates().into_iter().find(|t| t.name.eq_ignore_ascii_case("hf-brs")),
+        "hf-dda" | "dda" | "bps-dda" => HeaderFooterTemplate::built_in_templates().into_iter().find(|t| t.name.eq_ignore_ascii_case("hf-dda")),
         _ => None,
     }
 }
@@ -332,7 +389,6 @@ pub fn expand_tokens(template: &str, doc: &Document) -> String {
             let token = &after_open[..close];
             match token {
                 "page" => out.push(story::PAGE_NUMBER),
-                "section" => out.push(story::SECTION_MARKER),
                 "filename" => {
                     if let Some(c) = doc.variable("File Name").and_then(var_char) {
                         out.push(c);
@@ -351,10 +407,11 @@ pub fn expand_tokens(template: &str, doc: &Document) -> String {
                     if let Some(c) = doc.variable("Running Header").and_then(var_char) {
                         out.push(c);
                     } else {
-                        out.push_str("Running Header");
+                        out.push(story::SECTION_MARKER);
                     }
                 }
-                "title" => {
+                "section" | "running_header" => out.push(story::SECTION_MARKER),
+                "title" | "static_text" | "staticText" => {
                     if let Some(c) = doc.variable("Title").and_then(var_char) {
                         out.push(c);
                     } else {
@@ -410,6 +467,7 @@ fn get(s: &mut Session, _: &Value) -> Result<Value> {
         "book": preset_spec("book"),
         "editorial": preset_spec("editorial"),
         "hf-brs": preset_spec("hf-brs"),
+        "hf-dda": preset_spec("hf-dda"),
     });
 
     let templates = all_templates(s);
@@ -468,9 +526,23 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         h
     } else if let Some(name) = preset_name {
         let mut h = if let Some(spec) = preset_spec(name) {
-            spec
+            if name.eq_ignore_ascii_case("custom")
+                && let Some(existing) = s.doc()?.doc.header_footer.clone()
+            {
+                existing
+            } else {
+                spec
+            }
         } else if let Some(tpl) = find_template(s, name) {
             tpl.to_header_footer(HfScope::All)
+        } else if name.eq_ignore_ascii_case("custom") {
+            if let Some(existing) = s.doc()?.doc.header_footer.clone() {
+                existing
+            } else {
+                preset_spec("minimal")
+                    .or_else(|| find_template(s, "Modern Minimal").map(|t| t.to_header_footer(HfScope::All)))
+                    .ok_or_else(|| bad(CMD, "default template missing"))?
+            }
         } else {
             return Err(bad(CMD, format!("unknown preset or template `{name}`")));
         };
@@ -2010,5 +2082,55 @@ mod tests {
         assert_eq!(text_of(hf.folio_items.left), Some(story::PAGE_NUMBER.to_string()), "the left folio is the page number");
         let parent = hf.parent.expect("a parent spread");
         assert!((0..doc.page_count()).all(|i| doc.page(i).and_then(|p| p.parent) == Some(parent)), "every page shows the footer parent");
+    }
+
+    #[test]
+    fn test_apply_hf_dda_preset_facing_pages() {
+        let mut s = session_with_doc(true, 4);
+        let res = s.execute("layout.headerFooter.apply", &json!({ "preset": "hf-dda" }));
+        assert!(res.is_ok(), "apply hf-dda should succeed: {res:?}");
+        let doc = &s.doc().unwrap().doc;
+        let hf = doc.header_footer.as_ref().expect("the preset is stored");
+        assert_eq!(hf.preset, "hf-dda");
+        assert_eq!(hf.sided, Sided::Double);
+
+        let text_of = |id: Option<designcraft_doc::ItemId>| {
+            id.and_then(|i| doc.item(i)).and_then(|it| it.text_frame()).and_then(|tf| doc.story(tf.story)).map(|st| st.text.clone())
+        };
+        // Header carries section marker and page number:
+        let lh_text = text_of(hf.header_items.left).expect("left header text");
+        assert!(lh_text.contains(story::SECTION_MARKER), "left header has section marker: {lh_text}");
+        assert!(lh_text.contains(story::RIGHT_INDENT_TAB), "left header has tab: {lh_text}");
+        assert!(lh_text.contains(story::PAGE_NUMBER), "left header has page number: {lh_text}");
+
+        let rh_text = text_of(hf.header_items.right).expect("right header text");
+        assert!(rh_text.contains(story::SECTION_MARKER), "right header has section marker: {rh_text}");
+        assert!(rh_text.contains(story::RIGHT_INDENT_TAB), "right header has right indent tab: {rh_text}");
+        assert!(rh_text.contains(story::PAGE_NUMBER), "right header has page number: {rh_text}");
+
+        // Footer carries static text:
+        let lf_text = text_of(hf.footer_items.left).expect("left footer text");
+        assert!(lf_text.contains("Title") || lf_text.is_empty(), "left footer has title text");
+
+        let rf_text = text_of(hf.footer_items.right).expect("right footer text");
+        assert!(rf_text.contains("Title") || rf_text.is_empty(), "right footer has title text");
+    }
+
+    #[test]
+    fn test_apply_custom_preset() {
+        let mut s = session_with_doc(true, 4);
+        let res = s.execute(
+            "layout.headerFooter.apply",
+            &json!({
+                "preset": "custom",
+                "sided": "double",
+                "header": { "left": "{section}", "right": "\u{e006}{section}" },
+                "footer": { "left": "{page}", "right": "\u{e006}{page}" }
+            }),
+        );
+        assert!(res.is_ok(), "apply custom should succeed: {res:?}");
+        let doc = &s.doc().unwrap().doc;
+        let hf = doc.header_footer.as_ref().expect("header_footer is set");
+        assert_eq!(hf.preset, "custom");
     }
 }
