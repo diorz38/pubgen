@@ -151,10 +151,10 @@ if (Test-Path $AssetsSrc) {
   Copy-Item -Recurse -Force $AssetsSrc $Portable
 }
 
-# Pubgen samples: include DUAL_LANG and SINGLE_LANG sample files, excluding *.csv and *.zip
+# Pubgen samples: include DUAL_LANG, SINGLE_LANG, and BRS sample files, excluding *.csv and *.zip
 $SamplesSrc = Join-Path $Root 'plan\pubgen\samples'
 $SamplesDest = Join-Path $Portable 'samples'
-foreach ($folder in 'DUAL_LANG', 'SINGLE_LANG') {
+foreach ($folder in 'DUAL_LANG', 'SINGLE_LANG', 'brs') {
   $srcDir = Join-Path $SamplesSrc $folder
   if (Test-Path $srcDir) {
     $destDir = Join-Path $SamplesDest $folder
