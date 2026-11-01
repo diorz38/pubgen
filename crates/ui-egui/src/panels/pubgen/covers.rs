@@ -501,8 +501,10 @@ pub fn resolve_agency_swatch(doc: &mut designcraft_doc::Document, color_spec: &s
     if clean.is_empty() {
         return ensure_swatch(doc, "#00aeef");
     }
-    if doc.swatches.iter().any(|s| s.name.eq_ignore_ascii_case(clean)) {
-        return clean.to_string();
+    // A run resolves its fill by exact name, so return the swatch's own casing: handing back the
+    // caller's spelling of an existing swatch (`#00aeef` for `#00AEEF`) leaves the text unpainted.
+    if let Some(existing) = doc.swatches.iter().find(|s| s.name.eq_ignore_ascii_case(clean)) {
+        return existing.name.clone();
     }
     ensure_swatch(doc, clean)
 }
@@ -553,6 +555,148 @@ fn keeps_on_back_cover(it: &designcraft_doc::Item) -> bool {
         designcraft_doc::Content::Text(_) => false,
         designcraft_doc::Content::Graphic(_) | designcraft_doc::Content::Unassigned => true,
         designcraft_doc::Content::Group { items } => items.iter().any(|sub| keeps_on_back_cover(sub)),
+    }
+}
+
+/// A low-resolution render of the back cover page. What is painted behind a text frame decides
+/// whether its text must be light or dark, and no static guess can know that once the front cover's
+/// artwork (photos, gradients, colour bands) has been copied onto it.
+struct BackdropSample {
+    width: u32,
+    height: u32,
+    origin: [f64; 2],
+    scale: f64,
+    pixels: Vec<u8>,
+}
+
+impl BackdropSample {
+    /// Render page `abs` at a modest resolution; `None` when it cannot be rendered, in which case
+    /// the brand colours are kept unchanged.
+    fn capture(app: &mut DesignApp, abs: usize) -> Option<Self> {
+        let st = app.session.active()?;
+        let (si, pi) = st.doc.page_loc(abs)?;
+        let page = st.doc.spreads.get(si)?.pages.get(pi)?;
+        let bounds = page.bounds();
+        let longest = bounds.width().max(bounds.height()).max(1.0);
+        let scale = (700.0 / longest).clamp(0.1, 0.75);
+        let mut renderer = designcraft_render::Renderer::new();
+        let img = renderer.render_page(&st.doc, &app.session.cache, abs, scale, false, &designcraft_render::RenderOptions::default())?;
+        Some(Self { width: img.width, height: img.height, origin: [bounds.x0, bounds.y0], scale, pixels: img.pixels })
+    }
+
+    /// WCAG relative luminance of the pixels under `rect` (page coordinates), ascending. The sample
+    /// is bounded so a full-page frame stays cheap.
+    fn luminances(&self, rect: [f64; 4]) -> Vec<f64> {
+        let px = |v: f64, origin: f64, max: u32| -> u32 {
+            let p = ((v - origin) * self.scale).floor();
+            if !p.is_finite() {
+                return 0;
+            }
+            (p.max(0.0) as u32).min(max.saturating_sub(1))
+        };
+        let (x0, x1) = {
+            let (a, b) = (px(rect[0], self.origin[0], self.width), px(rect[2], self.origin[0], self.width));
+            if a <= b { (a, b) } else { (b, a) }
+        };
+        let (y0, y1) = {
+            let (a, b) = (px(rect[1], self.origin[1], self.height), px(rect[3], self.origin[1], self.height));
+            if a <= b { (a, b) } else { (b, a) }
+        };
+        let area = (x1 - x0 + 1) as u64 * (y1 - y0 + 1) as u64;
+        let stride = ((area / 4_000).max(1) as f64).sqrt().ceil() as u32;
+        let mut lums = Vec::new();
+        let mut y = y0;
+        while y <= y1 {
+            let mut x = x0;
+            while x <= x1 {
+                let i = (y as usize * self.width as usize + x as usize) * 4;
+                if let Some(px) = self.pixels.get(i..i + 4) {
+                    lums.push(relative_luminance([px[0] as f64 / 255.0, px[1] as f64 / 255.0, px[2] as f64 / 255.0]));
+                }
+                x = x.saturating_add(stride);
+            }
+            y = y.saturating_add(stride);
+        }
+        lums.sort_by(f64::total_cmp);
+        lums
+    }
+}
+
+/// WCAG 2.1 relative luminance (0 = black, 1 = white) of an sRGB colour.
+fn relative_luminance(rgb: [f64; 3]) -> f64 {
+    let lin = |c: f64| {
+        let c = c.clamp(0.0, 1.0);
+        if c <= 0.03928 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2])
+}
+
+/// WCAG contrast ratio between two relative luminances (1 = identical, 21 = black on white).
+fn contrast_ratio(a: f64, b: f64) -> f64 {
+    let (hi, lo) = if a >= b { (a, b) } else { (b, a) };
+    (hi + 0.05) / (lo + 0.05)
+}
+
+/// The 5th-percentile contrast of `rgb` against the sampled backdrop: the text stays readable over
+/// at least 95% of the frame instead of one stray pixel deciding the colour.
+fn worst_contrast(rgb: [f64; 3], backdrop: &[f64]) -> f64 {
+    if backdrop.is_empty() {
+        return 21.0;
+    }
+    let lum = relative_luminance(rgb);
+    let mut ratios: Vec<f64> = backdrop.iter().map(|b| contrast_ratio(lum, *b)).collect();
+    ratios.sort_by(f64::total_cmp);
+    let idx = (ratios.len() / 20).min(ratios.len().saturating_sub(1));
+    ratios.get(idx).copied().unwrap_or(1.0)
+}
+
+/// `#RRGGBB` for a display colour.
+fn hex_of(rgb: [f64; 3]) -> String {
+    let c = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("#{:02X}{:02X}{:02X}", c(rgb[0]), c(rgb[1]), c(rgb[2]))
+}
+
+/// A text colour that reads over `backdrop`: `None` when the brand colour already meets WCAG AA
+/// (4.5:1) there, otherwise the brand hue blended towards white or black just far enough to reach
+/// it, so the text keeps its identity instead of turning plain black or white.
+fn readable_text_hex(brand: [f32; 3], backdrop: &[f64]) -> Option<String> {
+    const AA: f64 = 4.5;
+    if backdrop.is_empty() {
+        return None;
+    }
+    let brand = [brand[0] as f64, brand[1] as f64, brand[2] as f64];
+    if worst_contrast(brand, backdrop) >= AA {
+        return None;
+    }
+    let target = if worst_contrast([1.0; 3], backdrop) >= worst_contrast([0.0; 3], backdrop) { [1.0; 3] } else { [0.0; 3] };
+    let mix = |t: f64| [brand[0] + (target[0] - brand[0]) * t, brand[1] + (target[1] - brand[1]) * t, brand[2] + (target[2] - brand[2]) * t];
+    // The smallest blend that reaches AA keeps as much of the brand colour as possible.
+    let mut best = target;
+    for step in 1..=20 {
+        let candidate = mix(step as f64 / 20.0);
+        if worst_contrast(candidate, backdrop) >= AA {
+            best = candidate;
+            break;
+        }
+    }
+    // A busy area (neither white nor black reaches AA) still gets the better of the two.
+    if worst_contrast(best, backdrop) < worst_contrast(target, backdrop) {
+        best = target;
+    }
+    Some(hex_of(best))
+}
+
+/// The swatch to fill back-cover text with: the brand colour when it reads well over the sampled
+/// backdrop, otherwise a contrast-adjusted shade of the same hue.
+fn readable_text_swatch(doc: &mut designcraft_doc::Document, brand_spec: &str, backdrop: &[f64]) -> String {
+    let brand = resolve_agency_swatch(doc, brand_spec);
+    if backdrop.is_empty() {
+        return brand;
+    }
+    let Some(rgb) = doc.resolve_color(&brand, 1.0).map(|c| c.to_rgb()) else { return brand };
+    match readable_text_hex(rgb, backdrop) {
+        Some(hex) => ensure_swatch(doc, &hex),
+        None => brand,
     }
 }
 
@@ -730,11 +874,17 @@ pub fn execute_generate_back_cover(app: &mut DesignApp, st: &PubgenState) -> Res
     let logo_path = if !st.cover_image_logo.trim().is_empty() { st.cover_image_logo.trim() } else { "plan/pubgen/samples/images/bps_logo.png" };
     let _ = place_locked_image(app, [logo_x, logo_y, logo_x + logo_w, logo_y + logo_h], logo_path, "#slot:back_cover:logo")?;
 
+    // 3b. Read what is painted behind the three text frames (the copied artwork, photos and
+    // gradients) so each text colour can be chosen for contrast instead of blindly inheriting the
+    // front cover's brand colour, which may be invisible on the back cover's own backdrop.
+    let backdrop = BackdropSample::capture(app, last_page_idx);
+
     // 4. Office Name: placed beside logo on bottom left, matching main cover color and font, bold
     let agency_x = logo_x + logo_w + 10.0;
     let agency_y = logo_y - 2.0;
     let agency_w = 260.0;
     let agency_h = logo_h + 4.0;
+    let agency_lums = backdrop.as_ref().map(|b| b.luminances([agency_x, agency_y, agency_x + agency_w, agency_y + agency_h])).unwrap_or_default();
     let res_agency = app.run(
         "frame.create",
         json!({
@@ -747,7 +897,7 @@ pub fn execute_generate_back_cover(app: &mut DesignApp, st: &PubgenState) -> Res
     )?;
     if let Some(fid) = res_agency.get("id").and_then(Value::as_u64) {
         let _ = app.session.edit(|doc, _| {
-            let agency_swatch = resolve_agency_swatch(doc, &branding.agency_color);
+            let agency_swatch = readable_text_swatch(doc, &branding.agency_color, &agency_lums);
             let mut story_id = None;
             if let Some(it) = doc.item_mut(designcraft_doc::ItemId(fid)) {
                 it.fill = designcraft_doc::Fill::none();
@@ -783,6 +933,7 @@ pub fn execute_generate_back_cover(app: &mut DesignApp, st: &PubgenState) -> Res
     let addr_y = logo_y + logo_h + 4.0;
     let addr_w = 340.0;
     let addr_h = 24.0;
+    let addr_lums = backdrop.as_ref().map(|b| b.luminances([addr_x, addr_y, addr_x + addr_w, addr_y + addr_h])).unwrap_or_default();
     let res_addr = app.run(
         "frame.create",
         json!({
@@ -795,7 +946,7 @@ pub fn execute_generate_back_cover(app: &mut DesignApp, st: &PubgenState) -> Res
     )?;
     if let Some(fid) = res_addr.get("id").and_then(Value::as_u64) {
         let _ = app.session.edit(|doc, _| {
-            let agency_swatch = resolve_agency_swatch(doc, &branding.agency_color);
+            let agency_swatch = readable_text_swatch(doc, &branding.agency_color, &addr_lums);
             let mut story_id = None;
             if let Some(it) = doc.item_mut(designcraft_doc::ItemId(fid)) {
                 it.fill = designcraft_doc::Fill::none();
@@ -825,6 +976,7 @@ pub fn execute_generate_back_cover(app: &mut DesignApp, st: &PubgenState) -> Res
     let issn_x = page_x + pw - 36.0 - issn_w;
     let issn_y = addr_y;
     let issn_h = addr_h;
+    let issn_lums = backdrop.as_ref().map(|b| b.luminances([issn_x, issn_y, page_x + pw - 36.0, issn_y + issn_h])).unwrap_or_default();
     let res_issn = app.run(
         "frame.create",
         json!({
@@ -837,7 +989,7 @@ pub fn execute_generate_back_cover(app: &mut DesignApp, st: &PubgenState) -> Res
     )?;
     if let Some(fid) = res_issn.get("id").and_then(Value::as_u64) {
         let _ = app.session.edit(|doc, _| {
-            let agency_swatch = resolve_agency_swatch(doc, &branding.agency_color);
+            let agency_swatch = readable_text_swatch(doc, &branding.agency_color, &issn_lums);
             let mut story_id = None;
             if let Some(it) = doc.item_mut(designcraft_doc::ItemId(fid)) {
                 it.fill = designcraft_doc::Fill::none();
@@ -2774,6 +2926,46 @@ pub(crate) mod tests {
                 sp.page_at_x(b.center().x) == Some(pi) && (b.width() - 264.0).abs() < 2.0 && (b.height() - 164.0).abs() < 2.0
             });
             assert!(copied, "{pages} pages: the back cover (page {}) has no copy of the front-cover shape", last + 1);
+        }
+    }
+
+    /// The three back-cover text frames pick their colour from what is actually painted behind them:
+    /// the brand colour where it reads, a contrast-adjusted shade of it where it does not (WCAG AA,
+    /// 4.5:1), instead of the front cover's colour whatever it happens to sit on.
+    #[test]
+    fn the_back_cover_text_colour_adapts_to_its_backdrop() {
+        for fill in ["#122647", "#FFFFFF"] {
+            let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+            app.run("file.new", json!({ "preset": "A4", "pages": 2, "facingPages": true })).unwrap();
+            app.run("frame.create", json!({ "spread": 0, "rect": [0.0, 0.0, 595.0, 842.0] })).unwrap();
+            let _ = app.run("object.color", json!({ "color": fill, "target": "fill" }));
+            execute_generate_back_cover(&mut app, &PubgenState::default()).unwrap();
+
+            let active = app.session.active().unwrap();
+            let doc = &active.doc;
+            let last = doc.page_count() - 1;
+            let (si, _) = doc.page_loc(last).unwrap();
+            let lum_of = |swatch: &str| {
+                doc.resolve_color(swatch, 1.0).map(|c| c.to_rgb()).map(|rgb| relative_luminance([rgb[0] as f64, rgb[1] as f64, rgb[2] as f64]))
+            };
+            let backdrop = designcraft_color::Color::from_hex(fill)
+                .map(|c| c.to_rgb())
+                .map(|rgb| relative_luminance([rgb[0] as f64, rgb[1] as f64, rgb[2] as f64]))
+                .expect("the test backdrop colour parses");
+            let mut checked = 0;
+            for it in &doc.spreads[si].items {
+                if !matches!(it.label.as_str(), "#slot:back_cover:agency" | "#slot:back_cover:address" | "#slot:back_cover:code") {
+                    continue;
+                }
+                let designcraft_doc::Content::Text(tf) = &it.content else { continue };
+                let Some(story) = doc.story(tf.story) else { continue };
+                let Some(swatch) = story.chars.first().and_then(|c| c.format.over.fill.clone()) else { continue };
+                let Some(lum) = lum_of(&swatch) else { continue };
+                let ratio = contrast_ratio(lum, backdrop);
+                assert!(ratio >= 4.5, "{}: {swatch} on {fill} has contrast {ratio:.2}, below WCAG AA", it.label);
+                checked += 1;
+            }
+            assert_eq!(checked, 3, "all three back-cover text frames were checked over {fill}");
         }
     }
 
