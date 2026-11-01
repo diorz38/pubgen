@@ -1836,6 +1836,11 @@ pub fn execute_generate_brs_back_cover(app: &mut DesignApp, st: &PubgenState) ->
         "Jl. dr. Sutomo No. 6-8 Jakarta 10710\nTelp : (021) 3841195, 3842508, 3810291-4, Fax : (021) 3857046\nHomepage : http://www.bps.go.id   E-mail : bpshq@bps.go.id"
     };
 
+    // Reserve the back cover's own page before the template's shapes are copied: with an even page
+    // count the appended page would be the right page of the last body spread, and the parity
+    // blank page inserted afterwards leaves a shape that bleeds past the cover's left edge behind
+    // on it. Reserving first makes the shapes land on their final, lone left page.
+    ensure_back_cover_slot(app)?;
     let page_count = app.session.active().map(|s| s.doc.page_count()).unwrap_or(2);
     let mut back_text_slots = serde_json::Map::new();
     back_text_slots.insert("contact_header".into(), json!("Untuk informasi lebih lanjut silakan hubungi:"));
@@ -3774,5 +3779,32 @@ pub(crate) mod tests {
         assert_eq!(super::format_indonesian_month_year("September 2026"), "September 2026");
         assert_eq!(super::format_indonesian_month_year("October 2026"), "Oktober 2026");
         assert_eq!(super::format_indonesian_month_year("01/09/2026"), "September 2026");
+    }
+
+    #[test]
+    fn brs_back_cover_shapes_stay_on_the_back_cover_when_its_page_is_reserved() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({ "facingPages": true })).unwrap();
+        // An even page count: appending the back cover page would put it on the right page of the
+        // last body spread, so a blank page has to be reserved before the cover is placed.
+        app.run("layout.pages.insert", json!({ "count": 1 })).unwrap();
+        assert_eq!(app.session.active().unwrap().doc.page_count(), 2);
+
+        execute_generate_brs_back_cover(&mut app, &PubgenState::default()).unwrap();
+
+        let active = app.session.active().unwrap();
+        let doc = &active.doc;
+        let count = doc.page_count();
+        let (si, _) = doc.page_loc(count - 1).unwrap();
+        let back = &doc.spreads[si];
+        assert_eq!(back.pages.len(), 1, "the back cover has a spread of its own");
+        assert_eq!(back.pages[0].side, designcraft_doc::PageSide::Left, "the back cover is a left page");
+        assert!(back.items.iter().any(|it| it.label.contains("theme2")), "the back cover carries its artwork");
+
+        // The blank pages reserved before the back cover stay empty: a decorative shape that bleeds
+        // past the cover's left edge must not be left behind on the page before it.
+        for p in 0..count - 1 {
+            assert!(!doc.page_has_items(p), "page {} before the back cover must stay empty", p + 1);
+        }
     }
 }
