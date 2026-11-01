@@ -1176,27 +1176,29 @@ For a yearbook with eight to twelve chapter workbooks, the compiler replaces the
 
 ---
 
-## 16. What’s New in This Build (0.15.2-pubgen.0.8.2)
+## 16. What’s New in This Build (0.15.2-pubgen.0.8.3)
 
-1. **BRS footer text prints again**: the footer colour matches its swatch by name whatever the hex
-   casing, and a run whose fill names no swatch prints black instead of disappearing.
-2. **Back cover lands on a left page**: with Facing Pages on, the back cover takes a verso page of its
-   own spread, so the finished book opens and closes symmetrically; a would-be right-hand cover gains
-   one blank page first. The BRS generate flow also reports back-cover, facing-pages and
-   `layout.headerFooter.apply` errors instead of swallowing them.
-3. **BRS page number sits in the inner margin**, past the spine-side margin edge and level with the
-   footer text, and stays on the page when the margin is narrower than its frame.
-4. **Cover thumbnails find their images**: the preview scans the app and per-user thumbnail folders
-   instead of fixed filenames.
-5. **Synced with upstream DesignCraft `main` (v0.15.2, 995 commits)**: TOC Create PDF Bookmarks
-   regenerated in place, the redesigned Color Picker with eyedropper, application **Units &
-   Increments** (`defaultUnits`) for new documents, and the upstream table convert dialogs — with
-   every Pubgen feature kept (plural tables of contents, BPS chapter and paired entries,
-   header/footer templates, covers, thumbnails).
+1. **Back cover keeps the front cover's shapes**: with Facing Pages on and an even page count, the
+   decorative shapes copied from the front cover used to stay behind on the last body page while the
+   back cover took a fresh page. The back cover's page is now reserved *before* the copy is made, and
+   the finished page is verified afterwards — if anything is missing, Pubgen reports
+   `The back cover is incomplete (missing: …)` instead of leaving a bare cover (§3).
+2. **Back-cover text adapts to its backdrop**: the agency name, address and ISSN/ISBN are now read
+   against what is actually painted behind them. The page is rendered once at low resolution, the
+   backdrop under each frame is measured, and the front cover's brand colour is kept where it already
+   reaches WCAG AA contrast (4.5:1); where it does not — cyan on a white page, for example — the same
+   hue is blended towards white or black only as far as needed to stay readable (§3).
+3. **Each AI cover style previews its own thumbnail**: all five AI styles used to share one hover
+   preview. Each preset now matches its own file names (`ai_retro_waves.png`, `100_retro_waves.png`,
+   …) and ships a distinct painted fallback (§3), so Retro Waves, Geometric Business, Minimal Sci-Fi,
+   Dynamic Waves Spread and Vibrant S-Curve Spread each show their own picture.
+4. **Back-cover address and ISSN text paint their colour again**: a swatch stored as `#00AEEF` and
+   requested as `#00aeef` left those frames unpainted (black); swatches are now resolved case-
+   insensitively and painted with the swatch's own name.
 
-Ships as tag `v0.15.2-pubgen.0.8.2` (`pubgen-0.8.X`); the Windows x64 portable build is published as
-**DesignCraft 0.15.2-pubgen.0.8.2 - Windows x64 Portable** on the GitHub releases page. Quality gates
+Ships as tag `v0.15.2-pubgen.0.8.3` (`pubgen-0.8.X`); the Windows x64 portable build is published as
+**DesignCraft 0.15.2-pubgen.0.8.3 - Windows x64 Portable** on the GitHub releases page. Quality gates
 on the tagged commit: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings` and
-`cargo test --workspace` (3770 tests) all clean.
+`cargo test --workspace` all clean.
 
 *DesignCraft Publication Generator (Pubgen) — Engineered for Speed, Elegance, and Precision.*

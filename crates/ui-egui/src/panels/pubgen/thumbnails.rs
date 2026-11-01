@@ -987,25 +987,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Opt-in evidence (`CRAFT_UI_VISUAL_FIXTURES=dir cargo test --features pubgen`): the five AI
-    /// preset fallbacks side by side, so they can be checked for being distinct and on-brand.
+    /// Opt-in evidence (`CRAFT_UI_VISUAL_FIXTURES=dir cargo test --features pubgen`): each AI preset
+    /// fallback painted on its own, so they can be checked for being distinct and on-brand, and the
+    /// PNGs double as per-style sample thumbnails (`retro_waves.png`, …).
     #[test]
     fn capture_ai_cover_thumbnails_fixture() {
         let Some(directory) = std::env::var_os("CRAFT_UI_VISUAL_FIXTURES").map(std::path::PathBuf::from) else { return };
         std::fs::create_dir_all(&directory).unwrap();
         let t = Tokens::for_brightness(crate::theme::Brightness::MediumDark);
-        let mut harness =
-            egui_kittest::Harness::builder().with_size(vec2(5.0 * 160.0, 220.0)).with_accessibility_check(false).wgpu().build_ui(|ui| {
+        for (i, preset) in super::super::ai_cover::AI_PRESETS.iter().enumerate() {
+            let style = super::super::ai_cover::AI_STYLE_BASE + i;
+            let mut harness = egui_kittest::Harness::builder().with_size(vec2(160.0, 222.0)).with_accessibility_check(false).wgpu().build_ui(|ui| {
                 crate::theme::install_fonts(ui.ctx(), "en");
                 crate::theme::apply(ui.ctx(), &t);
-                ui.horizontal(|ui| {
-                    for i in 0..super::super::ai_cover::AI_PRESETS.len() {
-                        paint_fallback_cover_thumb(ui, super::super::ai_cover::AI_STYLE_BASE + i, 150.0, 212.0, &t);
-                    }
-                });
+                paint_fallback_cover_thumb(ui, style, 150.0, 212.0, &t);
             });
-        harness.run_steps(2);
-        harness.render().unwrap().save(directory.join("pubgen-ai-thumbnails.png")).unwrap();
+            harness.run_steps(2);
+            let slug = preset.name.to_lowercase().replace([' ', '-'], "_");
+            harness.render().unwrap().save(directory.join(format!("{slug}.png"))).unwrap();
+        }
     }
 
     /// The checked-in samples still resolve through the folder itself (they are local-only, so a

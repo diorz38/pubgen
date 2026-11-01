@@ -73,6 +73,7 @@ Generated-in-code art is original and has no file to list: the UI icon set (`cra
 | `packaging/macos/dmg/background.svg` | @XusBadia | original work for this repository, derived from the DesignCraft app icon (`assets/app-icon/designcraft.svg`, referenced via `<image>`, not copied); text is outlined Inter / JetBrains Mono glyph paths | MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`) | DesignCraft macOS DMG window background for the Finder window; `packaging/macos/dmg/generate.py` renders it to `background.tiff` (2026-10-08) |
 | `packaging/macos/dmg/background.tiff` | @XusBadia | Rendered from `packaging/macos/dmg/background.svg` by `packaging/macos/dmg/generate.py` | MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`) | 1x + 2x HiDPI TIFF for the macOS DMG window; includes the app icon (see its row) and LittleCMS's built-in sRGB profile ("No copyright, use freely") |
 | `plan/pubgen/Check_Cover.designcraft` | DesignCraft contributor (generated) | scratch document for checking the Publication Cover styles | CC0-1.0 | Test document |
+| `plan/bps_brs_bugged.designcraft` | DesignCraft contributor (generated) | scratch document capturing a BRS back-cover bug report | CC0-1.0 | Test document |
 | `plan/pubgen/docs_images/pubgen_logo.jpg` | DesignCraft contributor (authored) | PubGen logo illustration in documentation | CC0-1.0 | Documentation image |
 | `plan/pubgen/docs_images/pubgen_logo.png` | DesignCraft contributor (authored) | PubGen logo illustration in documentation | CC0-1.0 | Documentation image |
 | `assets/templates/covers/000_wave_curves.designcraft` | DesignCraft contributor (authored) | cover template for Cover Style 0 (Wave Curves): copy of the `covers_original/` source, A4 artboard with slot-tagged frames and embedded preview | CC0-1.0 — **confirm** (embedded sample photo/emblem) | Authored in DesignCraft |
@@ -203,6 +204,11 @@ backend keeps the same files; hashes and upstream licence notices are retained h
 | `plan/pubgen/samples/style/design-5.designcraft` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
 | `plan/pubgen/samples/style/design-6.designcraft` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
 | `plan/pubgen/samples/thumb/ai_base.png` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
+| `plan/pubgen/samples/thumb/dynamic_waves_spread.png` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
+| `plan/pubgen/samples/thumb/geometric_business.png` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
+| `plan/pubgen/samples/thumb/minimal_sci_fi.png` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
+| `plan/pubgen/samples/thumb/retro_waves.png` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
+| `plan/pubgen/samples/thumb/vibrant_s_curve_spread.png` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
 | `plan/pubgen/samples/thumb/business_report.png` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
 | `plan/pubgen/samples/thumb/chevron_medallion.png` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
 | `plan/pubgen/samples/thumb/corporate_headline.png` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
