@@ -21,7 +21,7 @@ mod gpu_limits;
 mod logging;
 #[cfg(target_os = "macos")]
 mod native_menu;
-mod profile;
+use designcraft_engine::profile;
 
 use designcraft_engine::Session;
 use designcraft_ui_egui::{DesignApp, Services};

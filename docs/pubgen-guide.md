@@ -409,7 +409,7 @@ You can specify AI Base styles directly in your Excel workbook:
 ### Hover Thumbnail Previews
 - **Quick Preview Pills**: Under the style dropdown, you will see quick-switch pills for all 13 vector corporate styles plus the 5 AI styles.
 - **Hover to Preview**: Simply move your mouse over any pill (or click the small eye icon `👁` next to the dropdown). A floating tooltip instantly displays the actual rendered cover thumbnail so you can choose your favorite look before generating.
-- **Thumbnail images found anywhere**: the preview lists every image in the app image folder and the per-user thumbnail folder instead of a fixed set of filenames, so your own preview PNGs and JPGs show up.
+- **Thumbnail images found anywhere**: the preview lists every image in the app image folder and the per-user thumbnail folder instead of a fixed set of filenames, so your own preview PNGs and JPGs show up. The per-user folder follows the settings folder: `%APPDATA%\DesignCraft\PubgenThumbs`, and `DesignCraftData\PubgenThumbs` next to `designcraft.exe` in a portable install (`portable.txt` beside the exe).
 - **Every AI style previews itself**: each of the five AI styles shows its own painted preview (mid-century waves, geometric hexagons, sci-fi sun, spread sweep, S-curve ribbon) instead of all sharing one AI image. To use your own picture, drop a PNG/JPG named after the style in the per-user thumbnail folder — `ai_retro_waves.png`, `retro_waves.png` or `100_retro_waves.png` all match the first AI style; `style104.png` or `ai_vibrant_scurve_spread.png` match the last.
 
 ---
@@ -1195,6 +1195,9 @@ For a yearbook with eight to twelve chapter workbooks, the compiler replaces the
 4. **Back-cover address and ISSN text paint their colour again**: a swatch stored as `#00AEEF` and
    requested as `#00aeef` left those frames unpainted (black); swatches are now resolved case-
    insensitively and painted with the swatch's own name.
+5. **User thumbnails follow a portable install**: the per-user thumbnail folder is the settings
+   folder's `PubgenThumbs`, so a portable install keeps them in `DesignCraftData` next to
+   `designcraft.exe` instead of scattering them in `%APPDATA%` (§7).
 
 Ships as tag `v0.15.2-pubgen.0.8.3` (`pubgen-0.8.X`); the Windows x64 portable build is published as
 **DesignCraft 0.15.2-pubgen.0.8.3 - Windows x64 Portable** on the GitHub releases page. Quality gates

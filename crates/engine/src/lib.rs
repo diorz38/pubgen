@@ -17,6 +17,7 @@ pub mod guard;
 pub mod io;
 pub mod links;
 pub mod math;
+pub mod profile;
 pub mod recovery;
 pub mod sample;
 pub mod script;

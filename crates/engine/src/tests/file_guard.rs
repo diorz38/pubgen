@@ -27,6 +27,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "the unsaved documents live in a folder the host application chooses (a command's own `dir` is checked in cmd/file.rs before it gets here)",
     ),
     (
+        "engine/src/profile.rs",
+        "the settings folder itself (a portable install's marker file, or the platform profile path): no command parameter or document field names it, and it only probes writability with a throwaway file",
+    ),
+    (
         "engine/src/cmd/package.rs",
         "`OutputRoot` checks the folder against the write root before it creates anything and then only writes inside it. Its reads are of the font files that draw the document's text (installed fonts and the `Document Fonts` folder), never of a path a command names",
     ),

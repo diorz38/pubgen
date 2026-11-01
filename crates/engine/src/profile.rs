@@ -84,15 +84,18 @@ fn executable_dir() -> Option<PathBuf> {
     std::env::current_exe().ok()?.parent().map(Path::to_path_buf)
 }
 
+/// The host application's crash-recovery folder: settings root's `Recovery` with this run's own
+/// sub-folder. Native only — wasm has no file system.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn recovery_dir() -> Option<PathBuf> {
-    recovery_dir_with(root_with(|key| std::env::var_os(key), executable_dir().as_deref()), designcraft_engine::recovery::default_dir)
-        .and_then(own_run)
+    recovery_dir_with(root_with(|key| std::env::var_os(key), executable_dir().as_deref()), crate::recovery::default_dir).and_then(own_run)
 }
 
 /// This run's folder in the recovery folder `root`. A second running DesignCraft has its own, so
 /// neither writes over the other's documents nor takes them for a crash's.
+#[cfg(not(target_arch = "wasm32"))]
 fn own_run(root: PathBuf) -> Option<PathBuf> {
-    match designcraft_engine::recovery::run_dir(&root) {
+    match crate::recovery::run_dir(&root) {
         Ok(dir) => Some(dir),
         Err(e) => {
             log::warn!("recovery is unavailable because this run cannot be isolated: {e}");
@@ -101,6 +104,7 @@ fn own_run(root: PathBuf) -> Option<PathBuf> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn recovery_dir_with(root: Option<OsString>, default: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf> {
     match root {
         Some(root) => (!root.is_empty()).then(|| PathBuf::from(root).join("Recovery")),

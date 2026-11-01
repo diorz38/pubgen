@@ -21,24 +21,12 @@ pub(crate) fn adjust_hex(hex: &str, factor: f32) -> String {
 const THUMB_IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif"];
 
 /// The folder a user's own thumbnails persist in, so replacing a PNG survives restarts and
-/// updates: override it with `DESIGNCRAFT_PUBGEN_THUMBS`, otherwise it is the per-user data
-/// folder (`%APPDATA%\DesignCraft\PubgenThumbs`, `~/Library/Application Support/...` on macOS,
-/// `$XDG_DATA_HOME` on Linux).
+/// updates: override it with `DESIGNCRAFT_PUBGEN_THUMBS`, otherwise it is the settings folder's
+/// `PubgenThumbs` — the same place `prefs.json` lives ([`designcraft_engine::profile`]), so a
+/// portable install (`portable.txt` beside the executable) keeps them in `DesignCraftData`
+/// beside it instead of the user's profile.
 pub(crate) fn user_thumbs_dir() -> Option<std::path::PathBuf> {
-    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    if cfg!(target_os = "macos") {
-        return home.map(|h| h.join("Library/Application Support/DesignCraft/PubgenThumbs"));
-    }
-    if cfg!(target_os = "windows") {
-        return std::env::var_os("APPDATA")
-            .map(std::path::PathBuf::from)
-            .or_else(|| home.map(|h| h.join("AppData/Roaming")))
-            .map(|a| a.join("DesignCraft").join("PubgenThumbs"));
-    }
-    std::env::var_os("XDG_DATA_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| home.map(|h| h.join(".local/share")))
-        .map(|d| d.join("designcraft/pubgen-thumbs"))
+    designcraft_engine::profile::config_dir().map(|d| d.join("PubgenThumbs"))
 }
 
 /// The folders scanned for thumbnails, highest priority first; the first folder holding a style's
