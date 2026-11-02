@@ -27,3 +27,4 @@
 !docs/pubgen-glossary.example.csv
 *.geojson
 /assets/pubgen/maps/
+/pubgen/
