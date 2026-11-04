@@ -1,0 +1,22 @@
+[package]
+name = "pubgen-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "pubgen-cli"
+path = "src/main.rs"
+
+[[bin]]
+name = "pubgen-export"
+path = "src/export.rs"
+
+[dependencies]
+serde_json = { workspace = true }
+zip = { workspace = true }
