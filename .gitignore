@@ -28,3 +28,4 @@
 *.geojson
 /assets/pubgen/maps/
 /pubgen/
+/standalone/
