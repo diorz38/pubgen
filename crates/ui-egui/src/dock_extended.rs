@@ -63,7 +63,7 @@ pub const PUBGEN_PANELS: &[(&str, &str, &str)] = &[("pubgen", "PubGen", "panel-p
 
 /// The English name of panel `id`.
 pub fn panel_label(id: &str) -> &'static str {
-    DOCK_TABS.iter().chain(ICON_PANELS).map(|p| (p.0, p.1)).chain(FLOATING_PANELS.iter().copied()).find(|p| p.0 == id).map_or("Panel", |p| p.1)
+    DOCK_TABS.iter().chain(ICON_PANELS).chain(PUBGEN_PANELS).map(|p| (p.0, p.1)).chain(FLOATING_PANELS.iter().copied()).find(|p| p.0 == id).map_or("Panel", |p| p.1)
 }
 
 /// A panel's contents at most `max_h` tall, scrolling past that. The Pages panel scrolls its
