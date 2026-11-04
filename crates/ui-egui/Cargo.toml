@@ -22,6 +22,7 @@ designcraft-render = { workspace = true }
 designcraft-tools = { workspace = true }
 designcraft-textimport = { workspace = true }
 designcraft-engine = { workspace = true }
+designcraft-textimport = { workspace = true }
 designcraft-imagegen = { workspace = true }
 designcraft-translate = { workspace = true }
 craft-prepress = { workspace = true }
