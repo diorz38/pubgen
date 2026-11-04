@@ -854,11 +854,7 @@ pub(crate) fn card_cover_body_ui(app: &mut DesignApp, ui: &mut Ui, st: &mut Pubg
             }
         });
         if st.cover_style != prev_style {
-            match st.cover_style {
-                URBAN_STYLE => apply_urban_palette(st),
-                HORIZON_STYLE | BUSINESS_STYLE => apply_report_palette(st),
-                _ => {}
-            }
+            super::covers::apply_cover_style_default_theme(st);
         }
         combo.response.on_hover_ui(|ui| {
             show_style_thumbnail_tooltip(ui, st.cover_style, &cur_style, t);
@@ -938,16 +934,7 @@ pub(crate) fn card_cover_body_ui(app: &mut DesignApp, ui: &mut Ui, st: &mut Pubg
     // 2. Color Theme Preset
     ui.horizontal(|ui| {
         ui.label(RichText::new("Theme:").size(11.0).color(t.text));
-        let themes = [
-            "Classic BPS (Blue/Gold)",
-            "Corporate Navy & Amber",
-            "Emerald & Gold",
-            "Crimson & Slate",
-            "Modern Teal & Cyan",
-            "Modern Violet & Slate",
-            "Report Navy & Orange",
-            "Custom",
-        ];
+        let themes = super::covers::COVER_THEMES;
         let cur_theme = themes.get(st.cover_theme_preset).copied().unwrap_or("Classic BPS (Blue/Gold)");
         let prev_theme = st.cover_theme_preset;
         let combo_w = (ui.available_width() - 56.0).clamp(110.0, 220.0);
@@ -957,40 +944,7 @@ pub(crate) fn card_cover_body_ui(app: &mut DesignApp, ui: &mut Ui, st: &mut Pubg
             }
         });
         if st.cover_theme_preset != prev_theme {
-            match st.cover_theme_preset {
-                0 => {
-                    st.cover_color_primary = "#0072bc".into();
-                    st.cover_color_accent = "#f5ab19".into();
-                    st.cover_color_dark = "#122647".into();
-                }
-                1 => {
-                    st.cover_color_primary = "#1e3a8a".into();
-                    st.cover_color_accent = "#d97706".into();
-                    st.cover_color_dark = "#0f172a".into();
-                }
-                2 => {
-                    st.cover_color_primary = "#047857".into();
-                    st.cover_color_accent = "#eab308".into();
-                    st.cover_color_dark = "#064e3b".into();
-                }
-                3 => {
-                    st.cover_color_primary = "#be123c".into();
-                    st.cover_color_accent = "#ea580c".into();
-                    st.cover_color_dark = "#1e293b".into();
-                }
-                4 => {
-                    st.cover_color_primary = "#0891b2".into();
-                    st.cover_color_accent = "#f59e0b".into();
-                    st.cover_color_dark = "#1e293b".into();
-                }
-                5 => {
-                    st.cover_color_primary = "#6c5ce7".into();
-                    st.cover_color_accent = "#a29bfe".into();
-                    st.cover_color_dark = "#1e293b".into();
-                }
-                6 => apply_report_palette(st),
-                _ => {}
-            }
+            super::covers::apply_cover_theme_preset(st, st.cover_theme_preset);
         }
     });
 
@@ -998,12 +952,27 @@ pub(crate) fn card_cover_body_ui(app: &mut DesignApp, ui: &mut Ui, st: &mut Pubg
     ui.horizontal(|ui| {
         ui.label(RichText::new("Colors:").size(10.5).color(t.text_dim));
         let field_w = ((ui.available_width() - 56.0) / 3.0 - 6.0).clamp(44.0, 72.0);
-        ui.add_sized([field_w, crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut st.cover_color_primary))
-            .on_hover_text("Primary Color (e.g. #0072bc)");
-        ui.add_sized([field_w, crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut st.cover_color_accent))
-            .on_hover_text("Accent Color (e.g. #f5ab19)");
-        ui.add_sized([field_w, crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut st.cover_color_dark))
-            .on_hover_text("Dark / Secondary Color (e.g. #122647)");
+        if ui
+            .add_sized([field_w, crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut st.cover_color_primary))
+            .on_hover_text("Primary Color (e.g. #0072bc)")
+            .changed()
+        {
+            st.cover_theme_preset = super::covers::THEME_CUSTOM;
+        }
+        if ui
+            .add_sized([field_w, crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut st.cover_color_accent))
+            .on_hover_text("Accent Color (e.g. #f5ab19)")
+            .changed()
+        {
+            st.cover_theme_preset = super::covers::THEME_CUSTOM;
+        }
+        if ui
+            .add_sized([field_w, crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut st.cover_color_dark))
+            .on_hover_text("Dark / Secondary Color (e.g. #122647)")
+            .changed()
+        {
+            st.cover_theme_preset = super::covers::THEME_CUSTOM;
+        }
     });
 
     // 3. Form fields

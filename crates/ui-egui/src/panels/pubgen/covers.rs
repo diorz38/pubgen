@@ -3,6 +3,7 @@ use designcraft_imagegen as imagegen;
 
 /// Index of the "Modern Horizon" cover style — the one traced from the reference annual-report
 /// design, whose palette is navy + orange rather than the amber of the other presets.
+#[cfg(test)]
 pub(crate) const HORIZON_STYLE: usize = 7;
 
 /// Index of the "Business Report" cover style — the navy/orange diagonal cover derived from the
@@ -22,24 +23,167 @@ pub(crate) const PRISM_STYLE: usize = 11;
 /// Index of the "Quarter Stack" cover style — the fanned cards on a warm paper field.
 pub(crate) const QUARTER_STYLE: usize = 12;
 
-/// Theme preset index and colours of the reference annual-report cover (navy + orange).
-pub(crate) const REPORT_THEME: usize = 6;
+pub(crate) const THEME_CLASSIC_BPS: usize = 0;
+pub(crate) const THEME_NAVY_ORANGE: usize = 1;
+pub(crate) const THEME_URBAN_TEAL_AMBER: usize = 2;
+pub(crate) const THEME_TRICOLOR_BANDS: usize = 3;
+pub(crate) const THEME_PRISM_CRYSTALS: usize = 4;
+pub(crate) const THEME_EARTHY_CRAFT: usize = 5;
+pub(crate) const THEME_CUSTOM: usize = 6;
+
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) const REPORT_THEME: usize = THEME_NAVY_ORANGE;
+
+pub(crate) const COVER_THEMES: &[&str] = &[
+    "Classic BPS (Blue/Gold)",
+    "Navy–Orange–White (Template 000–008)",
+    "Urban Modern Teal–Amber (Template 009)",
+    "Dynamic Tri-Color Bands (Template 010)",
+    "Prism Crystals (Template 011)",
+    "Earthy / Editorial Craft (Template 012)",
+    "Custom",
+];
+
+pub(crate) fn default_theme_for_cover_style(style: usize) -> usize {
+    match style {
+        0..=8 => THEME_NAVY_ORANGE,
+        URBAN_STYLE => THEME_URBAN_TEAL_AMBER,
+        TRICOLOR_STYLE => THEME_TRICOLOR_BANDS,
+        PRISM_STYLE => THEME_PRISM_CRYSTALS,
+        QUARTER_STYLE => THEME_EARTHY_CRAFT,
+        _ => THEME_CLASSIC_BPS,
+    }
+}
+
+pub(crate) fn apply_cover_theme_preset(st: &mut PubgenState, preset_idx: usize) {
+    st.cover_theme_preset = preset_idx;
+    match preset_idx {
+        THEME_CLASSIC_BPS => {
+            st.cover_color_primary = "#0072bc".into();
+            st.cover_color_accent = "#f5ab19".into();
+            st.cover_color_dark = "#122647".into();
+        }
+        THEME_NAVY_ORANGE => {
+            st.cover_color_primary = "#082641".into();
+            st.cover_color_accent = "#f5871f".into();
+            st.cover_color_dark = "#082641".into();
+        }
+        THEME_URBAN_TEAL_AMBER => {
+            st.cover_color_primary = "#034460".into();
+            st.cover_color_accent = "#fcb91e".into();
+            st.cover_color_dark = "#034460".into();
+        }
+        THEME_TRICOLOR_BANDS => {
+            st.cover_color_primary = "#0088d2".into();
+            st.cover_color_accent = "#f38b1e".into();
+            st.cover_color_dark = "#102a3c".into();
+        }
+        THEME_PRISM_CRYSTALS => {
+            st.cover_color_primary = "#0088d2".into();
+            st.cover_color_accent = "#f38b1e".into();
+            st.cover_color_dark = "#0a2233".into();
+        }
+        THEME_EARTHY_CRAFT => {
+            st.cover_color_primary = "#c75b39".into();
+            st.cover_color_accent = "#e8a33d".into();
+            st.cover_color_dark = "#1f2a44".into();
+        }
+        _ => {}
+    }
+}
 
 /// Select the palette the reference design uses, so a freshly picked Modern Horizon cover already
 /// looks like the reference instead of the amber default.
+#[cfg(test)]
 pub(crate) fn apply_report_palette(st: &mut PubgenState) {
-    st.cover_theme_preset = REPORT_THEME;
-    st.cover_color_primary = "#082641".into();
-    st.cover_color_accent = "#f5871f".into();
-    st.cover_color_dark = "#082641".into();
+    apply_cover_theme_preset(st, THEME_NAVY_ORANGE);
 }
 
 /// The traced design-6 palette: deep petrol navy and warm marigold.
+#[cfg(test)]
+#[allow(dead_code)]
 pub(crate) fn apply_urban_palette(st: &mut PubgenState) {
-    st.cover_theme_preset = REPORT_THEME;
-    st.cover_color_primary = "#034460".into();
-    st.cover_color_accent = "#fcb91e".into();
-    st.cover_color_dark = "#034460".into();
+    apply_cover_theme_preset(st, THEME_URBAN_TEAL_AMBER);
+}
+
+/// Automatically applies the default color theme preset for the current cover style.
+pub(crate) fn apply_cover_style_default_theme(st: &mut PubgenState) {
+    let default_theme = default_theme_for_cover_style(st.cover_style);
+    apply_cover_theme_preset(st, default_theme);
+}
+
+pub(crate) fn blend_hex(hex: &str, target: [f64; 3], t: f64) -> String {
+    let rgb = designcraft_color::Color::from_hex(hex).map(|c| c.to_rgb()).unwrap_or([0.5, 0.5, 0.5]);
+    let r = ((rgb[0] as f64 + (target[0] - rgb[0] as f64) * t).clamp(0.0, 1.0) * 255.0).round() as u8;
+    let g = ((rgb[1] as f64 + (target[1] - rgb[1] as f64) * t).clamp(0.0, 1.0) * 255.0).round() as u8;
+    let b = ((rgb[2] as f64 + (target[2] - rgb[2] as f64) * t).clamp(0.0, 1.0) * 255.0).round() as u8;
+    format!("#{r:02X}{g:02X}{b:02X}")
+}
+
+pub(crate) fn build_template_palette_overrides(style: usize, primary: &str, accent: &str, dark: &str) -> serde_json::Map<String, serde_json::Value> {
+    let mut map = serde_json::Map::new();
+    map.insert("Primary".into(), serde_json::json!(primary));
+    map.insert("Accent".into(), serde_json::json!(accent));
+    map.insert("Dark".into(), serde_json::json!(dark));
+
+    match style {
+        // Templates 000-008: Navy-Orange-White
+        0..=8 => {
+            map.insert("R=8 G=38 B=65".into(), serde_json::json!(primary));
+            map.insert("R=245 G=135 B=31".into(), serde_json::json!(accent));
+            map.insert("R=255 G=155 B=35".into(), serde_json::json!(blend_hex(accent, [1.0, 1.0, 1.0], 0.12)));
+            map.insert("R=208 G=114 B=26".into(), serde_json::json!(blend_hex(accent, [0.0, 0.0, 0.0], 0.15)));
+            // Origami facet gradations (style 2)
+            map.insert("R=255 G=145 B=33".into(), serde_json::json!(blend_hex(accent, [1.0, 1.0, 1.0], 0.08)));
+            map.insert("R=240 G=132 B=30".into(), serde_json::json!(blend_hex(accent, [0.0, 0.0, 0.0], 0.06)));
+            map.insert("R=225 G=124 B=28".into(), serde_json::json!(blend_hex(accent, [0.0, 0.0, 0.0], 0.14)));
+            map.insert("R=220 G=121 B=27".into(), serde_json::json!(blend_hex(accent, [0.0, 0.0, 0.0], 0.20)));
+            // Chevron medallion (style 3)
+            map.insert("C=100 M=100 Y=0 K=0".into(), serde_json::json!(primary));
+            // Honeycomb lines (style 4)
+            map.insert("R=51 G=65 B=85".into(), serde_json::json!(blend_hex(dark, [1.0, 1.0, 1.0], 0.20)));
+        }
+        // Template 009: Urban Angle
+        URBAN_STYLE => {
+            map.insert("R=3 G=68 B=96".into(), serde_json::json!(primary));
+            map.insert("R=252 G=185 B=30".into(), serde_json::json!(accent));
+        }
+        // Template 010: Tri-Color Bands
+        TRICOLOR_STYLE => {
+            map.insert("Cover Blue".into(), serde_json::json!(primary));
+            map.insert("Cover Orange".into(), serde_json::json!(accent));
+            map.insert("Cover Ink".into(), serde_json::json!(dark));
+            let green_val = if accent.eq_ignore_ascii_case("#f38b1e") { "#74bf45".to_string() } else { blend_hex(primary, [0.45, 0.75, 0.27], 0.6) };
+            map.insert("Cover Green".into(), serde_json::json!(green_val));
+        }
+        // Template 011: Prism Diamonds
+        PRISM_STYLE => {
+            map.insert("Prism Blue".into(), serde_json::json!(primary));
+            map.insert("Prism Orange".into(), serde_json::json!(accent));
+            map.insert("Prism Night".into(), serde_json::json!(dark));
+            map.insert("Prism Deep".into(), serde_json::json!(blend_hex(dark, [0.05, 0.23, 0.31], 0.4)));
+            map.insert("Prism Sky".into(), serde_json::json!(blend_hex(primary, [1.0, 1.0, 1.0], 0.45)));
+            map.insert("Prism Mint".into(), serde_json::json!(blend_hex(accent, [0.75, 0.89, 0.80], 0.6)));
+            map.insert("Prism Ice".into(), serde_json::json!(blend_hex(primary, [1.0, 1.0, 1.0], 0.85)));
+            let green_val = if accent.eq_ignore_ascii_case("#f38b1e") { "#74bf45".to_string() } else { blend_hex(primary, [0.45, 0.75, 0.27], 0.5) };
+            map.insert("Prism Green".into(), serde_json::json!(green_val));
+        }
+        // Template 012: Quarter Stack
+        QUARTER_STYLE => {
+            map.insert("Stack Clay".into(), serde_json::json!(primary));
+            map.insert("Stack Marigold".into(), serde_json::json!(accent));
+            map.insert("Stack Ink".into(), serde_json::json!(dark));
+            let teal_val = if primary.eq_ignore_ascii_case("#c75b39") { "#2f6f6b".to_string() } else { blend_hex(primary, [0.18, 0.44, 0.42], 0.5) };
+            map.insert("Stack Teal".into(), serde_json::json!(teal_val));
+            let sage_val = if accent.eq_ignore_ascii_case("#e8a33d") { "#93a98c".to_string() } else { blend_hex(accent, [0.58, 0.66, 0.55], 0.5) };
+            map.insert("Stack Sage".into(), serde_json::json!(sage_val));
+            map.insert("Stack Blush".into(), serde_json::json!(blend_hex(accent, [1.0, 0.9, 0.85], 0.65)));
+        }
+        _ => {}
+    }
+
+    map
 }
 
 /// The world bounds of one item, read back through `document.inspect`.
@@ -1247,11 +1391,7 @@ pub fn execute_generate_front_cover(app: &mut DesignApp, st: &PubgenState) -> Re
                     "logo": logo,
                 }
             },
-            "palette": {
-                "Primary": primary,
-                "Accent": accent,
-                "Dark": dark,
-            }
+            "palette": build_template_palette_overrides(st.cover_style, primary, accent, dark)
         });
         if !st.doc_language.trim().is_empty() {
             apply_params["lang"] = json!(st.doc_language.trim());
@@ -3837,6 +3977,111 @@ pub(crate) mod tests {
         // past the cover's left edge must not be left behind on the page before it.
         for p in 0..count - 1 {
             assert!(!doc.page_has_items(p), "page {} before the back cover must stay empty", p + 1);
+        }
+    }
+
+    #[test]
+    fn test_cover_theme_presets_and_style_defaults() {
+        assert_eq!(COVER_THEMES.len(), 7);
+        for style in 0..=8 {
+            assert_eq!(default_theme_for_cover_style(style), THEME_NAVY_ORANGE);
+        }
+        assert_eq!(default_theme_for_cover_style(URBAN_STYLE), THEME_URBAN_TEAL_AMBER);
+        assert_eq!(default_theme_for_cover_style(TRICOLOR_STYLE), THEME_TRICOLOR_BANDS);
+        assert_eq!(default_theme_for_cover_style(PRISM_STYLE), THEME_PRISM_CRYSTALS);
+        assert_eq!(default_theme_for_cover_style(QUARTER_STYLE), THEME_EARTHY_CRAFT);
+
+        let mut st = PubgenState::default();
+        apply_cover_theme_preset(&mut st, THEME_URBAN_TEAL_AMBER);
+        assert_eq!(st.cover_color_primary, "#034460");
+        assert_eq!(st.cover_color_accent, "#fcb91e");
+
+        apply_cover_theme_preset(&mut st, THEME_TRICOLOR_BANDS);
+        assert_eq!(st.cover_color_primary, "#0088d2");
+        assert_eq!(st.cover_color_accent, "#f38b1e");
+        assert_eq!(st.cover_color_dark, "#102a3c");
+
+        apply_cover_theme_preset(&mut st, THEME_PRISM_CRYSTALS);
+        assert_eq!(st.cover_color_primary, "#0088d2");
+        assert_eq!(st.cover_color_accent, "#f38b1e");
+        assert_eq!(st.cover_color_dark, "#0a2233");
+
+        apply_cover_theme_preset(&mut st, THEME_EARTHY_CRAFT);
+        assert_eq!(st.cover_color_primary, "#c75b39");
+        assert_eq!(st.cover_color_accent, "#e8a33d");
+        assert_eq!(st.cover_color_dark, "#1f2a44");
+    }
+
+    #[test]
+    fn test_build_template_palette_overrides_maps_template_swatches() {
+        // Style 0 (Wave Curves): maps R=8 G=38 B=65 and R=245 G=135 B=31
+        let p0 = build_template_palette_overrides(0, "#112233", "#445566", "#778899");
+        assert_eq!(p0.get("R=8 G=38 B=65").unwrap(), "#112233");
+        assert_eq!(p0.get("R=245 G=135 B=31").unwrap(), "#445566");
+
+        // Style 9 (Urban Angle): maps R=3 G=68 B=96 and R=252 G=185 B=30
+        let p9 = build_template_palette_overrides(URBAN_STYLE, "#112233", "#445566", "#778899");
+        assert_eq!(p9.get("R=3 G=68 B=96").unwrap(), "#112233");
+        assert_eq!(p9.get("R=252 G=185 B=30").unwrap(), "#445566");
+
+        // Style 10 (Tri-Color Bands): maps Cover Blue, Cover Orange, Cover Ink
+        let p10 = build_template_palette_overrides(TRICOLOR_STYLE, "#112233", "#445566", "#778899");
+        assert_eq!(p10.get("Cover Blue").unwrap(), "#112233");
+        assert_eq!(p10.get("Cover Orange").unwrap(), "#445566");
+        assert_eq!(p10.get("Cover Ink").unwrap(), "#778899");
+
+        // Style 11 (Prism Diamonds): maps Prism Blue, Prism Orange, Prism Night
+        let p11 = build_template_palette_overrides(PRISM_STYLE, "#112233", "#445566", "#778899");
+        assert_eq!(p11.get("Prism Blue").unwrap(), "#112233");
+        assert_eq!(p11.get("Prism Orange").unwrap(), "#445566");
+        assert_eq!(p11.get("Prism Night").unwrap(), "#778899");
+
+        // Style 12 (Quarter Stack): maps Stack Clay, Stack Marigold, Stack Ink
+        let p12 = build_template_palette_overrides(QUARTER_STYLE, "#112233", "#445566", "#778899");
+        assert_eq!(p12.get("Stack Clay").unwrap(), "#112233");
+        assert_eq!(p12.get("Stack Marigold").unwrap(), "#445566");
+        assert_eq!(p12.get("Stack Ink").unwrap(), "#778899");
+    }
+
+    #[test]
+    fn test_execute_generate_cover_adjusts_template_colors() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", serde_json::json!({})).unwrap();
+
+        let st = PubgenState {
+            cover_style: 0, // Wave Curves
+            cover_color_primary: "#123456".into(),
+            cover_color_accent: "#654321".into(),
+            cover_color_dark: "#111111".into(),
+            ..PubgenState::default()
+        };
+
+        execute_generate_cover(&mut app, &st).unwrap();
+
+        let active = app.session.active().unwrap();
+        // Check swatches in document were overridden
+        let primary_swatch = active.doc.swatches.iter().find(|s| s.name == "R=8 G=38 B=65");
+        assert!(primary_swatch.is_some(), "Primary swatch R=8 G=38 B=65 must exist in document");
+        if let Some(s) = primary_swatch {
+            if let designcraft_color::SwatchValue::Color { color, .. } = &s.value {
+                let [r, g, b, _] = color.to_rgba8(1.0);
+                let hex = format!("#{:02X}{:02X}{:02X}", r, g, b);
+                assert_eq!(hex, "#123456", "Primary swatch color should adjust to user choice");
+            } else {
+                panic!("Expected SwatchValue::Color for primary swatch");
+            }
+        }
+
+        let accent_swatch = active.doc.swatches.iter().find(|s| s.name == "R=245 G=135 B=31");
+        assert!(accent_swatch.is_some(), "Accent swatch R=245 G=135 B=31 must exist in document");
+        if let Some(s) = accent_swatch {
+            if let designcraft_color::SwatchValue::Color { color, .. } = &s.value {
+                let [r, g, b, _] = color.to_rgba8(1.0);
+                let hex = format!("#{:02X}{:02X}{:02X}", r, g, b);
+                assert_eq!(hex, "#654321", "Accent swatch color should adjust to user choice");
+            } else {
+                panic!("Expected SwatchValue::Color for accent swatch");
+            }
         }
     }
 }

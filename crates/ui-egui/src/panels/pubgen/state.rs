@@ -81,15 +81,15 @@ pub(super) fn default_cover_code_num() -> String {
 }
 
 pub(super) fn default_cover_primary() -> String {
-    "#0072bc".into()
+    "#082641".into()
 }
 
 pub(super) fn default_cover_accent() -> String {
-    "#f5ab19".into()
+    "#f5871f".into()
 }
 
 pub(super) fn default_cover_dark() -> String {
-    "#122647".into()
+    "#082641".into()
 }
 
 pub(super) fn default_cover_skyline() -> String {
@@ -670,7 +670,7 @@ impl Default for PubgenState {
             cover_catalogue: default_cover_catalogue(),
             cover_code_type: 0,
             cover_code_num: default_cover_code_num(),
-            cover_theme_preset: 0,
+            cover_theme_preset: 1,
             cover_color_primary: default_cover_primary(),
             cover_color_accent: default_cover_accent(),
             cover_color_dark: default_cover_dark(),
