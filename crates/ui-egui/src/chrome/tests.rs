@@ -72,6 +72,19 @@ fn rect(h: &egui_kittest::Harness<'static, test_window::Window>, label: &str) ->
     h.query_all_by_label(label).map(|n| n.rect()).find(|r| bar.y_range().contains(r.center().y)).unwrap_or_else(|| h.get_by_label(label).rect())
 }
 
+/// A point in the empty stretch of the title bar between the menus and the right-hand controls
+/// (the app bar stores where each ended up). The Pubgen fork's extra menus reach past the middle
+/// of the bar, so the window's centre is not always empty; falls back to `fallback` when no gap
+/// was recorded.
+fn gap_center(ctx: &egui::Context, fallback: egui::Pos2) -> egui::Pos2 {
+    let (menus_end, tools_start) =
+        ctx.data(|d| (d.get_temp::<f32>(egui::Id::unique("app_bar_menus_end")), d.get_temp::<f32>(egui::Id::unique("app_bar_tools_start"))));
+    match (menus_end, tools_start) {
+        (Some(a), Some(b)) if b - a >= 8.0 => pos2((a + b) / 2.0, fallback.y),
+        _ => fallback,
+    }
+}
+
 /// The application bar's search field (German interface).
 fn search_node<'h>(h: &'h egui_kittest::Harness<'static, test_window::Window>) -> egui_kittest::Node<'h> {
     h.get_by(|n| n.role() == egui::accesskit::Role::TextInput && n.placeholder() == Some(crate::i18n::tr("de", "Search")))
@@ -629,7 +642,7 @@ fn the_empty_mac_title_bar_zooms_and_moves_the_window() {
     let mut h = test_window::open(app, vec2(1400.0, 900.0));
     let bar = test_window::panel_rect(&h, "app_bar");
     // Under the centred title, and between the traffic lights and the Home button.
-    let empty = [pos2(bar.center().x, bar.min.y + MAC_APP_BAR / 2.0), pos2(bar.min.x + MAC_CONTENT_LEFT - 4.0, bar.min.y + 4.0)];
+    let empty = [gap_center(&h.ctx, pos2(bar.center().x, bar.min.y + MAC_APP_BAR / 2.0)), pos2(bar.min.x + MAC_CONTENT_LEFT - 4.0, bar.min.y + 4.0)];
     for at in empty {
         // Tests read the setting as its default, zoom.
         let cmds = double_click(&mut h, at);
@@ -665,12 +678,13 @@ fn the_mac_window_is_not_movable_on_the_title_bar_controls() {
     // The search field is the bar's last control: 125 wide, 4 from the 10-wide right margin.
     let search = pos2(bar.max.x - 10.0 - 4.0 - 60.0, mid);
     let controls = [rect(&h, "Home").center(), rect(&h, "Share").center(), rect(&h, "File").center(), search];
+    let empty_bar = gap_center(&h.ctx, pos2(bar.center().x, mid));
     let mut movable_at = |at: egui::Pos2| {
         h.hover_at(at);
         h.run_steps(2);
         craft_window::title_bar::window_movable(&h.ctx)
     };
-    for at in [pos2(bar.center().x, mid), pos2(bar.min.x + MAC_CONTENT_LEFT - 4.0, bar.min.y + 4.0), pos2(bar.center().x, 500.0)] {
+    for at in [empty_bar, pos2(bar.min.x + MAC_CONTENT_LEFT - 4.0, bar.min.y + 4.0), pos2(bar.center().x, 500.0)] {
         assert!(movable_at(at), "empty title bar or the page at {at:?}");
     }
     for at in controls {
@@ -684,7 +698,10 @@ fn a_narrow_window_scrolls_the_app_bar() {
     let mut h = test_window::open(app(), vec2(w, 600.0));
     let (help, share) = (rect(&h, "Help"), rect(&h, "Share"));
     assert!(help.max.x <= share.min.x, "the menus ({help:?}) and the workspace controls ({share:?}) overlap");
-    wheel(&mut h, help.center(), vec2(0.0, -3000.0));
+    // The extra Pubgen menus push Help off a narrow window, so the wheel goes to a spot that is
+    // always on screen — the Home button, in the same scrolling strip.
+    let home = rect(&h, "Home").center();
+    wheel(&mut h, home, vec2(0.0, -3000.0));
     let share = rect(&h, "Share");
     let window = egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(w, 600.0));
     assert!(window.contains_rect(share), "{share:?} outside the window");
@@ -809,7 +826,7 @@ fn title_area_drags_and_double_clicks_but_menus_do_not_drag() {
     let mut h = WindowHarness::new();
     let title = h.ctx.read_response(egui::Id::unique("window_title_drag")).unwrap().rect;
     assert!(title.width() > 0.0, "there is a drag region between menus and tools");
-    let p = title.center();
+    let p = gap_center(&h.ctx, title.center());
     let mut commands = h.press(p);
     commands.extend(h.frame(vec![egui::Event::PointerMoved(p + vec2(20.0, 0.0))]));
     assert!(commands.contains(&egui::ViewportCommand::StartDrag));
