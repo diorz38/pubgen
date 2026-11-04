@@ -1,0 +1,214 @@
+{
+  "version": 2,
+  "publicationTitle": "ntp202610",
+  "bilingual": false,
+  "profile": "bps_brs",
+  "output": {
+    "document": "",
+    "pdf": ""
+  },
+  "document": {
+    "preset": "A4",
+    "facingPages": true,
+    "bleedMm": 3.0,
+    "marginsMm": {
+      "top": 20.2,
+      "bottom": 20.0,
+      "inside": 19.0,
+      "outside": 15.0
+    }
+  },
+  "cover": {
+    "source": "ntp202610.xlsx",
+    "style": 13,
+    "themePreset": 0,
+    "includeInside": true,
+    "includeBack": true
+  },
+  "frontMatter": {
+    "workbook": "ntp202610.xlsx"
+  },
+  "chapters": [
+    {
+      "chapter": 1,
+      "path": "ntp202610.xlsx",
+      "title": "ntp202610"
+    }
+  ],
+  "pagination": {
+    "frontMatterFormat": "lowerRoman",
+    "bodyFormat": "arabic",
+    "restartAtBody": true
+  },
+  "toc": {
+    "placement": "afterFrontMatter",
+    "lists": [
+      "contents",
+      "tables",
+      "charts"
+    ],
+    "titleBilingual": true,
+    "hangingIndent": true
+  },
+  "headerFooter": {
+    "preset": "book",
+    "scope": "body"
+  },
+  "build": {
+    "keepIntermediate": true,
+    "exportPdf": false
+  },
+  "profileData": {
+    "id": "bps_brs",
+    "name": "BPS Berita Resmi Statistik",
+    "description": "Press release dan rilis statistik berkala BPS, format halaman tunggal modern tanpa nomor kolom tabel.",
+    "sector": "BpsOfficial",
+    "geometry": {
+      "page_size": "A4",
+      "facing_pages": true,
+      "margins_mm": {
+        "top": 18.0,
+        "bottom": 18.0,
+        "inside": 20.0,
+        "outside": 20.0
+      }
+    },
+    "structure": {
+      "has_front_matter": false,
+      "front_matter_numbering": "none",
+      "restart_body_numbering": false,
+      "require_chapter_dividers": false,
+      "include_inside_cover": false,
+      "include_back_cover": true,
+      "bilingual": false,
+      "header_footer_preset": "hf-brs"
+    },
+    "nomenclature": {
+      "chapter_prefix": "",
+      "table_prefix": "Tabel",
+      "chart_prefix": "Grafik",
+      "toc_title": "Daftar Isi",
+      "list_tables_title": "Daftar Tabel",
+      "list_charts_title": "Daftar Grafik",
+      "source_labels": [
+        "Sumber:",
+        "Source:",
+        "Data:"
+      ],
+      "note_labels": [
+        "Catatan:",
+        "Note:",
+        "Notes:"
+      ]
+    },
+    "sheet_routing": {
+      "cover_patterns": [
+        "(?i)^cov$",
+        "(?i)^cover$",
+        "(?i)^sampul$"
+      ],
+      "divider_patterns": [
+        "(?i)^ringkasan.*",
+        "(?i)^section.*"
+      ],
+      "narrative_patterns": [
+        "(?i)^point$",
+        "(?i)^u\\d+.*",
+        "(?i)^brs.*",
+        "(?i)^utama.*",
+        "(?i)^ringkasan.*",
+        "(?i)^ulasan.*",
+        "(?i)^narrative.*"
+      ],
+      "table_patterns": [
+        "(?i)^t\\d+.*",
+        "(?i)^tabel.*",
+        "(?i)^table.*",
+        "(?i)^\\d+[_.]\\d+.*"
+      ],
+      "chart_patterns": [
+        "(?i)^c\\d+.*",
+        "(?i)^grafik.*",
+        "(?i)^chart.*"
+      ],
+      "graphic_patterns": [
+        "(?i)^g\\d+.*",
+        "(?i)^gambar.*",
+        "(?i)^image.*",
+        "(?i)^infografik.*"
+      ]
+    },
+    "table_styling": {
+      "include_column_number_row": true,
+      "include_table_footer": false,
+      "alternating_row_fills": true,
+      "horizontal_rules_only": false,
+      "default_theme_palette": "BRS6"
+    },
+    "typography": {
+      "body_font": "Lato",
+      "heading_font": "Lato",
+      "title_font": "Lato"
+    }
+  },
+  "generateSettings": {
+    "typeCol": 0,
+    "numCol": 1,
+    "titleCol": 2,
+    "fileCol": 3,
+    "templateCol": 4,
+    "titleEnCol": 5,
+    "fileEnCol": 6,
+    "templatePath": "",
+    "preset": 0,
+    "tocPrefix": true,
+    "autoInsertTables": true,
+    "delim": ",",
+    "tableStyle": 4,
+    "colorTheme": 4,
+    "themeOverride": "BRS6",
+    "placement": 2,
+    "firstRowHeader": true,
+    "colNumbers": true,
+    "tableFooter": false,
+    "rowConditions": true,
+    "hfStyle": "hf-brs",
+    "hfSided": 0,
+    "hfHeaderOffset": 24.0,
+    "hfFooterOffset": 24.0,
+    "hfHeaderSingle": "",
+    "hfHeaderLeft": "",
+    "hfHeaderRight": "",
+    "hfFooterSingle": "{title}\n{nopub}",
+    "hfFooterLeft": "{title}\n{nopub}",
+    "hfFooterRight": "{title}\n{nopub}",
+    "hfHeaderRule": false,
+    "hfHeaderRuleWeight": 0.5,
+    "hfFooterRule": false,
+    "hfFooterRuleWeight": 0.5,
+    "hfAccentBar": false,
+    "hfAccentBarHeight": 4.0,
+    "hfAccentBarBleed": true,
+    "hfColorPrimary": "#f68839",
+    "hfColorAccent": "#3b82f6",
+    "hfColorDark": "#1f2937",
+    "hfColorRule": "#e5e7eb",
+    "hfColorText": "#f68839",
+    "coverTitle2": "61/10/32/Th. XXVIII",
+    "coverTitleEn": "61/10/32/Th. XXVIII",
+    "coverYear": "2026",
+    "coverVolume": "Volume 23 2026",
+    "coverCatalogue": "1102001.3215113",
+    "coverCodeType": 0,
+    "coverCodeNum": "2828-7436",
+    "coverColorPrimary": "#082641",
+    "coverColorAccent": "#f5871f",
+    "coverColorDark": "#082641",
+    "coverImageSkyline": "outputs/city_skyline.jpg",
+    "tocStyle": "TOC Entry",
+    "tocLayoutStyle": 0,
+    "locale": "id",
+    "docLanguage": "",
+    "glossaryPath": ""
+  }
+}
