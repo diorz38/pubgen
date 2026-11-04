@@ -122,6 +122,8 @@ fn pipeline(app: &mut DesignApp, ui: &mut egui::Ui) {
     let items: Vec<crate::menus::Item> = [
         "pubgen.generateFromExcel",
         "pubgen.openProject",
+        "pubgen.saveProject",
+        "pubgen.saveProjectAs",
         "pubgen.compileProject",
         "pubgen.profileCustomize",
         "pubgen.vectorChart",
@@ -459,6 +461,20 @@ mod tests {
         assert_eq!(excel, 1, "one Excel route only: {rows:?}");
         assert!(!rows.iter().any(|t| t.contains("Compile Wizard")), "the duplicate route is gone: {rows:?}");
         assert!(!rows.iter().any(|t| t.contains("About")), "About lives in Help: {rows:?}");
+    }
+
+    /// Opening a project without a way to save it back was the gap: both save rows ride the
+    /// pipeline, right after Open.
+    #[test]
+    fn the_publication_menu_can_save_the_project_it_opens() {
+        let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx, "en");
+        let mut app = app();
+        let rows = publication_rows(&mut app, &ctx);
+        let open = rows.iter().position(|t| t.contains("Open Publication Project")).expect("Open row: {rows:?}");
+        let save = rows.iter().position(|t| t.contains("Save Publication Project")).expect("Save row: {rows:?}");
+        let save_as = rows.iter().position(|t| t.contains("Save Publication Project As")).expect("Save As row: {rows:?}");
+        assert!(open < save && save < save_as, "Save follows Open: {rows:?}");
     }
 
     /// Help carries About PubGen… and the menu-bar toggle — the one place both live.

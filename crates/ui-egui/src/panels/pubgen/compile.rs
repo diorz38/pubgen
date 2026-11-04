@@ -30,6 +30,8 @@ use crate::widgets::{FIELD_H, outline_button, section};
 const MAX_CHAPTERS: usize = 64;
 const MAX_TITLE_CHARS: usize = 512;
 const MAX_PATH_CHARS: usize = 4096;
+/// Upper bound on the page plan a compile writes back into the manifest.
+const MAX_PAGE_PLAN: usize = 4096;
 
 const DEFAULT_MARGIN_TOP_MM: f64 = 20.20;
 const DEFAULT_MARGIN_BOTTOM_MM: f64 = 20.0;
@@ -61,6 +63,17 @@ pub(crate) struct ProjectManifest {
     pub toc: TocSpec,
     pub header_footer: HeaderFooterSpec,
     pub build: BuildSpec,
+    /// Version 2: the full profile the publication was built with, including custom profiles
+    /// that are not installed. Absent in version 1 files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_data: Option<super::profiles::PubgenProfile>,
+    /// Version 2: the panel settings the pages were generated with. Absent in version 1 files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generate_settings: Option<GenerateSettings>,
+    /// Version 2: what produced every page of the compiled document, written after a compile.
+    /// Absent until the first compile.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub page_plan: Vec<PagePlanEntry>,
 }
 
 impl Default for ProjectManifest {
@@ -79,6 +92,9 @@ impl Default for ProjectManifest {
             toc: TocSpec::default(),
             header_footer: HeaderFooterSpec::default(),
             build: BuildSpec::default(),
+            profile_data: None,
+            generate_settings: None,
+            page_plan: Vec::new(),
         }
     }
 }
@@ -216,6 +232,274 @@ impl Default for BuildSpec {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
+/// The panel settings that steer page generation, embedded in a version 2 manifest so a compile
+/// reproduces the publication exactly. Save captures the live panel state; when the block is
+/// present it has the final word on these fields (a partial block means the panel defaults for
+/// the rest). `profileData` still supplies geometry, sheet routing and structure.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+pub(crate) struct GenerateSettings {
+    // Card 1: catalog columns and page-preset options.
+    pub type_col: usize,
+    pub num_col: usize,
+    pub title_col: usize,
+    pub file_col: usize,
+    pub template_col: usize,
+    pub title_en_col: usize,
+    pub file_en_col: usize,
+    pub template_path: String,
+    pub preset: usize,
+    pub toc_prefix: bool,
+    #[serde(default = "default_true")]
+    pub auto_insert_tables: bool,
+    pub delim: String,
+    // Card 2: table styling.
+    pub table_style: usize,
+    pub color_theme: usize,
+    pub theme_override: Option<String>,
+    pub placement: usize,
+    #[serde(default = "default_true")]
+    pub first_row_header: bool,
+    #[serde(default = "default_true")]
+    pub col_numbers: bool,
+    #[serde(default = "default_true")]
+    pub table_footer: bool,
+    #[serde(default = "default_true")]
+    pub row_conditions: bool,
+    // Header and footer.
+    pub hf_style: String,
+    pub hf_sided: usize,
+    pub hf_header_offset: f64,
+    pub hf_footer_offset: f64,
+    pub hf_header_single: String,
+    pub hf_header_left: String,
+    pub hf_header_right: String,
+    pub hf_footer_single: String,
+    pub hf_footer_left: String,
+    pub hf_footer_right: String,
+    pub hf_header_rule: bool,
+    pub hf_header_rule_weight: f64,
+    pub hf_footer_rule: bool,
+    pub hf_footer_rule_weight: f64,
+    pub hf_accent_bar: bool,
+    pub hf_accent_bar_height: f64,
+    pub hf_accent_bar_bleed: bool,
+    pub hf_color_primary: String,
+    pub hf_color_accent: String,
+    pub hf_color_dark: String,
+    pub hf_color_rule: String,
+    pub hf_color_text: String,
+    // Cover texts and colors the panel holds beyond the manifest's cover block.
+    pub cover_title2: String,
+    pub cover_title_en: String,
+    pub cover_year: String,
+    pub cover_volume: String,
+    pub cover_catalogue: String,
+    pub cover_code_type: usize,
+    pub cover_code_num: String,
+    pub cover_color_primary: String,
+    pub cover_color_accent: String,
+    pub cover_color_dark: String,
+    pub cover_image_skyline: String,
+    // Contents lists.
+    pub toc_style: String,
+    pub toc_layout_style: usize,
+    // Language and terminology.
+    pub locale: String,
+    pub doc_language: String,
+    pub glossary_path: String,
+}
+
+impl Default for GenerateSettings {
+    fn default() -> Self {
+        let st = PubgenState::default();
+        Self::from_state(&st, "")
+    }
+}
+
+impl GenerateSettings {
+    /// Capture the panel state that a compile would use, with the glossary override from prefs.
+    pub(crate) fn from_state(st: &PubgenState, glossary_path: &str) -> Self {
+        Self {
+            type_col: st.card1_type_col,
+            num_col: st.card1_num_col,
+            title_col: st.card1_title_col,
+            file_col: st.card1_file_col,
+            template_col: st.card1_template_col,
+            title_en_col: st.card1_title_en_col,
+            file_en_col: st.card1_file_en_col,
+            template_path: st.card1_template_path.trim().to_string(),
+            preset: st.card1_preset,
+            toc_prefix: st.card1_toc_prefix,
+            auto_insert_tables: st.card1_auto_insert_tables,
+            delim: st.card1_delim.map(|c| c.to_string()).unwrap_or_default(),
+            table_style: st.card2_style,
+            color_theme: st.card2_color_theme,
+            theme_override: st.card2_theme_override.clone(),
+            placement: st.card2_placement,
+            first_row_header: st.card2_first_row_header,
+            col_numbers: st.card2_col_numbers,
+            table_footer: st.card2_table_footer,
+            row_conditions: st.card2_row_conditions,
+            hf_style: st.hf_style.clone(),
+            hf_sided: st.hf_sided,
+            hf_header_offset: st.hf_header_offset,
+            hf_footer_offset: st.hf_footer_offset,
+            hf_header_single: st.hf_header_single.clone(),
+            hf_header_left: st.hf_header_left.clone(),
+            hf_header_right: st.hf_header_right.clone(),
+            hf_footer_single: st.hf_footer_single.clone(),
+            hf_footer_left: st.hf_footer_left.clone(),
+            hf_footer_right: st.hf_footer_right.clone(),
+            hf_header_rule: st.hf_header_rule,
+            hf_header_rule_weight: st.hf_header_rule_weight,
+            hf_footer_rule: st.hf_footer_rule,
+            hf_footer_rule_weight: st.hf_footer_rule_weight,
+            hf_accent_bar: st.hf_top_accent_bar,
+            hf_accent_bar_height: st.hf_top_accent_bar_height,
+            hf_accent_bar_bleed: st.hf_top_accent_bar_bleed,
+            hf_color_primary: st.hf_color_primary.clone(),
+            hf_color_accent: st.hf_color_accent.clone(),
+            hf_color_dark: st.hf_color_dark.clone(),
+            hf_color_rule: st.hf_color_rule.clone(),
+            hf_color_text: st.hf_color_text.clone(),
+            cover_title2: st.cover_title2.clone(),
+            cover_title_en: st.cover_title_en.clone(),
+            cover_year: st.cover_year.clone(),
+            cover_volume: st.cover_volume.clone(),
+            cover_catalogue: st.cover_catalogue.clone(),
+            cover_code_type: st.cover_code_type,
+            cover_code_num: st.cover_code_num.clone(),
+            cover_color_primary: st.cover_color_primary.clone(),
+            cover_color_accent: st.cover_color_accent.clone(),
+            cover_color_dark: st.cover_color_dark.clone(),
+            cover_image_skyline: st.cover_image_skyline.trim().to_string(),
+            toc_style: st.toc_style.clone(),
+            toc_layout_style: st.toc_layout_style,
+            locale: st.locale.as_str().to_string(),
+            doc_language: st.doc_language.clone(),
+            glossary_path: glossary_path.trim().to_string(),
+        }
+    }
+
+    /// Overlay these settings on the compile's base panel state.
+    pub(crate) fn apply_to(&self, st: &mut PubgenState) {
+        st.card1_type_col = self.type_col;
+        st.card1_num_col = self.num_col;
+        st.card1_title_col = self.title_col;
+        st.card1_file_col = self.file_col;
+        st.card1_template_col = self.template_col;
+        st.card1_title_en_col = self.title_en_col;
+        st.card1_file_en_col = self.file_en_col;
+        st.card1_template_path = self.template_path.clone();
+        st.card1_preset = self.preset;
+        st.card1_toc_prefix = self.toc_prefix;
+        st.card1_auto_insert_tables = self.auto_insert_tables;
+        st.card1_delim = self.delim.trim().chars().next();
+        st.card2_style = self.table_style;
+        st.card2_color_theme = self.color_theme;
+        st.card2_theme_override = self.theme_override.clone();
+        st.card2_placement = self.placement;
+        st.card2_first_row_header = self.first_row_header;
+        st.card2_col_numbers = self.col_numbers;
+        st.card2_table_footer = self.table_footer;
+        st.card2_row_conditions = self.row_conditions;
+        st.hf_style = self.hf_style.clone();
+        st.hf_sided = self.hf_sided;
+        st.hf_header_offset = self.hf_header_offset;
+        st.hf_footer_offset = self.hf_footer_offset;
+        st.hf_header_single = self.hf_header_single.clone();
+        st.hf_header_left = self.hf_header_left.clone();
+        st.hf_header_right = self.hf_header_right.clone();
+        st.hf_footer_single = self.hf_footer_single.clone();
+        st.hf_footer_left = self.hf_footer_left.clone();
+        st.hf_footer_right = self.hf_footer_right.clone();
+        st.hf_header_rule = self.hf_header_rule;
+        st.hf_header_rule_weight = self.hf_header_rule_weight;
+        st.hf_footer_rule = self.hf_footer_rule;
+        st.hf_footer_rule_weight = self.hf_footer_rule_weight;
+        st.hf_top_accent_bar = self.hf_accent_bar;
+        st.hf_top_accent_bar_height = self.hf_accent_bar_height;
+        st.hf_top_accent_bar_bleed = self.hf_accent_bar_bleed;
+        st.hf_color_primary = self.hf_color_primary.clone();
+        st.hf_color_accent = self.hf_color_accent.clone();
+        st.hf_color_dark = self.hf_color_dark.clone();
+        st.hf_color_rule = self.hf_color_rule.clone();
+        st.hf_color_text = self.hf_color_text.clone();
+        st.cover_title2 = self.cover_title2.clone();
+        st.cover_title_en = self.cover_title_en.clone();
+        st.cover_year = self.cover_year.clone();
+        st.cover_volume = self.cover_volume.clone();
+        st.cover_catalogue = self.cover_catalogue.clone();
+        st.cover_code_type = self.cover_code_type;
+        st.cover_code_num = self.cover_code_num.clone();
+        st.cover_color_primary = self.cover_color_primary.clone();
+        st.cover_color_accent = self.cover_color_accent.clone();
+        st.cover_color_dark = self.cover_color_dark.clone();
+        st.cover_image_skyline = self.cover_image_skyline.clone();
+        st.toc_style = self.toc_style.clone();
+        st.toc_layout_style = self.toc_layout_style;
+        st.locale = if self.locale.eq_ignore_ascii_case("en") { super::locale::Locale::En } else { super::locale::Locale::Id };
+        st.doc_language = self.doc_language.clone();
+    }
+}
+
+/// One page of the compiled document: what it is and what produced it. Written by a finished
+/// compile into the manifest, so the file answers "what is on page N and how was it made".
+fn is_zero_u32(val: &u32) -> bool {
+    *val == 0
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+pub(crate) struct PagePlanEntry {
+    /// 1-based page number; 0 = the row produced no page.
+    pub page: usize,
+    /// `frontCover`, `insideCover`, `frontMatter`, `toc`, `divider`, `table`, `chart`,
+    /// `narrative`, `blank`, `backCover` or `content`.
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub chapter: u32,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub number: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
+    /// The contents list a `toc` page belongs to.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub list: String,
+    /// The chapter or front-matter workbook the page comes from, relative to the manifest.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source: String,
+    /// The catalog row's data file (table CSV, image) when it has one.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub file: String,
+}
+
+impl Default for PagePlanEntry {
+    fn default() -> Self {
+        Self {
+            page: 0,
+            kind: String::new(),
+            chapter: 0,
+            number: String::new(),
+            title: String::new(),
+            list: String::new(),
+            source: String::new(),
+            file: String::new(),
+        }
+    }
+}
+
+/// The profile a manifest builds with: the embedded version 2 definition when present, else the
+/// named built-in. Version 1 manifests resolve exactly as before.
+fn effective_profile(manifest: &ProjectManifest) -> Option<super::profiles::PubgenProfile> {
+    manifest.profile_data.clone().or_else(|| manifest.profile.as_deref().map(super::profiles::ProfileManager::get_profile))
+}
+
 /// Where a chapter's pages come from. The manifest accepts workbooks only; catalogs exist so the
 /// pipeline can be tested without binary XLSX fixtures.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -317,8 +601,7 @@ impl CompilePlan {
         let mut warnings = Vec::new();
 
         let mut manifest = manifest;
-        if let Some(ref prof_id) = manifest.profile {
-            let prof = super::profiles::ProfileManager::get_profile(prof_id);
+        if let Some(prof) = effective_profile(&manifest) {
             if (manifest.document.margins_mm.top - DEFAULT_MARGIN_TOP_MM).abs() < 1e-4
                 && (manifest.document.margins_mm.bottom - DEFAULT_MARGIN_BOTTOM_MM).abs() < 1e-4
             {
@@ -352,7 +635,7 @@ impl CompilePlan {
 
     /// The ordered pipeline for this plan.
     pub(crate) fn steps(&self) -> Vec<CompileStep> {
-        let prof = self.manifest.profile.as_deref().map(super::profiles::ProfileManager::get_profile);
+        let prof = effective_profile(&self.manifest);
         let include_inside = prof.as_ref().map(|p| p.structure.include_inside_cover).unwrap_or(true) && self.manifest.cover.include_inside;
         let include_back = prof.as_ref().map(|p| p.structure.include_back_cover).unwrap_or(true) && self.manifest.cover.include_back;
 
@@ -364,7 +647,7 @@ impl CompilePlan {
         // Without a dedicated workbook the first chapter supplies the leading narrative rows; the
         // step is planned anyway and discovers them at compile time.
         steps.push(CompileStep::FrontMatter);
-        let is_brs = self.manifest.profile.as_deref() == Some("bps_brs");
+        let is_brs = prof.as_ref().is_some_and(|p| p.id == "bps_brs");
         let toc_at_end = self.manifest.toc.placement == "end";
         if !is_brs && !toc_at_end && !self.manifest.toc.lists.is_empty() {
             steps.push(CompileStep::TocPlaceholders);
@@ -590,6 +873,27 @@ struct PreparedChapter {
     narrative_prefix: usize,
 }
 
+/// One catalog row, as the page plan records it.
+#[derive(Clone, Debug)]
+struct RowMeta {
+    kind: String,
+    number: String,
+    title: String,
+    file: String,
+}
+
+/// One page-generating emit: where it started in the document and which rows it consumed. The
+/// finished compile turns these into the manifest's page plan.
+#[derive(Clone, Debug)]
+struct EmitRecord {
+    chapter: u32,
+    front_matter: bool,
+    source: String,
+    start_page: usize,
+    pages: usize,
+    rows: Vec<RowMeta>,
+}
+
 /// The compiler's step machine. A panel advances it one step per frame; `run_all` runs it in one
 /// call for the command palette, the control channel and tests.
 #[derive(Clone, Debug)]
@@ -613,6 +917,9 @@ pub(crate) struct CompileJob {
     started: Instant,
     cancelled: Arc<AtomicBool>,
     report: CompileReport,
+    inside_cover_page: Option<usize>,
+    emit_log: Vec<EmitRecord>,
+    page_plan: Vec<PagePlanEntry>,
 }
 
 impl CompileJob {
@@ -629,6 +936,25 @@ impl CompileJob {
         };
         if !plan.manifest.publication_title.trim().is_empty() {
             base.cover_title = plan.manifest.publication_title.trim().to_string();
+        }
+        // A version 2 manifest that carries the recipe — the profile's styling flags and the panel
+        // settings saved with the project — compiles from it. Version 1 files, and v2 files that
+        // only hold a page plan, compile exactly as they always did.
+        if plan.manifest.version >= 2 && (plan.manifest.profile_data.is_some() || plan.manifest.generate_settings.is_some()) {
+            if let Some(prof) = effective_profile(&plan.manifest) {
+                base.apply_profile(prof, false);
+                base.cover_include_inside_back = false;
+                base.translate_with_ai = false;
+                base.bilingual_output = plan.manifest.bilingual;
+                base.toc_pair_bilingual = plan.manifest.bilingual;
+                base.cover_style = plan.manifest.cover.style;
+                base.cover_theme_preset = plan.manifest.cover.theme_preset;
+                base.toc_hanging_indent = plan.manifest.toc.hanging_indent;
+            }
+            if let Some(settings) = &plan.manifest.generate_settings {
+                settings.apply_to(&mut base);
+                base.translate_with_ai = false;
+            }
         }
         let steps = plan.steps();
         let warnings = plan.warnings.clone();
@@ -651,6 +977,9 @@ impl CompileJob {
             started: Instant::now(),
             cancelled: Arc::new(AtomicBool::new(false)),
             report: CompileReport::default(),
+            inside_cover_page: None,
+            emit_log: Vec::new(),
+            page_plan: Vec::new(),
         }
     }
 
@@ -749,6 +1078,128 @@ impl CompileJob {
         self.report.chapters = std::mem::take(&mut self.chapter_stats);
         self.report.warnings = std::mem::take(&mut self.warnings);
         self.report.elapsed_ms = self.started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+        self.build_page_plan(app);
+        self.update_manifest_recipe();
+        if !self.warnings.is_empty() {
+            self.report.warnings.append(&mut self.warnings);
+        }
+    }
+
+    /// Name every page of the finished document: the covers and lists we placed, and each catalog
+    /// row in order — blank pages included, because even-start padding shifts rows off their index.
+    fn build_page_plan(&mut self, app: &mut DesignApp) {
+        let total = match page_count(app) {
+            Ok(total) if total > 0 => total,
+            _ => return,
+        };
+        let cover_source = relative_to_proj(self.plan.dir(), self.plan.manifest.cover.source.trim());
+        let mut slots: Vec<Option<PagePlanEntry>> = (0..total).map(|_| None).collect();
+        slots[0] = Some(PagePlanEntry { page: 1, kind: "frontCover".into(), source: cover_source, ..Default::default() });
+        if let Some(idx) = self.inside_cover_page.filter(|i| *i < total) {
+            let slot = &mut slots[idx];
+            if slot.is_none() {
+                *slot = Some(PagePlanEntry { page: idx + 1, kind: "insideCover".into(), ..Default::default() });
+            }
+        }
+        let toc_pages = self.toc_pages.clone();
+        for (list, page) in &toc_pages {
+            let pages = self.toc_story_pages(app, list);
+            let pages = if pages.is_empty() { vec![*page] } else { pages };
+            for idx in pages {
+                if idx < total && slots[idx].is_none() {
+                    slots[idx] = Some(PagePlanEntry { page: idx + 1, kind: "toc".into(), list: list.clone(), ..Default::default() });
+                }
+            }
+        }
+        let mut unplaced = 0usize;
+        for record in &self.emit_log {
+            let end = record.start_page.saturating_add(record.pages).min(total);
+            let mut cursor = record.start_page;
+            let mut rows = record.rows.iter().peekable();
+            while cursor < end {
+                let empty = app.session.active().is_some_and(|a| page_is_empty(&a.doc, cursor));
+                let entry = if rows.peek().is_some() && !empty {
+                    if let Some(row) = rows.next() {
+                        PagePlanEntry {
+                            page: cursor + 1,
+                            kind: if record.front_matter { "frontMatter".to_string() } else { row.kind.clone() },
+                            chapter: record.chapter,
+                            number: row.number.clone(),
+                            title: row.title.clone(),
+                            source: record.source.clone(),
+                            file: row.file.clone(),
+                            list: String::new(),
+                        }
+                    } else {
+                        PagePlanEntry { page: cursor + 1, kind: "blank".into(), ..Default::default() }
+                    }
+                } else {
+                    PagePlanEntry { page: cursor + 1, kind: "blank".into(), ..Default::default() }
+                };
+                if slots[cursor].is_none() {
+                    slots[cursor] = Some(entry);
+                }
+                cursor = cursor.saturating_add(1);
+            }
+            unplaced = unplaced.saturating_add(rows.count());
+        }
+        if unplaced > 0 {
+            self.warnings.push(format!("the page plan could not place {unplaced} catalog row(s) on a page"));
+        }
+        if let Some(idx) = self.back_cover.filter(|i| *i < total) {
+            let slot = &mut slots[idx];
+            if slot.is_none() {
+                *slot = Some(PagePlanEntry { page: idx + 1, kind: "backCover".into(), ..Default::default() });
+            }
+        }
+        let mut plan = Vec::with_capacity(total);
+        for (idx, slot) in slots.iter_mut().enumerate() {
+            let entry = slot.take().unwrap_or_else(|| PagePlanEntry {
+                page: idx + 1,
+                kind: if app.session.active().is_some_and(|a| page_is_empty(&a.doc, idx)) { "blank" } else { "content" }.into(),
+                ..Default::default()
+            });
+            plan.push(entry);
+        }
+        if plan.len() > MAX_PAGE_PLAN {
+            plan.truncate(MAX_PAGE_PLAN);
+            self.warnings.push(format!("the page plan was capped at {MAX_PAGE_PLAN} pages"));
+        }
+        self.page_plan = plan;
+    }
+
+    /// Every page the list's story occupies, so a spilling contents list names its whole run;
+    /// empty when the story's pages can't be located (the recorded placeholder page is used then).
+    fn toc_story_pages(&self, app: &mut DesignApp, list: &str) -> Vec<usize> {
+        let Some(active) = app.session.active() else { return Vec::new() };
+        let doc = &active.doc;
+        let title = list_title(list, self.toc_title_bilingual());
+        let Some(story) = doc.tocs.iter().find(|t| t.title.trim() == title.trim()).and_then(|t| doc.story(t.story)) else { return Vec::new() };
+        let mut pages: Vec<usize> = story.frames.iter().filter_map(|f| doc.page_of_item(*f)).collect();
+        pages.sort_unstable();
+        pages.dedup();
+        let (Some(first), Some(last)) = (pages.first().copied(), pages.last().copied()) else { return Vec::new() };
+        if last.saturating_sub(first).saturating_add(1) > pages.len().saturating_mul(4).saturating_add(8) {
+            return Vec::new();
+        }
+        (first..=last).collect()
+    }
+
+    /// Write the page plan back beside the document, so the manifest answers "what is on page N"
+    /// with real page numbers. The profile and settings recipe is written by Save, which knows the
+    /// panel; an auto-update of an older file adds only the plan, so recompiling it behaves as
+    /// before.
+    fn update_manifest_recipe(&mut self) {
+        if self.plan.manifest_path.as_os_str().is_empty() || !self.plan.manifest_path.is_file() {
+            return;
+        }
+        let mut manifest = self.plan.manifest.clone();
+        manifest.version = manifest.version.max(2);
+        manifest.page_plan = std::mem::take(&mut self.page_plan);
+        match write_manifest(&self.plan.manifest_path, &manifest) {
+            Ok(()) => self.plan.manifest = manifest,
+            Err(e) => self.warnings.push(format!("the manifest's page plan was not updated: {e}")),
+        }
     }
 
     fn run_step(&mut self, app: &mut DesignApp, step: &CompileStep) -> Result<(), String> {
@@ -756,7 +1207,7 @@ impl CompileJob {
             CompileStep::NewDocument => self.new_document(app),
             CompileStep::MasterSetup => self.master_setup(app),
             CompileStep::FrontCover => self.front_cover(app),
-            CompileStep::InsideCover => execute_generate_inside_cover(app),
+            CompileStep::InsideCover => self.inside_cover(app),
             CompileStep::NormalizeSeedPage => self.normalize_seed_page(app),
             CompileStep::FrontMatter => self.front_matter(app),
             CompileStep::TocPlaceholders => self.toc_placeholders(app),
@@ -827,6 +1278,17 @@ impl CompileJob {
         Ok(())
     }
 
+    fn inside_cover(&mut self, app: &mut DesignApp) -> Result<(), String> {
+        let before = page_count(app)?;
+        execute_generate_inside_cover(app)?;
+        // The page goes between the cover and the seeded page (normalize_seed_page expects the
+        // seed where it was); the document is cover, inside cover, seed.
+        if page_count(app)? > before {
+            self.inside_cover_page = Some(before.saturating_sub(1));
+        }
+        Ok(())
+    }
+
     /// The manifest's cover workbook, else the first chapter workbook carrying a COVER sheet.
     fn cover_workbook(&self) -> Result<Option<PathBuf>, String> {
         if !self.plan.manifest.cover.source.trim().is_empty() {
@@ -875,7 +1337,8 @@ impl CompileJob {
                 self.warnings.push("front_matter.workbook: the catalog has no rows".into());
                 return Ok(());
             }
-            let pages = self.emit(app, &prepared.state, 1, len)?;
+            let pages =
+                self.emit(app, &prepared.state, 1, len, 0, true, &relative_to_proj(self.plan.dir(), &plan.source.workbook().to_string_lossy()))?;
             if pages == 0 {
                 self.warnings.push("front_matter.workbook: no pages were generated".into());
             }
@@ -888,7 +1351,15 @@ impl CompileJob {
         if rows == 0 {
             self.warnings.push(format!("{}: no leading narrative rows, so the lists follow the inside cover", first.label()));
         } else {
-            self.emit(app, &prepared.state, 1, rows)?;
+            self.emit(
+                app,
+                &prepared.state,
+                1,
+                rows,
+                first.chapter,
+                true,
+                &relative_to_proj(self.plan.dir(), &first.source.workbook().to_string_lossy()),
+            )?;
         }
         if let Some(slot) = self.prepared.first_mut() {
             *slot = Some(prepared);
@@ -923,7 +1394,16 @@ impl CompileJob {
             (0, 0, 0)
         } else {
             let (tables, charts) = count_kinds(&prepared.state, from, len);
-            (self.emit(app, &prepared.state, from, len)?, tables, charts)
+            let pages = self.emit(
+                app,
+                &prepared.state,
+                from,
+                len,
+                plan.chapter,
+                false,
+                &relative_to_proj(self.plan.dir(), &plan.source.workbook().to_string_lossy()),
+            )?;
+            (pages, tables, charts)
         };
         if pages > 0 {
             self.chapter_ranges.push(start);
@@ -979,6 +1459,18 @@ impl CompileJob {
         let before_body = self.body_start.is_some_and(|b| self.toc_pages.first().is_some_and(|(_, p)| *p < b));
         if before_body && let Some(start) = self.body_start {
             self.body_start = Some(start.saturating_add(added));
+            // Pages at or after the body's first page move with it; the emit log and the chapter
+            // ranges keep pointing at the right pages.
+            for range in &mut self.chapter_ranges {
+                if *range >= start {
+                    *range = range.saturating_add(added);
+                }
+            }
+            for record in &mut self.emit_log {
+                if record.start_page >= start {
+                    record.start_page = record.start_page.saturating_add(added);
+                }
+            }
         }
         if let Some(back) = self.back_cover {
             self.back_cover = Some(back.saturating_add(added));
@@ -1128,14 +1620,38 @@ impl CompileJob {
         st
     }
 
-    fn emit(&mut self, app: &mut DesignApp, st: &PubgenState, from: usize, to: usize) -> Result<usize, String> {
+    fn emit(
+        &mut self,
+        app: &mut DesignApp,
+        st: &PubgenState,
+        from: usize,
+        to: usize,
+        chapter: u32,
+        front_matter: bool,
+        source: &str,
+    ) -> Result<usize, String> {
         let mut st = st.clone();
         st.card1_range_all = from == 1 && to == st.card1_records.len();
         st.card1_range_from = from;
         st.card1_range_to = to;
         let before = page_count(app)?;
         execute_generate_pages(app, &st)?;
-        Ok(page_count(app)?.saturating_sub(before))
+        let pages = page_count(app)?.saturating_sub(before);
+        let file_col = super::csv::effective_col(st.card1_file_col, &st.card1_headers, &["file", "filename"], 3);
+        let rows = st
+            .card1_records
+            .get(from.saturating_sub(1)..to)
+            .unwrap_or_default()
+            .iter()
+            .map(|r| RowMeta {
+                kind: row_page_kind(r.get(st.card1_type_col.min(2)).map(String::as_str).unwrap_or("").trim()).to_string(),
+                number: r.get(st.card1_num_col.min(2)).map(|s| s.trim().to_string()).unwrap_or_default(),
+                title: r.get(st.card1_title_col.min(2)).map(|s| s.trim().to_string()).unwrap_or_default(),
+                file: r.get(file_col).map(|s| s.trim().to_string()).unwrap_or_default(),
+            })
+            .collect();
+        self.emit_log.push(EmitRecord { chapter, front_matter, source: source.to_string(), start_page: before, pages, rows });
+        Ok(pages)
     }
 }
 
@@ -1185,6 +1701,19 @@ fn count_kinds(st: &PubgenState, from: usize, to: usize) -> (usize, usize) {
         }
     }
     (tables, charts)
+}
+
+/// The page plan's kind for a catalog row's type value.
+fn row_page_kind(kind: &str) -> &'static str {
+    if is_divider_type(kind) {
+        "divider"
+    } else if is_chart_type(kind) {
+        "chart"
+    } else if is_ulasan_type(kind) || kind.eq_ignore_ascii_case("G") || kind.eq_ignore_ascii_case("Note") {
+        "narrative"
+    } else {
+        "table"
+    }
 }
 
 fn page_is_empty(doc: &designcraft_doc::Document, page: usize) -> bool {
@@ -1327,7 +1856,18 @@ pub(crate) fn open_project(app: &mut DesignApp, p: &Value) -> Result<Value, Stri
             st.compile_manifest_path = path.clone();
             st.compile_checked = path.clone();
             st.compile_summary = summary.clone();
+            // A version 2 manifest restores the recipe it was compiled with: the embedded profile,
+            // the panel generation settings, and the manifest-owned switches on top.
+            if let Some(prof) = plan.manifest.profile_data.clone() {
+                st.apply_profile(prof, false);
+            }
+            if let Some(settings) = plan.manifest.generate_settings.as_ref() {
+                settings.apply_to(st);
+            }
             st.bilingual_output = plan.manifest.bilingual;
+            st.cover_style = plan.manifest.cover.style;
+            st.cover_theme_preset = plan.manifest.cover.theme_preset;
+            st.toc_hanging_indent = plan.manifest.toc.hanging_indent;
         });
         ctx.request_repaint();
     }
@@ -1348,6 +1888,201 @@ fn ask_for_manifest(app: &mut DesignApp) {
         }
         Ok(Value::Null)
     });
+}
+
+/// The `pubgen.saveProject` UI command: write the current publication project to its
+/// `pubgen_project.json`. `path` overrides the save target; without one it goes to the manifest
+/// last opened (or the New Project dialog's target), and with none known the app asks where.
+pub(crate) fn save_project(app: &mut DesignApp, p: &Value) -> Result<Value, String> {
+    save_project_with(app, p, false)
+}
+
+/// The `pubgen.saveProjectAs` UI command: the same save, always naming the target file.
+pub(crate) fn save_project_as(app: &mut DesignApp, p: &Value) -> Result<Value, String> {
+    save_project_with(app, p, true)
+}
+
+fn save_project_with(app: &mut DesignApp, p: &Value, force_ask: bool) -> Result<Value, String> {
+    if let Some(path) = p.get("path").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) {
+        if path.chars().count() > MAX_PATH_CHARS {
+            return Err("path: too long".into());
+        }
+        return save_project_to(app, path);
+    }
+    // Without a path: the manifest the panel holds, else the one last opened. A headless caller
+    // (no egui context, e.g. the command smoke test) has nothing to ask, and saves nothing.
+    let known = app.egui_ctx.as_ref().map(|ctx| {
+        super::with_state(ctx, |st| {
+            let from_dialog = st.compile_new_dialog.as_ref().map(|d| d.manifest_save_path.trim().to_string()).unwrap_or_default();
+            if !from_dialog.is_empty() { from_dialog } else { st.compile_manifest_path.trim().to_string() }
+        })
+    });
+    let remembered = app.session.prefs.pubgen_project_path.trim().to_string();
+    let known = known.as_deref().unwrap_or("");
+    let target = if force_ask {
+        String::new()
+    } else if !known.is_empty() {
+        known.to_string()
+    } else {
+        remembered
+    };
+    if !target.is_empty() {
+        if target.chars().count() > MAX_PATH_CHARS {
+            return Err("path: too long".into());
+        }
+        return save_project_to(app, &target);
+    }
+    if app.egui_ctx.is_none() {
+        return Ok(Value::Null);
+    }
+    let _ =
+        app.ask_save("pubgen_project.json", crate::app::file_dialogs::Bound::App, move |app, path| save_project_to(app, &path).map(|_| Value::Null));
+    Ok(serde_json::json!({"dialog": "pubgenProject", "open": true}))
+}
+
+/// Assemble the project from what the panel holds and write it: the manifest on disk (or the
+/// open New Project dialog, or the last Master Excel workbook) as the base, with the panel's
+/// current language mode, cover style and profile overlaid.
+fn save_project_to(app: &mut DesignApp, path: &str) -> Result<Value, String> {
+    let ctx = app.egui_ctx.clone();
+    let save_path = PathBuf::from(path.trim());
+    if save_path.extension().and_then(std::ffi::OsStr::to_str).map(|e| e.to_ascii_lowercase()) != Some("json".into()) {
+        return Err(format!("{}: manifest file must have a .json extension", save_path.display()));
+    }
+    let dir = save_path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new(".")).to_path_buf();
+
+    let glossary = app.session.prefs.pubgen_glossary_path.clone();
+    let (base, dialog, excel, bilingual, cover_style, profile_id, recipe) = ctx
+        .as_ref()
+        .map(|ctx| {
+            super::with_state(ctx, |st| {
+                (
+                    std::fs::read_to_string(&save_path).ok().and_then(|text| serde_json::from_str::<ProjectManifest>(&text).ok()),
+                    st.compile_new_dialog.clone(),
+                    st.excel_source_path.trim().to_string(),
+                    st.bilingual_output,
+                    st.cover_style,
+                    st.active_profile_id.clone(),
+                    Some((st.active_profile(), GenerateSettings::from_state(st, &glossary))),
+                )
+            })
+        })
+        .unwrap_or_else(|| (None, None, String::new(), false, 0, String::new(), None));
+
+    let mut manifest = match base {
+        Some(manifest) => manifest,
+        None => {
+            let mut m = ProjectManifest::default();
+            if !excel.is_empty() {
+                let source = PathBuf::from(&excel);
+                if source.extension().and_then(std::ffi::OsStr::to_str).map(|e| e.to_ascii_lowercase()).unwrap_or_default() != "xlsx" {
+                    return Err(format!("{excel}: the Master Excel source for a new project must be a .xlsx workbook"));
+                }
+                let num = (1..=MAX_CHAPTERS as u32)
+                    .find(|n| {
+                        source
+                            .file_stem()
+                            .and_then(std::ffi::OsStr::to_str)
+                            .is_some_and(|stem| deduce_chapter_title(stem, *n) != stem.replace(['_', '-'], " ").trim())
+                    })
+                    .unwrap_or(1);
+                let title = source.file_stem().and_then(std::ffi::OsStr::to_str).map(|stem| deduce_chapter_title(stem, num)).unwrap_or_default();
+                m.publication_title = title.clone();
+                m.front_matter.workbook = relative_to_proj(&dir, &excel);
+                m.cover.source = m.front_matter.workbook.clone();
+                m.chapters = vec![ChapterSpec { chapter: num, path: m.front_matter.workbook.clone(), title }];
+            }
+            m
+        }
+    };
+    if ctx.is_some() {
+        apply_project_state(&mut manifest, &profile_id, bilingual, cover_style);
+    }
+    if let Some(dialog) = dialog.as_ref() {
+        merge_project_dialog(&mut manifest, dialog, &dir);
+    }
+    // The saved file is a version 2 recipe: the profile and panel settings that generated the
+    // pages ride along, so reopening or recompiling reproduces the publication exactly.
+    if let Some((profile, settings)) = recipe {
+        manifest.version = manifest.version.max(2);
+        manifest.profile_data = Some(profile);
+        manifest.generate_settings = Some(settings);
+    }
+    if manifest.chapters.is_empty() {
+        return Err("nothing to save: open a publication project, generate from Excel or fill the New Publication Project dialog first".into());
+    }
+    write_manifest(&save_path, &manifest)?;
+    let path_str = save_path.to_string_lossy().to_string();
+    remember_manifest(app, &path_str)?;
+    if let Some(ctx) = &ctx {
+        let summary = CompilePlan::load(&save_path).map(|plan| plan.summary_line()).unwrap_or_else(|_| path_str.clone());
+        let status = format!("Saved publication project to {path_str}");
+        super::with_state(ctx, |st| {
+            st.compile_manifest_path = path_str.clone();
+            st.compile_checked = path_str.clone();
+            st.compile_summary = summary.clone();
+            st.compile_status = Some((status, true));
+            if let Some(d) = st.compile_new_dialog.as_mut() {
+                d.manifest_save_path = path_str.clone();
+                d.error_message = None;
+            }
+        });
+        ctx.request_repaint();
+        return Ok(serde_json::json!({"manifest": path_str, "chapters": manifest.chapters.len(), "summary": summary}));
+    }
+    Ok(serde_json::json!({"manifest": path_str, "chapters": manifest.chapters.len()}))
+}
+
+/// Overlay the panel's live settings onto a manifest: the language mode and cover style the
+/// user just switched, and the active publication profile.
+fn apply_project_state(manifest: &mut ProjectManifest, profile_id: &str, bilingual: bool, cover_style: usize) {
+    manifest.bilingual = bilingual;
+    manifest.cover.style = cover_style;
+    manifest.profile = if profile_id == "custom" { None } else { Some(profile_id.to_string()) };
+}
+
+/// Take the fields the open New Publication Project dialog holds over the manifest being saved.
+fn merge_project_dialog(manifest: &mut ProjectManifest, dialog: &NewProjectDialog, dir: &Path) {
+    let rel = |raw: &str| relative_to_proj(dir, raw);
+    if !dialog.publication_title.trim().is_empty() {
+        manifest.publication_title = dialog.publication_title.trim().to_string();
+    }
+    manifest.bilingual = dialog.bilingual;
+    manifest.output.document = rel(&dialog.output_document);
+    manifest.output.pdf = if dialog.export_pdf { rel(&dialog.output_pdf) } else { String::new() };
+    if !dialog.chapters.is_empty() {
+        manifest.chapters =
+            dialog.chapters.iter().map(|c| ChapterSpec { chapter: c.chapter, path: rel(&c.path), title: c.title.trim().to_string() }).collect();
+    }
+    manifest.cover.source = rel(&dialog.cover_source);
+    manifest.cover.style = dialog.cover_style;
+    manifest.cover.theme_preset = dialog.cover_theme_preset;
+    manifest.cover.include_inside = dialog.cover_include_inside;
+    manifest.cover.include_back = dialog.cover_include_back;
+    manifest.front_matter.workbook = rel(&dialog.front_matter_workbook);
+    manifest.pagination = PaginationSpec {
+        front_matter_format: dialog.pagination_front_format.clone(),
+        body_format: dialog.pagination_body_format.clone(),
+        restart_at_body: dialog.pagination_restart_body,
+    };
+    let mut lists = Vec::new();
+    if dialog.toc_contents {
+        lists.push("contents".into());
+    }
+    if dialog.toc_tables {
+        lists.push("tables".into());
+    }
+    if dialog.toc_charts {
+        lists.push("charts".into());
+    }
+    manifest.toc = TocSpec {
+        placement: dialog.toc_placement.clone(),
+        lists,
+        title_bilingual: dialog.toc_title_bilingual,
+        hanging_indent: dialog.toc_hanging_indent,
+    };
+    manifest.header_footer.preset = dialog.header_footer_preset.clone();
+    manifest.build.export_pdf = dialog.export_pdf;
 }
 
 /// Advance a frame-stepped compile by one step. The panel calls this once per frame.
@@ -1390,15 +2125,7 @@ pub(crate) const COVER_STYLES: &[&str] = &[
     "BPS Berita Resmi Statistik (BRS)",
 ];
 
-pub(crate) const COVER_THEMES: &[&str] = &[
-    "Classic BPS (Blue/Gold)",
-    "Emerald Growth (Green)",
-    "Sunset Crimson (Red)",
-    "Corporate Navy (Deep Blue)",
-    "Modern Slate (Gray)",
-    "Business Report (Report Blue)",
-    "Urban Dark (Charcoal/Gold)",
-];
+pub(crate) use super::covers::COVER_THEMES;
 
 fn cover_style_label(style: usize) -> String {
     if let Some(name) = super::ai_cover::style_name(style) {
@@ -1491,7 +2218,7 @@ impl Default for NewProjectDialog {
             front_matter_workbook: String::new(),
             cover_source: String::new(),
             cover_style: 11,       // Prism Diamonds
-            cover_theme_preset: 0, // Classic BPS
+            cover_theme_preset: 4, // Prism Crystals
             cover_include_inside: true,
             cover_include_back: true,
             toc_placement: "afterFrontMatter".into(),
@@ -1530,14 +2257,7 @@ impl NewProjectDialog {
 
         let manifest_dir = save_path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
 
-        let rel = |raw: &str| -> String {
-            let s = raw.trim();
-            if s.is_empty() {
-                return String::new();
-            }
-            let target = Path::new(s);
-            if let Ok(r) = target.strip_prefix(manifest_dir) { r.to_string_lossy().replace('\\', "/") } else { s.replace('\\', "/") }
-        };
+        let rel = |raw: &str| relative_to_proj(&manifest_dir, raw);
 
         let title = self.publication_title.trim().to_string();
 
@@ -1588,40 +2308,54 @@ impl NewProjectDialog {
             },
             header_footer: HeaderFooterSpec { preset: self.header_footer_preset.clone(), scope: "body".into() },
             build: BuildSpec { keep_intermediate: true, export_pdf: self.export_pdf },
+            profile_data: None,
+            generate_settings: None,
+            page_plan: Vec::new(),
         };
 
         Ok((save_path, manifest))
     }
 
+    /// The dialog's own save, used by tests; the UI path writes the version 2 recipe instead.
+    #[cfg(test)]
     pub(crate) fn save_manifest(&self) -> Result<PathBuf, String> {
         let (save_path, manifest) = self.build_manifest()?;
-        if let Some(parent) = save_path.parent() {
-            if !parent.as_os_str().is_empty() && !parent.exists() {
-                std::fs::create_dir_all(parent).map_err(|e| format!("create folder {}: {e}", parent.display()))?;
-            }
-            if !manifest.output.document.is_empty() {
-                let doc_path = resolve_against(parent, &manifest.output.document);
-                if let Some(doc_parent) = doc_path.parent()
-                    && !doc_parent.as_os_str().is_empty()
-                    && !doc_parent.exists()
-                {
-                    let _ = std::fs::create_dir_all(doc_parent);
-                }
-            }
-            if !manifest.output.pdf.is_empty() {
-                let pdf_path = resolve_against(parent, &manifest.output.pdf);
-                if let Some(pdf_parent) = pdf_path.parent()
-                    && !pdf_parent.as_os_str().is_empty()
-                    && !pdf_parent.exists()
-                {
-                    let _ = std::fs::create_dir_all(pdf_parent);
-                }
-            }
-        }
-        let json_str = serde_json::to_string_pretty(&manifest).map_err(|e| format!("serialize manifest: {e}"))?;
-        std::fs::write(&save_path, json_str).map_err(|e| format!("write {}: {e}", save_path.display()))?;
+        write_manifest(&save_path, &manifest)?;
         Ok(save_path)
     }
+}
+
+/// The manifest file, optionally creating its folder and the output folders it names.
+fn write_manifest(save_path: &Path, manifest: &ProjectManifest) -> Result<(), String> {
+    if let Some(parent) = save_path.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("create folder {}: {e}", parent.display()))?;
+        }
+        for out in [&manifest.output.document, &manifest.output.pdf] {
+            if out.trim().is_empty() {
+                continue;
+            }
+            let doc_path = resolve_against(parent, out);
+            if let Some(doc_parent) = doc_path.parent()
+                && !doc_parent.as_os_str().is_empty()
+                && !doc_parent.exists()
+            {
+                let _ = std::fs::create_dir_all(doc_parent);
+            }
+        }
+    }
+    let json_str = serde_json::to_string_pretty(manifest).map_err(|e| format!("serialize manifest: {e}"))?;
+    std::fs::write(save_path, json_str).map_err(|e| format!("write {}: {e}", save_path.display()))
+}
+
+/// A path as the manifest stores it: relative to the manifest's folder, forward slashes.
+fn relative_to_proj(dir: &Path, raw: &str) -> String {
+    let s = raw.trim();
+    if s.is_empty() {
+        return String::new();
+    }
+    let target = Path::new(s);
+    if let Ok(r) = target.strip_prefix(dir) { r.to_string_lossy().replace('\\', "/") } else { s.replace('\\', "/") }
 }
 
 /// A new-project dialog that inherits the active profile's language mode: a BPS BRS panel is
@@ -1665,6 +2399,15 @@ pub(crate) fn compile_card_ui(app: &mut DesignApp, ui: &mut Ui, st: &mut PubgenS
         }
         if outline_button(ui, crate::i18n::tr(&lang, "New…"), 46.0).clicked() {
             st.compile_new_dialog = Some(Box::new(new_project_dialog_for(st)));
+        }
+        if outline_button(ui, crate::i18n::tr(&lang, "Save"), 44.0)
+            .on_hover_text(crate::i18n::tr(
+                &lang,
+                "Write this publication project to its pubgen_project.json (the panel's language mode, cover style and profile included)",
+            ))
+            .clicked()
+        {
+            let _ = save_project(app, &Value::Null);
         }
     });
 
@@ -1911,6 +2654,7 @@ fn render_new_project_cover_tab(app: &mut DesignApp, ui: &mut Ui, dialog: &mut N
         ui.label(RichText::new("Cover style:").size(11.0).color(t.text));
         let cur_name = cover_style_label(dialog.cover_style);
         let combo_w = (ui.available_width() - 10.0).clamp(120.0, 240.0);
+        let prev_style = dialog.cover_style;
         craft_ui::ComboBox::from_id_salt("new_proj_cover_style").selected_text(cur_name).width(combo_w).show_ui(ui, |ui| {
             for (idx, name) in COVER_STYLES.iter().enumerate() {
                 ui.selectable_value(&mut dialog.cover_style, idx, *name);
@@ -1921,6 +2665,9 @@ fn render_new_project_cover_tab(app: &mut DesignApp, ui: &mut Ui, dialog: &mut N
                 ui.selectable_value(&mut dialog.cover_style, sid, format!("AI {} (online)", p.name));
             }
         });
+        if dialog.cover_style != prev_style {
+            dialog.cover_theme_preset = super::covers::default_theme_for_cover_style(dialog.cover_style);
+        }
     });
 
     // Cover Theme
@@ -2087,7 +2834,14 @@ pub(crate) fn compile_new_project_dialog_ui(app: &mut DesignApp, ui: &mut Ui, st
     }
 
     if save_and_open || save_and_compile {
-        match dialog.save_manifest() {
+        let glossary = app.session.prefs.pubgen_glossary_path.clone();
+        let saved = dialog.build_manifest().and_then(|(saved_path, mut manifest)| {
+            manifest.version = 2;
+            manifest.profile_data = Some(st.active_profile());
+            manifest.generate_settings = Some(GenerateSettings::from_state(st, &glossary));
+            write_manifest(&saved_path, &manifest).map(|()| saved_path)
+        });
+        match saved {
             Ok(saved_path) => {
                 let path_str = saved_path.to_string_lossy().to_string();
                 st.compile_manifest_path = path_str.clone();
@@ -2747,6 +3501,115 @@ Grafik,01.02,Kepadatan,
     }
 
     #[test]
+    fn the_save_project_commands_are_registered() {
+        for (id, label) in [("pubgen.saveProject", "Save Publication Project"), ("pubgen.saveProjectAs", "Save Publication Project As...")] {
+            let entry = crate::menus::UI_COMMANDS.iter().find(|c| c.0 == id);
+            let (_, l, _, params) = entry.unwrap_or_else(|| panic!("{id} must be a UI command"));
+            assert_eq!(*l, label);
+            assert!(params.contains("path"), "params doc names `path`: {params}");
+        }
+    }
+
+    #[test]
+    fn saving_a_project_overlays_the_panel_state_on_the_opened_manifest() {
+        let dir = temp_dir("save-overlay");
+        workbook(&dir, "a.xlsx");
+        workbook(&dir, "b.xlsx");
+        let manifest_path = dir.join("pubgen_project.json");
+        std::fs::write(&manifest_path, r#"{"publicationTitle":"Demo","chapters":[{"chapter":1,"path":"a.xlsx"},{"chapter":2,"path":"b.xlsx"}]}"#)
+            .unwrap();
+
+        let ctx = egui::Context::default();
+        let mut app = app();
+        app.egui_ctx = Some(ctx.clone());
+        open_project(&mut app, &serde_json::json!({"path": manifest_path.to_string_lossy()})).unwrap();
+        crate::dock::pubgen::with_state(&ctx, |st| {
+            st.bilingual_output = true;
+            st.cover_style = 4;
+            st.active_profile_id = "bps_brs".into();
+        });
+
+        let report = save_project(&mut app, &serde_json::json!({})).unwrap();
+        assert_eq!(report["chapters"], 2);
+        assert!(app.session.prefs.pubgen_project_path.ends_with("pubgen_project.json"), "path remembered");
+
+        let saved: ProjectManifest = serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+        assert!(saved.bilingual, "the panel's dual-language switch is saved");
+        assert_eq!(saved.cover.style, 4, "the panel's cover style is saved");
+        assert_eq!(saved.profile.as_deref(), Some("bps_brs"), "the active profile is saved");
+        assert_eq!(saved.chapters.len(), 2, "the manifest's chapters survive the save");
+        assert_eq!(saved.publication_title, "Demo", "the manifest's title survives the save");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn saving_without_any_project_data_is_an_error() {
+        let dir = temp_dir("save-empty");
+        let ctx = egui::Context::default();
+        let mut app = app();
+        app.egui_ctx = Some(ctx);
+        let error = save_project(&mut app, &serde_json::json!({"path": dir.join("out.json").to_string_lossy()})).unwrap_err();
+        assert!(error.contains("nothing to save"), "{error}");
+        assert!(!dir.join("out.json").exists(), "a refused save writes nothing");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn saving_a_generated_excel_project_builds_a_manifest_from_the_workbook() {
+        let dir = temp_dir("save-excel");
+        let wb = workbook(&dir, "BAB_02.xlsx");
+        let ctx = egui::Context::default();
+        let mut app = app();
+        app.egui_ctx = Some(ctx.clone());
+        crate::dock::pubgen::with_state(&ctx, |st| st.excel_source_path = wb.clone());
+
+        let target = dir.join("pubgen_project.json");
+        save_project(&mut app, &serde_json::json!({"path": target.to_string_lossy()})).unwrap();
+
+        let saved: ProjectManifest = serde_json::from_str(&std::fs::read_to_string(&target).unwrap()).unwrap();
+        assert_eq!(saved.chapters.len(), 1, "the master workbook becomes chapter 1");
+        assert_eq!(saved.chapters[0].path, "BAB_02.xlsx", "the workbook is stored relative to the manifest");
+        assert_eq!(saved.publication_title, "Iklim", "the BPS chapter title is deduced from the workbook name");
+        assert_eq!(saved.front_matter.workbook, "BAB_02.xlsx");
+        assert_eq!(saved.cover.source, "BAB_02.xlsx");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn saving_merges_the_open_new_project_dialog_into_the_manifest() {
+        let dir = temp_dir("save-dialog");
+        workbook(&dir, "a.xlsx");
+        let manifest_path = dir.join("pubgen_project.json");
+        std::fs::write(&manifest_path, r#"{"publicationTitle":"Demo","chapters":[{"chapter":1,"path":"a.xlsx"}]}"#).unwrap();
+
+        let ctx = egui::Context::default();
+        let mut app = app();
+        app.egui_ctx = Some(ctx.clone());
+        open_project(&mut app, &serde_json::json!({"path": manifest_path.to_string_lossy()})).unwrap();
+        crate::dock::pubgen::with_state(&ctx, |st| {
+            let mut dialog = NewProjectDialog::default();
+            dialog.publication_title = "Karawang 2026".into();
+            dialog.bilingual = false;
+            dialog.toc_charts = false;
+            dialog.export_pdf = false;
+            dialog.chapters = vec![ChapterSpec { chapter: 2, path: dir.join("b.xlsx").to_string_lossy().to_string(), title: "Iklim".into() }];
+            std::fs::write(dir.join("b.xlsx"), b"xlsx placeholder").unwrap();
+            st.compile_new_dialog = Some(Box::new(dialog));
+        });
+
+        save_project(&mut app, &serde_json::json!({})).unwrap();
+
+        let saved: ProjectManifest = serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+        assert_eq!(saved.publication_title, "Karawang 2026", "the dialog's title wins");
+        assert!(!saved.bilingual, "the dialog's language choice wins");
+        assert_eq!(saved.toc.lists, ["contents", "tables"], "the dialog's list selection wins");
+        assert!(!saved.build.export_pdf);
+        assert_eq!(saved.chapters.len(), 1, "the dialog's chapter list replaces the manifest's");
+        assert_eq!(saved.chapters[0].path, "b.xlsx", "dialog paths are stored relative to the manifest");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn new_project_dialog_defaults_and_build() {
         let dir = temp_dir("new-dialog");
         let wb1 = workbook(&dir, "BAB_01.xlsx");
@@ -2825,6 +3688,168 @@ Grafik,01.02,Kepadatan,
 
         let (_, manifest) = dialog.build_manifest().unwrap();
         assert_eq!(manifest.chapters[0].path, "workbooks/BAB_01.xlsx");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_version_two_recipe_manifest_drives_geometry_and_generation_flags() {
+        let dir = temp_dir("compile-v2-recipe");
+        workbook(&dir, "a.xlsx");
+        let brs = serde_json::to_value(super::super::profiles::ProfileManager::get_profile("bps_brs")).unwrap();
+        let manifest: ProjectManifest = serde_json::from_value(serde_json::json!({
+            "version": 2,
+            "publicationTitle": "BRS Kabupaten",
+            "bilingual": true,
+            "chapters": [{"chapter": 1, "path": "a.xlsx", "title": "A"}],
+            "profile": "bps_brs",
+            "profileData": brs,
+            "generateSettings": {"tableStyle": 2},
+            "toc": {"lists": []},
+        }))
+        .unwrap();
+
+        // The embedded profile supplies the geometry when the manifest left the margins at the default.
+        let plan = CompilePlan::from_manifest(&dir.join("project.json"), manifest).unwrap();
+        assert_eq!(plan.manifest.document.margins_mm.top, 18.0, "the BRS profile's margin is applied from profileData");
+        assert!(plan.manifest.document.facing_pages, "BRS prints recto-verso");
+
+        // The compile's panel state follows the profile, then the settings block, then the manifest.
+        let job = CompileJob::new(plan);
+        let defaults = PubgenState::default();
+        assert_eq!(job.base.active_profile_id, "bps_brs", "the embedded profile is the compile's profile");
+        assert_eq!(job.base.cover_style, 0, "the manifest's cover style beat the BRS profile's 13");
+        assert_eq!(job.base.card2_style, 2, "generateSettings has the final word on the panel fields it names");
+        assert_eq!(job.base.hf_style, defaults.hf_style, "settings the block does not name fall back to the panel default");
+        assert!(job.base.bilingual_output, "the manifest's bilingual switch stays authoritative");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_version_one_manifest_compiles_exactly_as_before() {
+        let dir = temp_dir("compile-v1-compat");
+        workbook(&dir, "a.xlsx");
+        let manifest: ProjectManifest = serde_json::from_value(serde_json::json!({
+            "publicationTitle": "Old File",
+            "chapters": [{"chapter": 1, "path": "a.xlsx", "title": "A"}],
+            "profile": "bps_brs",
+            "toc": {"lists": []},
+        }))
+        .unwrap();
+        assert_eq!(manifest.version, 1);
+        let plan = CompilePlan::from_manifest(&dir.join("project.json"), manifest).unwrap();
+        let job = CompileJob::new(plan);
+        let default = PubgenState::default();
+        assert_eq!(job.base.active_profile_id, default.active_profile_id, "a v1 file never applies the profile to the panel state");
+        assert_eq!(job.base.card2_style, default.card2_style);
+        assert_eq!(job.base.card2_table_footer, default.card2_table_footer);
+        assert_eq!(job.base.hf_style, default.hf_style);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_finished_compile_writes_the_page_plan_back_into_the_manifest() {
+        let dir = temp_dir("compile-page-plan");
+        workbook(&dir, "c1.xlsx");
+        let manifest_path = dir.join("project.json");
+        std::fs::write(
+            &manifest_path,
+            r#"{"publicationTitle":"Plan","chapters":[{"chapter":1,"path":"c1.xlsx","title":"Satu"}],
+                "cover":{"style":0,"includeInside":false,"includeBack":true},"toc":{"lists":[]}}"#,
+        )
+        .unwrap();
+        let mut plan = CompilePlan::load(&manifest_path).unwrap();
+        let catalog = catalog(&dir, "c1", "Tabel,01.01,Suku Bangsa,\nTabel,01.02,Penduduk,\n");
+        plan.chapters.get_mut(0).unwrap().source = ChapterSource::Catalog { catalog, tables: Vec::new() };
+
+        let mut app = app();
+        let report = CompileJob::new(plan).run_all(&mut app).unwrap();
+
+        let saved: ProjectManifest = serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+        assert_eq!(saved.version, 2, "the auto-update stamps the recipe version");
+        assert_eq!(saved.page_plan.len(), report.pages, "one entry per page of the document");
+        assert_eq!(saved.page_plan[0].kind, "frontCover");
+        assert_eq!(saved.page_plan[0].page, 1);
+        let table = saved.page_plan.iter().find(|e| e.kind == "table").expect("the catalog's table rows are planned");
+        assert_eq!(table.number, "01.01");
+        assert_eq!(table.title, "Suku Bangsa");
+        assert_eq!(table.chapter, 1);
+        assert_eq!(table.source, "c1_catalog.csv", "the plan names the file the rows were read from");
+        assert!(saved.page_plan.iter().any(|e| e.kind == "backCover"), "the back cover is planned");
+        assert!(saved.page_plan.windows(2).all(|w| w[0].page < w[1].page), "the plan runs page 1 to the last");
+        assert_eq!(saved.page_plan.last().map(|e| e.page), Some(report.pages));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn saving_a_project_stamps_the_version_two_recipe() {
+        let dir = temp_dir("save-recipe");
+        workbook(&dir, "a.xlsx");
+        let manifest_path = dir.join("pubgen_project.json");
+        std::fs::write(&manifest_path, r#"{"publicationTitle":"Demo","chapters":[{"chapter":1,"path":"a.xlsx"}]}"#).unwrap();
+
+        let ctx = egui::Context::default();
+        let mut app = app();
+        app.egui_ctx = Some(ctx.clone());
+        open_project(&mut app, &serde_json::json!({"path": manifest_path.to_string_lossy()})).unwrap();
+        crate::dock::pubgen::with_state(&ctx, |st| {
+            st.apply_profile(super::super::profiles::ProfileManager::get_profile("corporate_annual"), true);
+            st.card2_placement = 1;
+        });
+
+        save_project(&mut app, &serde_json::json!({})).unwrap();
+        let saved: ProjectManifest = serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+        assert_eq!(saved.version, 2);
+        assert_eq!(saved.profile_data.as_ref().map(|p| p.id.as_str()), Some("corporate_annual"), "the full profile rides along");
+        let settings = saved.generate_settings.as_ref().expect("the panel's generation settings are saved");
+        assert_eq!(settings.table_style, 3, "the corporate profile's horizontal-rules style");
+        assert_eq!(settings.placement, 1);
+
+        // Reopening restores the recipe, including a custom profile's definition.
+        let job = CompileJob::new(CompilePlan::load(&manifest_path).unwrap());
+        assert_eq!(job.base.card2_style, 3, "the saved recipe drives the next compile");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn opening_a_version_two_manifest_restores_the_recipe_into_the_panel() {
+        let dir = temp_dir("open-v2");
+        workbook(&dir, "a.xlsx");
+        let custom = super::super::profiles::PubgenProfile {
+            id: "custom".into(),
+            name: "Karawang Kustom".into(),
+            description: String::new(),
+            sector: super::super::profiles::ProfileSector::Government,
+            geometry: super::super::profiles::ProfileGeometry {
+                page_size: "A4".into(),
+                facing_pages: false,
+                margins_mm: super::super::profiles::MarginsMm { top: 25.0, bottom: 22.0, inside: 21.0, outside: 17.0 },
+            },
+            ..Default::default()
+        };
+        let manifest_path = dir.join("pubgen_project.json");
+        std::fs::write(
+            &manifest_path,
+            serde_json::json!({
+                "version": 2,
+                "publicationTitle": "Kustom",
+                "chapters": [{"chapter": 1, "path": "a.xlsx"}],
+                "profileData": custom,
+                "generateSettings": {"tableStyle": 5, "hfFooterSingle": "Kabupaten Karawang"},
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let ctx = egui::Context::default();
+        let mut app = app();
+        app.egui_ctx = Some(ctx.clone());
+        open_project(&mut app, &serde_json::json!({"path": manifest_path.to_string_lossy()})).unwrap();
+        crate::dock::pubgen::with_state(&ctx, |st| {
+            assert_eq!(st.active_profile_id, "custom");
+            assert_eq!(st.profile_custom.as_ref().map(|p| p.name.as_str()), Some("Karawang Kustom"), "the custom profile is restored");
+            assert_eq!(st.card2_style, 5, "the saved generation settings are restored");
+            assert_eq!(st.hf_footer_single, "Kabupaten Karawang");
+        });
         std::fs::remove_dir_all(&dir).ok();
     }
 }

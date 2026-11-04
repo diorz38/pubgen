@@ -806,8 +806,9 @@ Publication Compiler dapat menerapkan preset untuk Anda: `"headerFooter": { "pre
 
 Kartu **Publication Compiler** di bagian atas panel membangun seluruh publikasi dari satu manifest. Daripada membuka sepuluh buku kerja bab satu per satu, Anda mendeskripsikannya sekali di `pubgen_project.json` lalu menekan **Compile**.
 
-- **Manifest** — ketik jalurnya atau pakai **Open…**. Manifest terakhir yang dibuka diingat dan dipakai saat kolom kosong.
+- **Manifest** — ketik jalurnya atau pakai **Open…**. Manifest terakhir yang dibuka diingat dan dipakai saat kolom kosong. Membuka manifest versi 2 memulihkan profil dan pengaturan generate yang tertanam kembali ke panel.
 - **New…** — formulir pembuat proyek: judul publikasi, mode dwibahasa, jalur simpan, gaya dan tema sampul, daftar bab, margin, penomoran halaman, dan ekspor PDF. Hasilnya `pubgen_project.json` yang siap dijalankan.
+- **Save / Save As** — **Publication ▸ Save Publication Project** (`Ctrl+Shift+S`) menulis kembali state panel ke manifest yang tadi dibuka; bila publikasi dihasilkan langsung dari Excel, manifest baru disusun dari daftar workbook aktif. **Save Publication Project As…** selalu menanyakan jalur. Menyimpan selalu menanamkan resep versi 2 (lihat di bawah), sehingga berkas itu saja sudah cukup untuk mereproduksi publikasi.
 - **Compile** — menjalankan alur dengan bilah progres dan tombol **Cancel** yang berfungsi. Tanda titik menandai baris menu Publication selama proses berjalan.
 - Build yang gagal atau dibatalkan tidak menyentuh dokumen sebelumnya: berkas hasil disimpan pada langkah kedua terakhir. Dokumen yang sudah terbuka di tab tidak pernah ditimpa — build dilewati.
 
@@ -815,7 +816,7 @@ Kartu **Publication Compiler** di bagian atas panel membangun seluruh publikasi 
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "publicationTitle": "Kecamatan Karawang Timur Dalam Angka 2026",
   "bilingual": true,
   "profile": "bps_dda",
@@ -855,6 +856,28 @@ Kartu **Publication Compiler** di bagian atas panel membangun seluruh publikasi 
 
 Semua jalur relatif — buku kerja bab, sumber sampul, berkas keluaran — diselesaikan terhadap folder manifest. Kunci yang tidak dikenal diabaikan, dan setiap bagian boleh dihilangkan untuk memakai bawaannya.
 
+### Resep versi 2
+
+Manifest versi 2 adalah resep lengkap yang berdiri sendiri: berkas yang sama yang menjalankan kompilasi juga merekam persis bagaimana halaman-halamannya dibuat. Tiga blok tambahan, semuanya opsional dan dikelola panel untuk Anda:
+
+- **`profileData`** — seluruh profil aktif disalin ke dalam manifest, termasuk profil kustom (id `profile` saja tidak cukup portabel). Geometri, rute sheet, nomenklatur, dan gaya tabel ikut verbatim, sehingga kompilasi ulang hanya butuh berkas ini.
+- **`generateSettings`** — setiap switch generate seperti posisi panel saat ini: pemetaan kolom CSV (tipe/nomor/judul/file/template dan delimiter), gaya serta penempatan tabel, blok header & footer lengkap (teks, garis, accent bar, warna), teks dan warna sampul, gaya TOC, locale, dan jalur glosarium. Saat kompilasi blok ini menjadi kata terakhir untuk field yang disebutnya; saat **Open…** panel dipulihkan darinya, sehingga pekerjaan berlanjut persis seperti sebelumnya.
+- **`pagePlan`** — satu entri per halaman hasil, ditulis otomatis ketika kompilasi selesai: halaman mana berisi apa (`frontCover`, `insideCover`, `frontMatter`, `toc`, `divider`, `table`, `chart`, `narrative`, `blank`, `backCover`), bab, nomor, judul, dan berkas katalog sumber barisnya. Halaman kosong sisipan untuk mulai bab genap juga tercatat, jadi nomor halaman cocok dengan dokumen nyata.
+
+Urutan preseden bila semuanya ada: profil tertanam diterapkan lebih dulu, field manifest sendiri (`bilingual`, gaya/tema sampul, hanging indent TOC) mengalahkannya, lalu `generateSettings` terakhir menimpa field panel yang disebutnya. **Save** / **Save As** selalu menanamkan versi 2; **New…** juga menulis berkas versi 2.
+
+Manifest versi 1 dikompilasi persis seperti sebelumnya: tanpa `profileData`/`generateSettings` tidak ada tambahan yang diterapkan, dan berkas itu mempertahankan geometri serta pengaturan babnya sendiri. Tulis-ulang otomatis setelah kompilasi hanya menambahkan `pagePlan` (dan stamp versi) — tidak pernah menulis resep — jadi menjalankan ulang manifest lama hasilnya identik.
+
+```json
+"pagePlan": [
+  { "page": 1, "kind": "frontCover", "source": "workbooks/BAB_01_2025.xlsx" },
+  { "page": 8, "kind": "divider", "chapter": 1, "title": "Geografi" },
+  { "page": 9, "kind": "blank", "chapter": 1 },
+  { "page": 10, "kind": "table", "chapter": 1, "number": "01.01",
+    "title": "Luas Wilayah Menurut Desa", "source": "c1_catalog.csv" }
+]
+```
+
 ### Urutan kerja satu kompilasi
 
 1. Dokumen baru dengan ukuran halaman, halaman berhadapan, margin, dan bleed dari manifest (margin profil mengisi bila manifest masih memakai bawaan).
@@ -866,6 +889,7 @@ Semua jalur relatif — buku kerja bab, sumber sampul, berkas keluaran — disel
 7. Sampul belakang.
 8. Daftar isi/daftar tabel/daftar grafik, penomoran halaman, dan running header.
 9. Simpan, lalu ekspor PDF bila `build.exportPdf` aktif.
+10. Rencana halaman per halaman yang sebenarnya ditulis kembali ke `pagePlan` di manifest (lihat di atas), sehingga berkas merekam apa yang benar-benar dihasilkan kompilasi.
 
 Compiler hanya tersedia di aplikasi desktop: build web menyatakan bahwa kompilasi memerlukan aplikasi desktop. Lewat control channel atau skrip: `{"command":"pubgen.compileProject","params":{"path":"…/pubgen_project.json","pdf":"…/out.pdf"}}`; tambahkan `"sync": false` agar berjalan bertahap di panel.
 

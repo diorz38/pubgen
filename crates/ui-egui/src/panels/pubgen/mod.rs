@@ -36,7 +36,7 @@ pub mod charts;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod compile;
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use compile::{compile_card_ui, compile_project, open_project, poll_compile_job};
+pub(crate) use compile::{compile_card_ui, compile_project, open_project, poll_compile_job, save_project, save_project_as};
 mod cover_art;
 mod covers;
 mod csv;
@@ -90,6 +90,18 @@ pub fn open_chart_dialog(app: &mut DesignApp, edit: bool) -> Result<(), String> 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn compile_project(_app: &mut DesignApp, _p: &Value) -> Result<Value, String> {
     Err("compiling a publication needs the desktop app".to_string())
+}
+
+/// Saving a publication project writes a manifest file: the web build only explains why it can't.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn save_project(_app: &mut DesignApp, _p: &Value) -> Result<Value, String> {
+    Err("saving a publication project needs the desktop app".to_string())
+}
+
+/// As above, for Save As.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn save_project_as(_app: &mut DesignApp, _p: &Value) -> Result<Value, String> {
+    Err("saving a publication project needs the desktop app".to_string())
 }
 
 /// Runs any closure with mutable access to PubgenState, persisting it to Context temp storage.

@@ -909,8 +909,9 @@ The Publication Compiler can apply a preset for you: `"headerFooter": { "preset"
 
 The **Publication Compiler** card (top of the panel) builds an entire publication from one manifest. Instead of opening ten chapter workbooks one after another, you describe them once in `pubgen_project.json` and press **Compile**.
 
-- **Manifest** — type the path, or use **Open…**. The last manifest you opened is remembered and used when the field is empty.
+- **Manifest** — type the path, or use **Open…**. The last manifest you opened is remembered and used when the field is empty. Opening a version 2 manifest restores its embedded profile and generation settings back into the panel.
 - **New…** — the project builder form: publication title, bilingual flag, save path, cover style and theme, chapter list, margins, pagination and PDF export. It writes a ready-to-run `pubgen_project.json`.
+- **Save / Save As** — **Publication ▸ Save Publication Project** (`Ctrl+Shift+S`) writes the panel back to the manifest you opened, or, when the publication was generated straight from Excel, builds a new manifest from the current workbook list. **Save Publication Project As…** (**Publication ▸ Save Publication Project As…**) always asks for a path. Saving stamps the full version 2 recipe (§below), so the file alone is enough to reproduce the publication.
 - **Compile** — runs the pipeline with a progress bar and a working **Cancel**. A dot marks the Publication menu row while it runs.
 - A build that fails or is cancelled leaves the previous document untouched: the compiled file is saved second-to-last. A document already open in a tab is never overwritten — the build is skipped instead.
 
@@ -918,7 +919,7 @@ The **Publication Compiler** card (top of the panel) builds an entire publicatio
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "publicationTitle": "Kecamatan Karawang Timur Dalam Angka 2026",
   "bilingual": true,
   "profile": "bps_dda",
@@ -958,6 +959,28 @@ The **Publication Compiler** card (top of the panel) builds an entire publicatio
 
 Every relative path — chapter workbooks, cover source, output files — resolves against the folder holding the manifest. Unknown keys are ignored, and every section may be omitted to take its default.
 
+### The version 2 recipe
+
+A version 2 manifest is a complete, self-contained recipe: the same file that drives a compile also records exactly how the pages were made. Three optional blocks are added, and the panel maintains them for you:
+
+- **`profileData`** — the entire active profile inlined, including a custom one (the `profile` id alone can't travel). Geometry, sheet routing, nomenclature and table styling are copied verbatim, so a recompile needs nothing but this file.
+- **`generateSettings`** — every generation switch as the panel currently holds it: CSV column mapping (type/number/title/file/template columns, delimiter), table style and placement, the full header & footer block (texts, rules, accent bar, colours), cover texts and colours, TOC style, locale and the glossary path. On compile it is the last word for the fields it names; on **Open…** the panel is restored from it, so continuing work picks up where you left off.
+- **`pagePlan`** — one entry per produced page, written back automatically when a compile finishes: which page holds what (`frontCover`, `insideCover`, `frontMatter`, `toc`, `divider`, `table`, `chart`, `narrative`, `blank`, `backCover`), its chapter, number, title and the catalog file the rows came from. Blanks inserted for even-start chapter padding are recorded too, so page numbers match the real document.
+
+Precedence when all of it is present: the embedded profile is applied first, the manifest's own fields (`bilingual`, cover style/theme, TOC hanging indent) override it, and `generateSettings` finally overrides the panel fields it names. **Save** / **Save As** always stamp version 2; **New…** writes a version 2 file too.
+
+Version 1 manifests compile exactly as before: without `profileData`/`generateSettings` nothing extra is applied, and they keep their own geometry and chapter settings. The automatic write-back after a compile only adds the `pagePlan` (and the version stamp) — never a recipe — so re-running an old manifest behaves identically.
+
+```json
+"pagePlan": [
+  { "page": 1, "kind": "frontCover", "source": "workbooks/BAB_01_2025.xlsx" },
+  { "page": 8, "kind": "divider", "chapter": 1, "title": "Geografi" },
+  { "page": 9, "kind": "blank", "chapter": 1 },
+  { "page": 10, "kind": "table", "chapter": 1, "number": "01.01",
+    "title": "Luas Wilayah Menurut Desa", "source": "c1_catalog.csv" }
+]
+```
+
 ### What a compile does, in order
 
 1. A new document with the manifest's page size, facing pages, margins and bleed (profile margins fill in when the manifest leaves them at the defaults).
@@ -969,6 +992,7 @@ Every relative path — chapter workbooks, cover source, output files — resolv
 7. Back cover.
 8. The contents lists, page numbering and running headers.
 9. Save, then export the PDF when `build.exportPdf` is on.
+10. The real per-page plan is written back into the manifest's `pagePlan` (§above), so the file records what the compile actually produced.
 
 The compiler is desktop-only: the web build reports that compiling needs the desktop app. From the control channel or a script: `{"command":"pubgen.compileProject","params":{"path":"…/pubgen_project.json","pdf":"…/out.pdf"}}`; add `"sync": false` to run it step by step in the panel instead.
 

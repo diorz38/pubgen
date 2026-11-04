@@ -93,6 +93,20 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ),
     #[cfg(feature = "pubgen")]
     (
+        "pubgen.saveProject",
+        "Save Publication Project",
+        Some("Ctrl+Shift+S"),
+        "{path?} — write the publication project to its pubgen_project.json: the manifest last opened, the open New Publication Project dialog or the Master Excel workbook (with the panel's current language mode, cover style and profile); with no known target, or with path, asks where to save",
+    ),
+    #[cfg(feature = "pubgen")]
+    (
+        "pubgen.saveProjectAs",
+        "Save Publication Project As...",
+        None,
+        "{path?} — save the publication project, always naming the pubgen_project.json: with path it is written there, otherwise the app asks",
+    ),
+    #[cfg(feature = "pubgen")]
+    (
         "pubgen.compileProject",
         "Compile Publication",
         Some("Ctrl+Shift+B"),

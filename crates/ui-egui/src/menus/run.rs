@@ -209,6 +209,10 @@ fn run_ui_part1(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value
         "pubgen.compileProject" => crate::dock::pubgen::compile_project(app, p),
         #[cfg(feature = "pubgen")]
         "pubgen.openProject" => crate::dock::pubgen::open_project(app, p),
+        #[cfg(feature = "pubgen")]
+        "pubgen.saveProject" => crate::dock::pubgen::save_project(app, p),
+        #[cfg(feature = "pubgen")]
+        "pubgen.saveProjectAs" => crate::dock::pubgen::save_project_as(app, p),
         "window.hideMenuItem" => {
             let Some(item) = p.get("item").and_then(Value::as_str) else { return Some(Err("missing item".into())) };
             let hide = p.get("hidden").and_then(Value::as_bool).unwrap_or(true);
