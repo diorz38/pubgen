@@ -183,7 +183,7 @@ if (-not (Get-Command rc.exe -ErrorAction SilentlyContinue)) {
 }
 $env:DESIGNCRAFT_REQUIRE_WINRES = "1"
 $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = "-C target-feature=+crt-static"
-cargo build --release -p designcraft -p designcraft-cli --features designcraft/pubgen --target x86_64-pc-windows-msvc
+cargo build --release -p designcraft -p designcraft-cli -p pubgen-cli --features designcraft/pubgen --target x86_64-pc-windows-msvc
 ```
 
 #### Step 2: Prepare the Portable Directory Structure
@@ -200,9 +200,11 @@ New-Item -ItemType Directory -Force -Path (Join-Path $DistDir "samples\thumb") |
 
 #### Step 3: Copy Binaries and Assets
 ```powershell
-# Copy GUI and CLI executables
+# Copy GUI and CLI executables (pubgen-cli/pubgen-export: see apps/pubgen-cli/README.md)
 Copy-Item "target\x86_64-pc-windows-msvc\release\designcraft.exe" $DistDir
 Copy-Item "target\x86_64-pc-windows-msvc\release\designcraft-cli.exe" $DistDir
+Copy-Item "target\x86_64-pc-windows-msvc\release\pubgen-cli.exe" $DistDir
+Copy-Item "target\x86_64-pc-windows-msvc\release\pubgen-export.exe" $DistDir
 
 # Copy sample CSV and XLSX datasets into dedicated subfolders (no files in root samples folder)
 Copy-Item "plan\pubgen\samples\*.csv" (Join-Path $DistDir "samples\csv")
@@ -266,7 +268,7 @@ if (-not (Get-Command rc.exe -ErrorAction SilentlyContinue)) {
 }
 `$env:DESIGNCRAFT_REQUIRE_WINRES = '1'
 `$env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = '-C target-feature=+crt-static'
-cargo build --release -p designcraft -p designcraft-cli --features designcraft/pubgen --target x86_64-pc-windows-msvc
+cargo build --release -p designcraft -p designcraft-cli -p pubgen-cli --features designcraft/pubgen --target x86_64-pc-windows-msvc
 
 Write-Host '==> 2. Assembling portable folder...'
 Remove-Item -Recurse -Force `$DistDir -ErrorAction SilentlyContinue
@@ -278,6 +280,8 @@ New-Item -ItemType Directory -Force -Path (Join-Path `$DistDir 'samples\thumb') 
 
 Copy-Item 'target\x86_64-pc-windows-msvc\release\designcraft.exe' `$DistDir
 Copy-Item 'target\x86_64-pc-windows-msvc\release\designcraft-cli.exe' `$DistDir
+Copy-Item 'target\x86_64-pc-windows-msvc\release\pubgen-cli.exe' `$DistDir
+Copy-Item 'target\x86_64-pc-windows-msvc\release\pubgen-export.exe' `$DistDir
 
 Copy-Item 'plan\pubgen\samples\*.csv' (Join-Path `$DistDir 'samples\csv')
 Copy-Item 'plan\pubgen\samples\BAB_02_2025.xlsx' (Join-Path `$DistDir 'samples\xlsx')
@@ -322,8 +326,9 @@ Get-Item (Join-Path `$DistDir 'designcraft.exe'), `$ZipPath | Format-Table Name,
 | :--- | :--- |
 | **Check dock drift** | `cargo xtask diff-dock` |
 | **Run Pubgen tests** | `cargo test -p designcraft-ui-egui --features pubgen -- pubgen` |
+| **Run pubgen-cli tests** | `cargo test -p pubgen-cli` |
 | **Run app with Pubgen (Debug)** | `cargo run -p designcraft --features pubgen` |
-| **Build Portable Release (x64)** | `$env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = "-C target-feature=+crt-static"; cargo build --release -p designcraft -p designcraft-cli --features designcraft/pubgen --target x86_64-pc-windows-msvc` |
+| **Build Portable Release (x64)** | `$env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = "-C target-feature=+crt-static"; cargo build --release -p designcraft -p designcraft-cli -p pubgen-cli --features designcraft/pubgen --target x86_64-pc-windows-msvc` |
 | **Verify branch sync** | `git log -n 5 --oneline --graph` |
 
 ---
