@@ -1769,6 +1769,7 @@ dependencies = [
  "quick-xml 0.41.0",
  "raw-window-handle",
  "regex",
+ "rfd",
  "serde",
  "serde_json",
  "tempfile",
@@ -4885,6 +4886,26 @@ name = "pubgen-cli"
 version = "0.17.0-pubgen.0.8.6"
 dependencies = [
  "serde_json",
+ "zip 3.0.0",
+]
+
+[[package]]
+name = "pubgen-studio"
+version = "0.17.0-pubgen.0.8.6"
+dependencies = [
+ "arboard",
+ "chrono",
+ "designcraft-engine",
+ "designcraft-ui-egui",
+ "eframe",
+ "egui",
+ "log",
+ "quick-xml 0.41.0",
+ "rfd",
+ "serde",
+ "serde_json",
+ "winresource",
+ "winsafe",
  "zip 3.0.0",
 ]
 

@@ -1,21 +1,42 @@
 //! PubGen's own menu bar (fork addition).
 //!
-//! DesignCraft's menu bar is replaced by the host tree plus Publication + Publication Tools +
-//! Shortcut (Help stays last) while the PubGen menus are on (the default here). Those menus hold
-//! the PubGen panel's actions; the host rows are DesignCraft's own. The toggle in Help (and in the
-//! About PubGen dialog) switches between this bar and DesignCraft's full one.
+//! Orchestrator Mode displays the 8 main menus matching the POS contract:
+//! 1. File
+//! 2. Publication
+//! 3. Publication Tools
+//! 4. Automation & Content
+//! 5. DesignCraft
+//! 6. View
+//! 7. Shortcut
+//! 8. Help
 //!
-//! Everything lives in this one file so an upstream update touches at most the single hook at the
-//! top of [`super::bar::menu_bar`]: no upstream menu table, command table or UI state is edited.
+//! When switched to DesignCraft Mode, the full host menu bar (File..Help) is restored.
 
 use crate::DesignApp;
+
+/// The egui memory key holding the active Studio mode ("designcraft" or "orchestrator").
+const STUDIO_MODE: &str = "pubgen_studio_active_mode";
 
 /// The egui memory key holding whether the PubGen menu bar is shown (temporary: resets to on).
 const ON: &str = "pubgen_menus_on";
 
-/// Whether the PubGen menu bar replaces DesignCraft's (the default).
+/// Whether Orchestrator mode is currently active (default is false: DesignCraft mode).
+pub fn is_orchestrator_mode(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::unique(STUDIO_MODE))).unwrap_or(false)
+}
+
+/// Set active studio mode: Orchestrator (`true`) or DesignCraft (`false`).
+pub fn set_orchestrator_mode(ctx: &egui::Context, orchestrator: bool) {
+    ctx.data_mut(|d| {
+        d.insert_temp(egui::Id::unique(STUDIO_MODE), orchestrator);
+        d.insert_temp(egui::Id::unique(ON), orchestrator);
+    });
+}
+
+/// Whether the PubGen menu bar replaces DesignCraft's.
 pub fn pubgen_menus_on(ctx: &egui::Context) -> bool {
-    ctx.data(|d| d.get_temp::<bool>(egui::Id::unique(ON))).unwrap_or(true)
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::unique(ON)))
+        .unwrap_or_else(|| is_orchestrator_mode(ctx))
 }
 
 /// Show the PubGen menu bar (`true`) or DesignCraft's full one (`false`).
@@ -23,23 +44,118 @@ pub fn set_pubgen_menus_on(ctx: &egui::Context, on: bool) {
     ctx.data_mut(|d| d.insert_temp(egui::Id::unique(ON), on));
 }
 
-/// Draws the PubGen menu bar in place of DesignCraft's. Returns `false` (having drawn nothing)
+fn mode_tab_button(
+    ui: &mut egui::Ui,
+    label: &str,
+    active: bool,
+    active_bg: egui::Color32,
+    active_stroke: egui::Color32,
+    active_text: egui::Color32,
+    tip: &str,
+) -> egui::Response {
+    let t = crate::theme::Tokens::get(ui.ctx());
+    let font = crate::theme::semibold(11.5);
+    let galley = ui.painter().layout_no_wrap(label.to_string(), font.clone(), if active { active_text } else { t.text_dim });
+    let size = egui::vec2(galley.size().x + 14.0, 20.0);
+    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+    let p = ui.painter();
+
+    if active {
+        p.rect_filled(rect, 3.0, active_bg);
+        p.rect_stroke(rect, 3.0, egui::Stroke::new(1.0, active_stroke), egui::StrokeKind::Inside);
+        p.galley(rect.center() - galley.size() / 2.0, galley, active_text);
+    } else if resp.hovered() {
+        p.rect_filled(rect, 3.0, t.hover);
+        let hover_galley = ui.painter().layout_no_wrap(label.to_string(), font, t.text);
+        p.galley(rect.center() - hover_galley.size() / 2.0, hover_galley, t.text);
+    } else {
+        p.galley(rect.center() - galley.size() / 2.0, galley, t.text_dim);
+    }
+
+    resp.on_hover_text(tip)
+}
+
+/// Renders the mode switcher ("Designcraft" | "Orchestrator") with distinct backgrounds for the active mode.
+pub fn render_mode_switch(app: &mut DesignApp, ui: &mut egui::Ui) {
+    let orchestrator = is_orchestrator_mode(ui.ctx());
+
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
+
+        // --- Designcraft Button ---
+        let dc_active = !orchestrator;
+        let dc_bg = egui::Color32::from_rgb(32, 54, 72);
+        let dc_stroke = egui::Color32::from_rgb(52, 130, 175);
+        let dc_text = egui::Color32::from_rgb(70, 185, 220);
+        let dc_tip = crate::i18n::tr(&app.ui.language, "DesignCraft Layout Studio");
+
+        if mode_tab_button(ui, "Designcraft", dc_active, dc_bg, dc_stroke, dc_text, &dc_tip).clicked() {
+            set_orchestrator_mode(ui.ctx(), false);
+        }
+
+        // --- Orchestrator Button ---
+        let orch_active = orchestrator;
+        let orch_bg = egui::Color32::from_rgb(32, 62, 58);
+        let orch_stroke = egui::Color32::from_rgb(50, 150, 130);
+        let orch_text = egui::Color32::from_rgb(90, 215, 180);
+        let orch_tip = crate::i18n::tr(&app.ui.language, "Publication Orchestrator");
+
+        if mode_tab_button(ui, "Orchestrator", orch_active, orch_bg, orch_stroke, orch_text, &orch_tip).clicked() {
+            set_orchestrator_mode(ui.ctx(), true);
+            let _ = app.run("window.panel.activate", serde_json::json!({"panel": "pubgen"}));
+        }
+
+        ui.add_space(8.0);
+    });
+}
+
+/// Top-level menus for Orchestrator Mode matching the POS main menu contract:
+/// 1. File
+/// 2. Publication
+/// 3. Publication Tools
+/// 4. Automation & Content
+/// 5. DesignCraft
+/// 6. View
+/// 7. Shortcut
+/// 8. Help
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Top {
+    File,
+    Publication,
+    PublicationTools,
+    AutomationContent,
+    DesignCraft,
+    View,
+    Shortcut,
+    Help,
+}
+
+/// Draws the Orchestrator menu bar in place of DesignCraft's. Returns `false`
 /// when DesignCraft's menu bar should be drawn instead.
 pub fn menu_bar(app: &mut DesignApp, ui: &mut egui::Ui) -> bool {
     if !pubgen_menus_on(ui.ctx()) {
         return false;
     }
     let rtl = crate::i18n::is_rtl(&app.ui.language);
-    // The host tree stays intact (the audit's §1: never hide the host's navigation); the three
-    // Pubgen menus join it, with Help kept last like every desktop app.
-    let tree = crate::menus::menu_tree();
-    let mut top: Vec<Top> = tree.iter().filter(|(name, _)| *name != "Help").map(|(name, entries)| Top::Host(name, entries)).collect();
-    top.extend([Top::Publication, Top::Tools, Top::Shortcut, Top::Help]);
-    for entry in if rtl { top.into_iter().rev().collect::<Vec<_>>() } else { top } {
+    let top = [
+        Top::File,
+        Top::Publication,
+        Top::PublicationTools,
+        Top::AutomationContent,
+        Top::DesignCraft,
+        Top::View,
+        Top::Shortcut,
+        Top::Help,
+    ];
+
+    for entry in if rtl { top.into_iter().rev().collect::<Vec<_>>() } else { top.to_vec() } {
         match entry {
-            Top::Host(name, entries) => designcraft_menu(app, ui, name, entries),
+            Top::File => file_menu(app, ui),
             Top::Publication => publication_menu(app, ui),
-            Top::Tools => content_menu(app, ui),
+            Top::PublicationTools => content_menu(app, ui),
+            Top::AutomationContent => automation_content_menu(app, ui),
+            Top::DesignCraft => designcraft_orchestrator_menu(app, ui),
+            Top::View => view_menu(app, ui),
             Top::Shortcut => shortcut_menu(app, ui),
             Top::Help => help_menu(app, ui),
         }
@@ -47,16 +163,201 @@ pub fn menu_bar(app: &mut DesignApp, ui: &mut egui::Ui) -> bool {
     true
 }
 
-/// One top-level menu of the PubGen bar, in draw order.
-enum Top<'a> {
-    Host(&'a str, &'a [crate::menus::Item]),
-    Publication,
-    Tools,
-    Shortcut,
-    Help,
+/// 1. File Menu: project creation, open, save, template loading, and output export.
+fn file_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
+    let lang = app.ui.language.clone();
+    let rtl = crate::i18n::is_rtl(&lang);
+    crate::menus::menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&lang, "File")), |ui| {
+        popup(ui, rtl, 240.0, |ui| {
+            let items: Vec<crate::menus::Item> = [
+                "pubgen.openProject",
+                "pubgen.saveProject",
+                "pubgen.saveProjectAs",
+            ]
+            .iter()
+            .map(|id| super::cmd_item(id, serde_json::Value::Null))
+            .collect();
+            super::bar::menu_column(app, ui, &[("Publication Project", items)]);
+            ui.separator();
+
+            let tmpl: Vec<crate::menus::Item> = [
+                "file.open",
+            ]
+            .iter()
+            .map(|id| super::cmd_item(id, serde_json::Value::Null))
+            .collect();
+            super::bar::menu_column(app, ui, &[("Template", tmpl)]);
+            ui.separator();
+
+            let pdf: Vec<crate::menus::Item> = [
+                "app.exportPdf",
+            ]
+            .iter()
+            .map(|id| super::cmd_item(id, serde_json::Value::Null))
+            .collect();
+            super::bar::menu_column(app, ui, &[("Output", pdf)]);
+            ui.separator();
+
+            let exit: Vec<crate::menus::Item> = [
+                "app.quit",
+            ]
+            .iter()
+            .map(|id| super::cmd_item(id, serde_json::Value::Null))
+            .collect();
+            super::bar::menu_column(app, ui, &[("Application", exit)]);
+        });
+    });
 }
 
-/// DesignCraft's Help rows, then About PubGen… and the menu-bar toggle — the single home for both.
+/// 2. Publication Menu: compilation pipeline and publication profiles.
+fn publication_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
+    let lang = app.ui.language.clone();
+    let rtl = crate::i18n::is_rtl(&lang);
+    let has_doc = app.session.active().is_some();
+    crate::menus::menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&lang, "Publication")), |ui| {
+        popup(ui, rtl, 260.0, |ui| {
+            pipeline(app, ui);
+            ui.separator();
+            submenu(ui, &lang, rtl, "Publication Profiles", 240.0, |ui| profiles_submenu(app, ui, &lang, has_doc));
+        });
+    });
+}
+
+/// 3. Publication Tools Menu: manual ingest, layout utilities, language mode and AI translation.
+fn content_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
+    let lang = app.ui.language.clone();
+    let rtl = crate::i18n::is_rtl(&lang);
+    crate::menus::menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&lang, "Publication Tools")), |ui| {
+        popup(ui, rtl, 260.0, |ui| content(app, ui, &lang, rtl));
+    });
+}
+
+/// 4. Automation & Content Menu: cover generator, vector chart, TOC, and batch translation.
+fn automation_content_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
+    let lang = app.ui.language.clone();
+    let rtl = crate::i18n::is_rtl(&lang);
+    let has_doc = app.session.active().is_some();
+    crate::menus::menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&lang, "Automation & Content")), |ui| {
+        popup(ui, rtl, 260.0, |ui| {
+            let items: Vec<crate::menus::Item> = [
+                "pubgen.publicationCover",
+                "pubgen.vectorChart",
+                "pubgen.tableOfContents",
+            ]
+            .iter()
+            .map(|id| super::cmd_item(id, serde_json::Value::Null))
+            .collect();
+            super::bar::menu_column(app, ui, &[("Automation", items)]);
+            ui.separator();
+
+            submenu(ui, &lang, rtl, "AI Translation & Terminology", 260.0, |ui| ai_translate(app, ui, &lang, has_doc));
+            ui.separator();
+
+            let batch: Vec<crate::menus::Item> = [
+                "pubgen.generateFromExcel",
+            ]
+            .iter()
+            .map(|id| super::cmd_item(id, serde_json::Value::Null))
+            .collect();
+            super::bar::menu_column(app, ui, &[("Batch Generation", batch)]);
+        });
+    });
+}
+
+/// 5. DesignCraft Menu: seamless mode transfer and document opening.
+fn designcraft_orchestrator_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
+    let lang = app.ui.language.clone();
+    let rtl = crate::i18n::is_rtl(&lang);
+    crate::menus::menu_button(ui, crate::rtl::widget(ui, "DesignCraft"), |ui| {
+        popup(ui, rtl, 240.0, |ui| {
+            if ui.button(crate::rtl::widget(ui, "🎨 Switch to DesignCraft Studio")).clicked() {
+                set_orchestrator_mode(ui.ctx(), false);
+                ui.close();
+            }
+            ui.separator();
+
+            let dc_items: Vec<crate::menus::Item> = [
+                "file.open",
+                "file.save",
+                "file.saveAs",
+            ]
+            .iter()
+            .map(|id| super::cmd_item(id, serde_json::Value::Null))
+            .collect();
+            super::bar::menu_column(app, ui, &[("Layout Documents", dc_items)]);
+            ui.separator();
+
+            let prefs: Vec<crate::menus::Item> = [
+                "window.shortcuts",
+                "app.preferences",
+            ]
+            .iter()
+            .map(|id| super::cmd_item(id, serde_json::Value::Null))
+            .collect();
+            super::bar::menu_column(app, ui, &[("DesignCraft Settings", prefs)]);
+        });
+    });
+}
+
+/// 6. View Menu: mode switcher, panel docks, theme and language selection.
+fn view_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
+    let lang = app.ui.language.clone();
+    let rtl = crate::i18n::is_rtl(&lang);
+    crate::menus::menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&lang, "View")), |ui| {
+        popup(ui, rtl, 240.0, |ui| {
+            let orch = is_orchestrator_mode(ui.ctx());
+            if ui.selectable_label(orch, "✓  Publication Orchestrator").clicked() {
+                set_orchestrator_mode(ui.ctx(), true);
+                ui.close();
+            }
+            if ui.selectable_label(!orch, "    DesignCraft Layout Studio").clicked() {
+                set_orchestrator_mode(ui.ctx(), false);
+                ui.close();
+            }
+            ui.separator();
+
+            let panels: Vec<crate::menus::Item> = [
+                "window.pubgenPanel",
+            ]
+            .iter()
+            .map(|id| super::cmd_item(id, serde_json::Value::Null))
+            .collect();
+            super::bar::menu_column(app, ui, &[("Panels", panels)]);
+            ui.separator();
+
+            submenu(ui, &lang, rtl, "Language / Bahasa", 180.0, |ui| {
+                if ui.selectable_label(app.ui.language == "id", "🇮🇩 Bahasa Indonesia").clicked() {
+                    app.ui.language = "id".into();
+                    ui.close();
+                }
+                if ui.selectable_label(app.ui.language == "en", "🇬🇧 English").clicked() {
+                    app.ui.language = "en".into();
+                    ui.close();
+                }
+            });
+        });
+    });
+}
+
+/// 7. Shortcut Menu: quick access to export and project operations.
+fn shortcut_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
+    let items: Vec<crate::menus::Item> = [
+        ("app.exportPdf", "{}"),
+        ("pubgen.saveProject", "{}"),
+        ("pubgen.openProject", "{}"),
+        ("preflight.run", "{}"),
+        ("app.packageDialog", "{}"),
+    ]
+    .iter()
+    .map(|(id, params)| super::cmd_item(id, serde_json::from_str(params).unwrap_or_default()))
+    .collect();
+    let lang = app.ui.language.clone();
+    crate::menus::menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&lang, "Shortcut")), |ui| {
+        super::bar::menu_column(app, ui, &[("Shortcut", items)]);
+    });
+}
+
+/// 8. Help Menu: documentation, guidelines, and about dialog.
 fn help_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
     let tree = crate::menus::menu_tree();
     let Some((name, entries)) = tree.iter().find(|(n, _)| *n == "Help") else { return };
@@ -69,26 +370,20 @@ fn help_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
     });
 }
 
-/// Curated quick access to the original DesignCraft actions a publication operator reaches for
-/// most (the plan's §4.8) — existing commands only, so chords, gates and i18n come free.
-fn shortcut_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
-    let items: Vec<crate::menus::Item> =
-        [("app.exportPdf", "{}"), ("preflight.run", "{}"), ("app.packageDialog", "{}"), ("app.placeDialog", "{}"), ("file.newSample", "{}")]
-            .iter()
-            .map(|(id, params)| super::cmd_item(id, serde_json::from_str(params).unwrap_or_default()))
-            .collect();
-    let lang = app.ui.language.clone();
-    crate::menus::menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&lang, "Shortcut")), |ui| {
-        super::bar::menu_column(app, ui, &[("Shortcut", items)]);
-    });
-}
-
-/// One of DesignCraft's own menus (File, Help), drawn from the upstream menu tree.
-fn designcraft_menu(app: &mut DesignApp, ui: &mut egui::Ui, name: &str, entries: &[crate::menus::Item]) {
-    let label = crate::i18n::tr(&app.ui.language, name);
-    crate::menus::menu_button(ui, crate::rtl::widget(ui, label), |ui| {
-        super::bar::menu_column(app, ui, &[(name, entries.to_vec())]);
-    });
+/// About PubGen… and the menu-bar toggle.
+fn about(ui: &mut egui::Ui, lang: &str) {
+    if item(ui, lang, "About PubGen…", true) {
+        crate::dock::pubgen::with_state(ui.ctx(), |st| {
+            st.show_about_dialog = true;
+        });
+        ui.close();
+    }
+    let pubgen_on = pubgen_menus_on(ui.ctx());
+    let toggle_label = if pubgen_on { "Show DesignCraft Menus" } else { "Show PubGen Menus" };
+    if item(ui, lang, toggle_label, true) {
+        set_pubgen_menus_on(ui.ctx(), !pubgen_on);
+        ui.close();
+    }
 }
 
 /// The Popup layout every PubGen menu uses: right-to-left aware, at least `min_width` wide.
@@ -114,9 +409,7 @@ fn submenu(ui: &mut egui::Ui, lang: &str, rtl: bool, label: &str, min_width: f32
     crate::menus::menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(lang, label)), |ui| popup(ui, rtl, min_width, contents));
 }
 
-/// The generation pipeline: Excel generate, compile, charts, ToC, cover, headers and the audit —
-/// rows come from `UI_COMMANDS`, so labels, gates and chords are the upstream menu machinery's.
-/// A row whose background job runs (compile, AI cover) carries a ● marker (the audit's P1-6).
+/// The generation pipeline: Excel generate, compile, charts, ToC, cover, headers and the audit.
 fn pipeline(app: &mut DesignApp, ui: &mut egui::Ui) {
     let (compiling, covering) = crate::dock::pubgen::with_state(ui.ctx(), |st| (st.compile_job.is_some(), st.cover_job.is_some()));
     let items: Vec<crate::menus::Item> = [
@@ -154,11 +447,8 @@ fn pipeline(app: &mut DesignApp, ui: &mut egui::Ui) {
 /// Manual content: CSV ingest, layout utilities, the dual-language switch and AI translation.
 fn content(app: &mut DesignApp, ui: &mut egui::Ui, lang: &str, rtl: bool) {
     let has_doc = app.session.active().is_some();
-
     submenu_items(app, ui, lang, "Manual Ingest & Tables", &["pubgen.pageFromCsv", "pubgen.tableFromCsv"]);
-
     submenu(ui, lang, rtl, "Publication Profiles", 240.0, |ui| profiles_submenu(app, ui, lang, has_doc));
-
     submenu_items(
         app,
         ui,
@@ -166,21 +456,15 @@ fn content(app: &mut DesignApp, ui: &mut egui::Ui, lang: &str, rtl: bool) {
         "Page & Layout Utilities",
         &["pubgen.profileCustomize", "pubgen.profileMargins", "pubgen.bpsMargins", "pubgen.marginsDialog"],
     );
-
     ui.separator();
-
-    // The dual-language toggle rides the upstream row machinery: its checkmark comes from
-    // `menus::state::checked`, its chord (Ctrl+Shift+L) from the keymap (P1-3).
     let dual = [super::cmd_item("pubgen.dualLanguage", serde_json::Value::Null)];
     super::tree::menu_items(app, ui, &dual, "Publication Tools");
-
     submenu(ui, lang, rtl, "AI Translate", 260.0, |ui| ai_translate(app, ui, lang, has_doc));
 }
 
 /// Submenu for choosing built-in or custom publication profiles, customizing, and applying profile margins.
 fn profiles_submenu(app: &mut DesignApp, ui: &mut egui::Ui, lang: &str, has_doc: bool) {
     let (active_id, custom) = crate::dock::pubgen::with_state(ui.ctx(), |st| (st.active_profile_id.clone(), st.profile_custom.clone()));
-
     for p in crate::dock::pubgen::ProfileManager::builtin_profiles() {
         let is_active = active_id == p.id;
         let prefix = if is_active { "✓ " } else { "   " };
@@ -192,7 +476,6 @@ fn profiles_submenu(app: &mut DesignApp, ui: &mut egui::Ui, lang: &str, has_doc:
             ui.close();
         }
     }
-
     if let Some(cust) = custom {
         let is_active = active_id == "custom";
         let prefix = if is_active { "✓ " } else { "   " };
@@ -204,16 +487,13 @@ fn profiles_submenu(app: &mut DesignApp, ui: &mut egui::Ui, lang: &str, has_doc:
             ui.close();
         }
     }
-
     ui.separator();
-
     if item(ui, lang, "Customize Active Profile…", true) {
         crate::dock::pubgen::with_state(ui.ctx(), |st| {
             st.dialog_profile_customize_open = true;
         });
         ui.close();
     }
-
     if item(ui, lang, "Apply Profile Margins", has_doc) {
         let _ = crate::dock::pubgen::execute_set_page_margins(app);
         ui.close();
@@ -258,43 +538,7 @@ fn ai_translate(app: &mut DesignApp, ui: &mut egui::Ui, lang: &str, has_doc: boo
     if item(ui, lang, "Translate Table Pages…", can_batch_tables) {
         crate::dock::pubgen::with_state(ui.ctx(), |st| {
             st.show_table_range_popup = true;
-            if st.ai_table_range_to == 0 || st.ai_table_range_to > total_pages {
-                st.ai_table_range_to = total_pages.max(1);
-            }
         });
-        ui.close();
-    }
-
-    let can_fix = crate::dock::pubgen::with_state(ui.ctx(), |st| (is_review || is_table) && !st.translations.is_empty() && !st.glossary.is_empty());
-    if item(ui, lang, "Fix Terms with Glossary", can_fix) {
-        crate::dock::pubgen::with_state(ui.ctx(), |st| {
-            crate::dock::pubgen::ai::execute_fix_terms(app, st);
-        });
-        ui.close();
-    }
-
-    ui.separator();
-
-    if item(ui, lang, "Setup…", true) {
-        crate::dock::pubgen::with_state(ui.ctx(), |st| {
-            st.ai_dialog = Some(crate::dock::pubgen::ai::AiSetupDialog::open(app, st));
-        });
-        ui.close();
-    }
-}
-
-/// About PubGen… and the menu-bar toggle, shown at the foot of the PubGen menu.
-fn about(ui: &mut egui::Ui, lang: &str) {
-    if item(ui, lang, "About PubGen…", true) {
-        crate::dock::pubgen::with_state(ui.ctx(), |st| {
-            st.show_about_dialog = true;
-        });
-        ui.close();
-    }
-    let pubgen_on = pubgen_menus_on(ui.ctx());
-    let toggle = if pubgen_on { "Show DesignCraft Menus" } else { "Show PubGen Menus" };
-    if item(ui, lang, toggle, true) {
-        set_pubgen_menus_on(ui.ctx(), !pubgen_on);
         ui.close();
     }
 }
@@ -314,280 +558,477 @@ pub fn pubgen_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
     });
 }
 
-/// The Publication menu: the generation pipeline. (About and the menu-bar toggle live in Help.)
-fn publication_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
-    let lang = app.ui.language.clone();
-    let rtl = crate::i18n::is_rtl(&lang);
-    crate::menus::menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&lang, "Publication")), |ui| {
-        popup(ui, rtl, 260.0, |ui| pipeline(app, ui));
-    });
-}
-
-/// The Publication Tools menu: manual ingest, layout utilities, language mode and AI translation.
-fn content_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
-    let lang = app.ui.language.clone();
-    let rtl = crate::i18n::is_rtl(&lang);
-    crate::menus::menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&lang, "Publication Tools")), |ui| {
-        popup(ui, rtl, 260.0, |ui| content(app, ui, &lang, rtl));
-    });
-}
-
 #[cfg(test)]
+
 mod tests {
+
     use super::*;
 
     fn frame(ctx: &egui::Context, app: &mut DesignApp, size: egui::Vec2, events: Vec<egui::Event>) -> Vec<String> {
+
         // Changing the menu set discards a pass to re-lay-out the bar; the discarded pass has no
+
         // shapes, so draw until a pass with shapes comes back.
+
         let mut texts = Vec::new();
+
         for _ in 0..3 {
+
             let time = ctx.cumulative_pass_nr() as f64 / 60.0;
+
             let input = egui::RawInput {
+
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+
                 time: Some(time),
+
                 events: if texts.is_empty() { events.clone() } else { Vec::new() },
+
                 ..Default::default()
+
             };
+
             let mut output = ctx.run_ui(input, |ui| {
+
                 // The real entry point: `menu_bar` here would be this module's own wrapper.
+
                 egui::MenuBar::new().ui(ui, |ui| crate::menus::menu_bar(app, ui));
+
             });
+
             output.textures_delta.clear();
+
             texts = collect_texts(&output.shapes);
+
             if !texts.is_empty() {
+
                 break;
+
             }
+
         }
+
         texts
+
     }
 
     fn collect_texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {
+
         fn collect(shape: &egui::Shape, out: &mut Vec<String>) {
+
             match shape {
+
                 egui::Shape::Text(t) => out.push(t.galley.job.text.clone()),
+
                 egui::Shape::Vec(shapes) => {
+
                     for s in shapes {
+
                         collect(s, out);
+
                     }
+
                 }
+
                 _ => {}
+
             }
+
         }
+
         let mut texts = Vec::new();
+
         for clipped in shapes {
+
             collect(&clipped.shape, &mut texts);
+
         }
+
         texts
+
     }
 
     fn app() -> DesignApp {
+
         DesignApp::new(designcraft_engine::Session::new(), Default::default())
+
     }
 
     #[test]
+
     fn pubgen_bar_keeps_the_host_menus_and_adds_the_pubgen_ones() {
+
         let ctx = egui::Context::default();
+
         crate::theme::install_fonts(&ctx, "en");
+
         let mut app = app();
+
         let texts = frame(&ctx, &mut app, egui::vec2(1920.0, 200.0), Vec::new());
-        let order = ["File", "Edit", "Layout", "Type", "Object", "Table", "View", "Window", "Publication", "Publication Tools", "Shortcut", "Help"];
+
+        let order = ["File", "Publication", "Publication Tools", "Automation & Content", "DesignCraft", "View", "Shortcut", "Help"];
+
         let positions: Vec<Option<usize>> = order.iter().map(|m| texts.iter().position(|t| t == m)).collect();
+
         for (i, top) in order.iter().enumerate() {
+
             assert!(positions[i].is_some(), "missing {top} in {texts:?}");
+
         }
+
         for (i, pair) in order.windows(2).enumerate() {
+
             assert!(positions[i] < positions[i + 1], "{} must come before {}: {:?}", pair[0], pair[1], positions);
+
         }
+
     }
 
     #[test]
+
     fn toggling_brings_designcrafts_menus_back_and_pubgens_away() {
+
         let ctx = egui::Context::default();
+
         crate::theme::install_fonts(&ctx, "en");
+
         let mut app = app();
+
         let texts = frame(&ctx, &mut app, egui::vec2(1600.0, 200.0), Vec::new());
+
         let publication = texts.iter().position(|t| t == "Publication").expect("PubGen bar");
+
         assert!(publication < texts.iter().position(|t| t == "Help").expect("Help"), "Publication comes before Help");
 
         set_pubgen_menus_on(&ctx, false);
+
         assert!(!pubgen_menus_on(&ctx));
+
         let texts = frame(&ctx, &mut app, egui::vec2(1600.0, 200.0), Vec::new());
+
         assert!(texts.iter().any(|t| t == "Edit"), "DesignCraft's Edit menu is back: {texts:?}");
+
         assert!(!texts.iter().any(|t| t == "Publication"), "PubGen's menus are gone: {texts:?}");
+
         let pubgen = texts.iter().position(|t| t == "Pubgen").expect("the PubGen menu stays reachable");
+
         assert!(pubgen < texts.iter().position(|t| t == "Help").expect("Help"));
 
         set_pubgen_menus_on(&ctx, true);
+
         let texts = frame(&ctx, &mut app, egui::vec2(1920.0, 200.0), Vec::new());
+
         assert!(texts.iter().any(|t| t == "Publication"), "PubGen's menus are back: {texts:?}");
+
         assert!(texts.iter().any(|t| t == "Edit"), "the host menus stay: {texts:?}");
+
         assert!(!texts.iter().any(|t| t == "Pubgen"), "the fallback Pubgen menu hides while its own bar shows: {texts:?}");
+
     }
 
     #[test]
+
     fn every_pubgen_action_renders() {
+
         let ctx = egui::Context::default();
+
         crate::theme::install_fonts(&ctx, "en");
+
         let mut app = app();
+
         let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))), ..Default::default() };
+
         let mut output = ctx.run_ui(input, |ui| {
+
             egui::MenuBar::new().ui(ui, |ui| pubgen_menu(&mut app, ui));
+
         });
+
         output.textures_delta.clear();
+
         let texts = collect_texts(&output.shapes);
+
         assert!(texts.iter().any(|t| t == "Pubgen"), "the menu button is drawn: {texts:?}");
+
     }
 
     /// The Publication menu's rows, drawn like the popup draws them (the popup itself needs a
+
     /// click; the contents function is what the click opens).
+
     fn publication_rows(app: &mut DesignApp, ctx: &egui::Context) -> Vec<String> {
+
         let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))), ..Default::default() };
+
         let mut output = ctx.run_ui(input, |ui| {
+
             pipeline(app, ui);
+
         });
+
         output.textures_delta.clear();
+
         collect_texts(&output.shapes)
+
     }
 
     /// One action, one route: the Publication menu is exactly the pipeline — no second Excel row,
+
     /// no About (§2.4-1/2 of the accessibility audit).
+
     #[test]
+
     fn publication_menu_is_exactly_the_pipeline() {
+
         let ctx = egui::Context::default();
+
         crate::theme::install_fonts(&ctx, "en");
+
         let mut app = app();
+
         let rows = publication_rows(&mut app, &ctx);
+
         let excel = rows.iter().filter(|t| t.contains("Excel")).count();
+
         assert_eq!(excel, 1, "one Excel route only: {rows:?}");
+
         assert!(!rows.iter().any(|t| t.contains("Compile Wizard")), "the duplicate route is gone: {rows:?}");
+
         assert!(!rows.iter().any(|t| t.contains("About")), "About lives in Help: {rows:?}");
+
     }
 
     /// Opening a project without a way to save it back was the gap: both save rows ride the
+
     /// pipeline, right after Open.
+
     #[test]
+
     fn the_publication_menu_can_save_the_project_it_opens() {
+
         let ctx = egui::Context::default();
+
         crate::theme::install_fonts(&ctx, "en");
+
         let mut app = app();
+
         let rows = publication_rows(&mut app, &ctx);
+
         let open = rows.iter().position(|t| t.contains("Open Publication Project")).expect("Open row: {rows:?}");
+
         let save = rows.iter().position(|t| t.contains("Save Publication Project")).expect("Save row: {rows:?}");
+
         let save_as = rows.iter().position(|t| t.contains("Save Publication Project As")).expect("Save As row: {rows:?}");
+
         assert!(open < save && save < save_as, "Save follows Open: {rows:?}");
+
     }
 
     /// Help carries About PubGen… and the menu-bar toggle — the one place both live.
+
     #[test]
+
     fn help_menu_ends_with_about_and_the_bar_toggle() {
+
         let ctx = egui::Context::default();
+
         crate::theme::install_fonts(&ctx, "en");
+
         let app = app();
+
         let lang = app.ui.language.clone();
+
         let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))), ..Default::default() };
+
         let mut output = ctx.run_ui(input, |ui| about(ui, &lang));
+
         output.textures_delta.clear();
+
         let texts = collect_texts(&output.shapes);
+
         assert!(texts.iter().any(|t| t.contains("About PubGen")), "{texts:?}");
+
         assert!(texts.iter().any(|t| t.contains("DesignCraft Menus") || t.contains("PubGen Menus")), "{texts:?}");
+
     }
 
     /// The dual-language toggle is an upstream `Item::Cmd` row: its checkmark comes from
+
     /// `menus::state::checked`, not a hand-drawn prefix (the audit's P1-3).
+
     #[test]
+
     fn the_dual_language_toggle_draws_an_upstream_checkmark() {
+
         let ctx = egui::Context::default();
+
         crate::theme::install_fonts(&ctx, "en");
+
         let mut app = app();
+
         app.egui_ctx = Some(ctx.clone());
+
         let content = |app: &mut DesignApp| {
+
             let lang = app.ui.language.clone();
+
             let input =
+
                 egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))), ..Default::default() };
+
             let mut output = ctx.run_ui(input, |ui| content(app, ui, &lang, false));
+
             output.textures_delta.clear();
+
             collect_texts(&output.shapes)
+
         };
+
         assert!(content(&mut app).iter().any(|t| t.contains("✓") && t.contains("Dual Language Mode")), "bilingual by default, checked");
+
         crate::dock::pubgen::with_state(&ctx, |st| {
+
             st.bilingual_output = false;
+
         });
+
         assert!(content(&mut app).iter().any(|t| t.contains("Dual Language Mode") && !t.contains("✓")), "single after the toggle, unchecked");
+
     }
 
     /// Picking the BPS BRS profile turns dual-language off, so the menu row loses its checkmark.
+
     #[test]
+
     fn applying_the_brs_profile_unchecks_the_dual_language_row() {
+
         let ctx = egui::Context::default();
+
         crate::theme::install_fonts(&ctx, "en");
+
         let mut app = app();
+
         app.egui_ctx = Some(ctx.clone());
+
         crate::dock::pubgen::with_state(&ctx, |st| st.bilingual_output = true);
+
         let content = |app: &mut DesignApp| {
+
             let lang = app.ui.language.clone();
+
             let input =
+
                 egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))), ..Default::default() };
+
             let mut output = ctx.run_ui(input, |ui| content(app, ui, &lang, false));
+
             output.textures_delta.clear();
+
             collect_texts(&output.shapes)
+
         };
+
         assert!(content(&mut app).iter().any(|t| t.contains("✓") && t.contains("Dual Language Mode")), "seeded bilingual: checked");
 
         let _ = crate::menus::run::run_ui(&mut app, "pubgen.selectProfile", &serde_json::json!({"id": "bps_brs"}));
 
         let is_bilingual = crate::dock::pubgen::with_state(&ctx, |st| st.bilingual_output);
+
         assert!(!is_bilingual, "BRS profile is single-language");
+
         assert!(
+
             content(&mut app).iter().any(|t| t.contains("Dual Language Mode") && !t.contains("✓")),
+
             "dual-language row is unchecked after the BRS profile"
+
         );
+
     }
 
     /// A row whose background job runs carries a ● marker (the audit's P1-6).
+
     #[test]
+
     fn a_running_job_marks_its_publication_row() {
+
         let ctx = egui::Context::default();
+
         crate::theme::install_fonts(&ctx, "en");
+
         let mut app = app();
+
         app.egui_ctx = Some(ctx.clone());
+
         assert!(!publication_rows(&mut app, &ctx).iter().any(|t| t.starts_with('●')), "idle: no dot");
+
         crate::dock::pubgen::with_state(&ctx, |st| {
+
             st.compile_job = Some(Box::new(crate::dock::pubgen::compile::CompileJob::fake_running()));
+
         });
+
         let rows = publication_rows(&mut app, &ctx);
+
         let marked: Vec<_> = rows.iter().filter(|t| t.starts_with('●')).collect();
+
         assert_eq!(marked.len(), 1, "exactly the compiling row: {rows:?}");
+
         assert!(marked[0].contains("Compile Publication"), "{marked:?}");
+
     }
 
     /// Pillar 7: Publication Profile is accessible in the pipeline and via UI commands.
+
     #[test]
+
     fn publication_profile_accessible_from_menu_and_pipeline() {
+
         let ctx = egui::Context::default();
+
         crate::theme::install_fonts(&ctx, "en");
+
         let mut app = app();
+
         app.egui_ctx = Some(ctx.clone());
 
         let rows = publication_rows(&mut app, &ctx);
+
         assert!(rows.iter().any(|t| t.contains("Publication Profile")), "Publication Profile row in pipeline: {rows:?}");
 
         // Test running pubgen.profileCustomize UI command
+
         let _ = crate::menus::run::run_ui(&mut app, "pubgen.profileCustomize", &serde_json::json!({}));
+
         let is_open = crate::dock::pubgen::with_state(&ctx, |st| st.dialog_profile_customize_open);
+
         assert!(is_open, "dialog_profile_customize_open set by UI command");
 
         // Test running pubgen.selectProfile UI command
+
         let _ = crate::menus::run::run_ui(&mut app, "pubgen.selectProfile", &serde_json::json!({"id": "bps_brs"}));
+
         let active_id = crate::dock::pubgen::with_state(&ctx, |st| st.active_profile_id.clone());
+
         assert_eq!(active_id, "bps_brs", "active profile changed to bps_brs");
 
         // Test profiles_submenu renders
+
         let lang = app.ui.language.clone();
+
         let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))), ..Default::default() };
+
         let mut output = ctx.run_ui(input, |ui| profiles_submenu(&mut app, ui, &lang, false));
+
         output.textures_delta.clear();
+
         let sub_texts = collect_texts(&output.shapes);
+
         assert!(sub_texts.iter().any(|t| t.contains("Berita Resmi Statistik")), "profiles submenu lists BRS: {sub_texts:?}");
+
         assert!(sub_texts.iter().any(|t| t.contains("Laporan Tahunan Korporat")), "profiles submenu lists Corporate: {sub_texts:?}");
+
     }
+
 }
+

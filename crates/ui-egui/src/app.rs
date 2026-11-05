@@ -231,23 +231,39 @@ impl DesignApp {
         if dbg {
             eprintln!("root start {:?}", ui.available_rect_before_wrap());
         }
+        let is_orchestrator = {
+            #[cfg(feature = "pubgen")]
+            {
+                crate::menus::pubgen_bar::is_orchestrator_mode(ui.ctx())
+            }
+            #[cfg(not(feature = "pubgen"))]
+            {
+                false
+            }
+        };
+
         if !presenting {
             chrome::app_bar(self, ui);
             if dbg {
                 eprintln!("after app bar {:?}", ui.available_rect_before_wrap());
             }
-            if self.ui.control_bar && self.session.active().is_some() && self.ui.hidden_panels == 0 {
+            if !is_orchestrator && self.ui.control_bar && self.session.active().is_some() && self.ui.hidden_panels == 0 {
                 chrome::control_bar(self, ui);
             }
             chrome::status_bar(self, ui);
             if dbg {
                 eprintln!("after status {:?}", ui.available_rect_before_wrap());
             }
-            if self.ui.hidden_panels != 1 {
+            if !is_orchestrator && self.ui.hidden_panels != 1 {
                 toolbar::show(self, ui);
             }
         }
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.pasteboard)).show(ui, |ui| {
+            #[cfg(feature = "pubgen")]
+            if is_orchestrator {
+                crate::dock::pubgen::workspace::show(self, ui);
+                return;
+            }
             // The panel layout holds the canvas as its protected `canvas` panel.
             if presenting || self.ui.hidden_panels != 0 {
                 self.canvas_area(ui, presenting);
