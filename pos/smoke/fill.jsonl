@@ -1,0 +1,2 @@
+{"command":"story.setText","params":{"story":9,"text":"Publisher Studio works"}}
+{"command":"story.setText","params":{"story":11,"text":"Body filled by the batch pipeline.\nSecond paragraph proves the flow."}}

@@ -1,0 +1,13 @@
+/target
+/dist/
+/samples/brs/csv/
+/samples/brs/md/
+samples/DUAL_LANG/csv/
+samples/DUAL_LANG/md/
+/samples/thumb/
+/samples/**/**/*.csv
+assets/designcraft*
+assets/*.zip
+~$*.xlsx
+recent_projects.json
+scratch/

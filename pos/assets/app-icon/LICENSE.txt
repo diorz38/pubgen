@@ -1,0 +1,13 @@
+POS app icon (pos.svg, pos-small.svg and every file derived from them in
+this directory: pos-1024.png, pos-macos-512.png, pos.icns, pos.ico,
+hicolor/).
+
+Original artwork made for this project by the project owner in ArtCraft, then vectorised. No
+third-party material. Licensed like the rest of POS, under either of
+
+  * Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0)
+  * MIT license (https://opensource.org/licenses/MIT)
+
+at your option.
+
+Regenerate the derived files from pos_logo.png (see README.md in this directory).
