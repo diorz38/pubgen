@@ -1,12 +1,7 @@
-use egui::{Color32, RichText, Ui, Vec2};
 use crate::mode::StudioMode;
+use egui::{Color32, RichText, Ui, Vec2};
 
-pub fn render_top_bar(
-    ui: &mut Ui,
-    active_mode: &mut StudioMode,
-    project_name: Option<&str>,
-    has_document: bool,
-) {
+pub fn render_top_bar(ui: &mut Ui, active_mode: &mut StudioMode, project_name: Option<&str>, has_document: bool) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = Vec2::new(12.0, 0.0);
 
@@ -19,23 +14,13 @@ pub fn render_top_bar(
         let orch_selected = *active_mode == StudioMode::Orchestrator;
         let dc_selected = *active_mode == StudioMode::DesignCraft;
 
-        if ui.selectable_label(orch_selected, StudioMode::Orchestrator.label())
-            .on_hover_text(StudioMode::Orchestrator.description())
-            .clicked()
-        {
+        if ui.selectable_label(orch_selected, StudioMode::Orchestrator.label()).on_hover_text(StudioMode::Orchestrator.description()).clicked() {
             *active_mode = StudioMode::Orchestrator;
         }
 
-        let dc_label = if has_document {
-            StudioMode::DesignCraft.label().to_string()
-        } else {
-            format!("{} (🔒)", StudioMode::DesignCraft.label())
-        };
+        let dc_label = if has_document { StudioMode::DesignCraft.label().to_string() } else { format!("{} (🔒)", StudioMode::DesignCraft.label()) };
 
-        if ui.selectable_label(dc_selected, dc_label)
-            .on_hover_text(StudioMode::DesignCraft.description())
-            .clicked()
-        {
+        if ui.selectable_label(dc_selected, dc_label).on_hover_text(StudioMode::DesignCraft.description()).clicked() {
             *active_mode = StudioMode::DesignCraft;
         }
 
@@ -57,4 +42,3 @@ pub fn render_top_bar(
         });
     });
 }
-

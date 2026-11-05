@@ -17,8 +17,7 @@ pub struct GeoMap {
 
 impl GeoMap {
     pub fn from_json_str(json_str: &str) -> Result<Self, String> {
-        let root: serde_json::Value =
-            serde_json::from_str(json_str).map_err(|e| format!("Invalid GeoJSON syntax: {e}"))?;
+        let root: serde_json::Value = serde_json::from_str(json_str).map_err(|e| format!("Invalid GeoJSON syntax: {e}"))?;
 
         let mut features = Vec::new();
         let mut min_lon = f64::INFINITY;
@@ -69,10 +68,10 @@ impl GeoMap {
                 "Polygon" => {
                     if let Some(rings) = coords.as_array() {
                         for ring in rings {
-                            if let Some(pts) = parse_ring(ring, &mut min_lon, &mut min_lat, &mut max_lon, &mut max_lat) {
-                                if pts.len() >= 3 {
-                                    polygons.push(pts);
-                                }
+                            if let Some(pts) = parse_ring(ring, &mut min_lon, &mut min_lat, &mut max_lon, &mut max_lat)
+                                && pts.len() >= 3
+                            {
+                                polygons.push(pts);
                             }
                         }
                     }
@@ -82,10 +81,10 @@ impl GeoMap {
                         for poly in poly_list {
                             if let Some(rings) = poly.as_array() {
                                 for ring in rings {
-                                    if let Some(pts) = parse_ring(ring, &mut min_lon, &mut min_lat, &mut max_lon, &mut max_lat) {
-                                        if pts.len() >= 3 {
-                                            polygons.push(pts);
-                                        }
+                                    if let Some(pts) = parse_ring(ring, &mut min_lon, &mut min_lat, &mut max_lon, &mut max_lat)
+                                        && pts.len() >= 3
+                                    {
+                                        polygons.push(pts);
                                     }
                                 }
                             }
@@ -104,21 +103,11 @@ impl GeoMap {
             return Err("GeoJSON contains no valid coordinates".into());
         }
 
-        Ok(GeoMap {
-            name: "GeoMap".into(),
-            bbox: [min_lon, min_lat, max_lon, max_lat],
-            features,
-        })
+        Ok(GeoMap { name: "GeoMap".into(), bbox: [min_lon, min_lat, max_lon, max_lat], features })
     }
 }
 
-fn parse_ring(
-    ring_val: &serde_json::Value,
-    min_lon: &mut f64,
-    min_lat: &mut f64,
-    max_lon: &mut f64,
-    max_lat: &mut f64,
-) -> Option<Vec<(f64, f64)>> {
+fn parse_ring(ring_val: &serde_json::Value, min_lon: &mut f64, min_lat: &mut f64, max_lon: &mut f64, max_lat: &mut f64) -> Option<Vec<(f64, f64)>> {
     let arr = ring_val.as_array()?;
     let mut pts = Vec::with_capacity(arr.len());
     for pt in arr {
@@ -188,11 +177,7 @@ pub fn render_choropleth_map_svg(
     let geo_aspect = geo_w / geo_h;
     let target_aspect = target_w / target_h;
 
-    let (draw_w, draw_h) = if target_aspect > geo_aspect {
-        (target_h * geo_aspect, target_h)
-    } else {
-        (target_w, target_w / geo_aspect)
-    };
+    let (draw_w, draw_h) = if target_aspect > geo_aspect { (target_h * geo_aspect, target_h) } else { (target_w, target_w / geo_aspect) };
 
     let offset_x = pad_left + (target_w - draw_w) * 0.5;
     let offset_y = pad_top + (target_h - draw_h) * 0.5;
@@ -287,15 +272,7 @@ mod tests {
         data.insert("Kecamatan Utara".into(), 85.0);
         data.insert("Kecamatan Selatan".into(), 42.0);
 
-        let svg = render_choropleth_map_svg(
-            "Peta Tematik Kemiskinan",
-            &map,
-            &data,
-            "#fee2e2",
-            "#b91c1c",
-            600.0,
-            400.0,
-        );
+        let svg = render_choropleth_map_svg("Peta Tematik Kemiskinan", &map, &data, "#fee2e2", "#b91c1c", 600.0, 400.0);
 
         assert!(svg.contains("<svg"));
         assert!(svg.contains("Peta Tematik Kemiskinan"));

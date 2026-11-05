@@ -52,11 +52,14 @@ pub const TABLE: &[(&str, Class)] = &[
     ("engine", Class::Layer(5)),
     ("ui-egui", Class::Layer(6)),
     ("mcp", Class::Layer(6)),
+    ("pubgen-core", Class::Layer(6)),
     ("testkit", Class::Testkit),
     // L7 apps and tooling
     ("designcraft", Class::Exempt),
     ("cli", Class::Exempt),
     ("web", Class::Exempt),
+    ("pubgen-cli", Class::Exempt),
+    ("pubgen-studio", Class::Exempt),
     ("xtask", Class::Exempt),
 ];
 

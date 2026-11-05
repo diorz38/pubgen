@@ -211,7 +211,7 @@ mod tests {
                 {"kind": "Chart", "scope": "NewObject"},
             ],
         });
-        let m = build_manifest(&meta, Path::new("BRS.pubgen"), &[wb.clone()], None).unwrap();
+        let m = build_manifest(&meta, Path::new("BRS.pubgen"), std::slice::from_ref(&wb), None).unwrap();
         assert_eq!(m["version"], 1);
         assert_eq!(m["profile"], "bps_brs");
         assert_eq!(m["publicationTitle"], "Rilis NTP");
@@ -232,7 +232,7 @@ mod tests {
         let dir = std::env::temp_dir();
         let wb = dir.join("X.xlsx");
         std::fs::write(&wb, b"x").unwrap();
-        let m = build_manifest(&meta, Path::new("p.pubgen"), &[wb.clone()], None).unwrap();
+        let m = build_manifest(&meta, Path::new("p.pubgen"), std::slice::from_ref(&wb), None).unwrap();
         assert_eq!(m["profile"], "bps_brs");
         std::fs::remove_file(&wb).unwrap();
     }

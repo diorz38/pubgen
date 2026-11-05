@@ -51,6 +51,15 @@ pub const MAC_CONTENT_LEFT: f32 = MAC_LIGHTS_LEFT + 2.0 * MAC_LIGHT_PITCH + MAC_
 
 impl DesignApp {
     fn session_home(&mut self) {
+        #[cfg(feature = "pubgen")]
+        if let Some(ctx) = self.egui_ctx.clone() {
+            if crate::menus::pubgen_bar::is_orchestrator_mode(&ctx) {
+                let mut state = crate::dock::pubgen::workspace::get_state(&ctx);
+                state.view = crate::dock::pubgen::workspace::OrchestratorView::Home;
+                crate::dock::pubgen::workspace::set_state(&ctx, state);
+                return;
+            }
+        }
         self.ui.status = crate::i18n::tr(&self.ui.language, "Home").into();
     }
 }

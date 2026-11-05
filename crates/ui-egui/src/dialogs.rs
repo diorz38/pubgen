@@ -2942,6 +2942,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
         "userDictionary" => crate::i18n::tr(&app.ui.language, "User Dictionary"),
         "newWorkspace" => crate::i18n::tr(&app.ui.language, "New Workspace"),
         "closeDocument" => crate::i18n::tr(&app.ui.language, "Unsaved Changes"),
+        "closeWorkspace" => crate::i18n::tr(&app.ui.language, "Unsaved Publication Workspace"),
         "deletePages" => crate::i18n::tr(&app.ui.language, "Warning"),
         "pagesPanelOptions" => crate::i18n::tr(&app.ui.language, "Panel Options"),
         "updateLink" => crate::i18n::tr(&app.ui.language, "Update Link"),
@@ -2977,7 +2978,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
         let available = (ctx.content_rect().size() - frame_margin - egui::vec2(16.0, 16.0)).max(egui::Vec2::splat(1.0));
         let preferred_width: f32 = match d.id.as_str() {
             "alert" => 440.0,
-            "closeDocument" | "updateLink" | "deletePages" | "newWorkspace" | "pagesPanelOptions" | "insertTable" | "convertTableToText" => 380.0,
+            "closeDocument" | "closeWorkspace" | "updateLink" | "deletePages" | "newWorkspace" | "pagesPanelOptions" | "insertTable" | "convertTableToText" => 380.0,
             "insertPages" => 440.0,
             "convertTextToTable" => 420.0,
             "newDocument" => 960.0,
@@ -3543,6 +3544,13 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                             .replace("{}", &d.s("title"));
                         crate::rtl::label(ui, text);
                     }
+                    "closeWorkspace" => {
+                        let text = crate::i18n::tr(
+                            &app.ui.language,
+                            "The active publication workspace has unsaved changes. Save before closing?",
+                        );
+                        crate::rtl::label(ui, text);
+                    }
                     "deletePages" => {
                         let several = d.fields.get("pages").and_then(Value::as_array).is_some_and(|p| p.len() > 1);
                         crate::rtl::label(
@@ -3791,7 +3799,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
         ui.add_space(12.0);
         let ok_label = match d.id.as_str() {
             "colorTheme" => crate::i18n::tr(&app.ui.language, "Add to Swatches").to_string(),
-            "closeDocument" => crate::i18n::tr(&app.ui.language, "  Save  ").to_string(),
+            "closeDocument" | "closeWorkspace" => crate::i18n::tr(&app.ui.language, "  Save  ").to_string(),
             "updateLink" => crate::i18n::tr(&app.ui.language, "  Update  ").to_string(),
             "findFont" => crate::i18n::tr(&app.ui.language, "Replace All").to_string(),
             "newDocument" => format!("  {}  ", crate::i18n::tr(&app.ui.language, "Create")),
@@ -3836,7 +3844,7 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
                         crate::rtl::label(ui, egui::RichText::new(st).color(crate::theme::Tokens::get(ui.ctx()).text_dim));
                     }
                 }
-                if d.id == "closeDocument" && ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Don't Save"))).clicked() {
+                if (d.id == "closeDocument" || d.id == "closeWorkspace") && ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Don't Save"))).clicked() {
                     d.fields.insert("discard".into(), json!(true));
                     result = Some(true);
                 }
@@ -4977,6 +4985,22 @@ fn confirm_part5(app: &mut DesignApp, d: Dialog) -> Result<Value, String> {
             Ok(Value::Null)
         }
         "updateLink" => crate::panels::properties::run_update_links(app, d.fields.get("target").cloned().unwrap_or_else(|| json!({}))),
+        "closeWorkspace" => {
+            let discard = d.b("discard");
+            if !discard {
+                #[cfg(feature = "pubgen")]
+                if let Some(ctx) = app.egui_ctx.clone() {
+                    let mut st = crate::dock::pubgen::workspace::get_state(&ctx);
+                    st.is_dirty = false;
+                    crate::dock::pubgen::workspace::set_state(&ctx, st);
+                }
+            }
+            app.quit_without_asking = true;
+            app.pending_window_commands.push(egui::ViewportCommand::Close);
+            app.ui.dialog = None;
+            app.quitting = None;
+            Ok(Value::Null)
+        }
         "closeDocument" => {
             // The document may have moved in the tab row (or gone) while the dialog was open.
             let uid = d.fields.get("uid").and_then(Value::as_u64);

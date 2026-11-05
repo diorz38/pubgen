@@ -87,15 +87,15 @@ fn clean_lines(content: &str, strip_hooks: bool) -> Vec<String> {
     content
         .lines()
         .map(str::trim)
-        .map(|line| {
-            if strip_hooks {
-                HOOK_REPLACEMENTS
-                    .iter()
-                    .fold(line.to_string(), |line, (from, to)| line.replace(from, to))
-            } else {
-                line.to_string()
-            }
-        })
+        .map(
+            |line| {
+                if strip_hooks {
+                    HOOK_REPLACEMENTS.iter().fold(line.to_string(), |line, (from, to)| line.replace(from, to))
+                } else {
+                    line.to_string()
+                }
+            },
+        )
         .filter(|line| {
             if line.is_empty() {
                 return false;

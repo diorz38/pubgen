@@ -55,10 +55,7 @@ pub fn enforce(text: &str, glossary: &[Entry]) -> (String, usize) {
 
         loop {
             let chars: Vec<char> = current.chars().collect();
-            let lower: Vec<char> = chars
-                .iter()
-                .map(|c| c.to_lowercase().next().unwrap_or(*c))
-                .collect();
+            let lower: Vec<char> = chars.iter().map(|c| c.to_lowercase().next().unwrap_or(*c)).collect();
 
             let mut found = None;
             for i in 0..=lower.len().saturating_sub(needle.len()) {
@@ -73,11 +70,7 @@ pub fn enforce(text: &str, glossary: &[Entry]) -> (String, usize) {
 
             let Some(at) = found else { break };
             let matched: String = chars[at..at + needle.len()].iter().collect();
-            let replacement = if entry.case_preserve {
-                apply_case(&entry.replacement, match_case_of(&matched))
-            } else {
-                entry.replacement.clone()
-            };
+            let replacement = if entry.case_preserve { apply_case(&entry.replacement, match_case_of(&matched)) } else { entry.replacement.clone() };
 
             let mut result: String = chars[..at].iter().collect();
             result.push_str(&replacement);
@@ -97,18 +90,8 @@ mod tests {
     #[test]
     fn test_glossary_enforcement() {
         let glossary = vec![
-            Entry {
-                term: "gdp".into(),
-                replacement: "PDB".into(),
-                do_not_translate: false,
-                case_preserve: false,
-            },
-            Entry {
-                term: "consumer price index".into(),
-                replacement: "indeks harga konsumen".into(),
-                do_not_translate: false,
-                case_preserve: true,
-            },
+            Entry { term: "gdp".into(), replacement: "PDB".into(), do_not_translate: false, case_preserve: false },
+            Entry { term: "consumer price index".into(), replacement: "indeks harga konsumen".into(), do_not_translate: false, case_preserve: true },
         ];
 
         let text = "Pertumbuhan GDP kuartal ini dipengaruhi oleh Consumer Price Index yang stabil.";
@@ -119,4 +102,3 @@ mod tests {
         assert!(enforced.contains("Indeks Harga Konsumen"));
     }
 }
-

@@ -13,6 +13,7 @@ mod cs;
 mod de;
 mod fr;
 mod hu;
+mod id;
 mod it;
 mod ja;
 mod ka;
@@ -25,6 +26,7 @@ mod uk;
 /// Supported interface languages: (code, name in that language).
 pub const LANGUAGES: &[(&str, &str)] = &[
     ("", "English"),
+    ("id", "Bahasa Indonesia"),
     ("de", "Deutsch"),
     ("fr", "Français"),
     ("es", "Español"),
@@ -84,9 +86,16 @@ pub fn tr<'a>(lang: &str, s: &'a str) -> &'a str {
 /// Looks up a label in lazily cached language tables, using the shared table where supported.
 /// Unknown languages and missing keys keep the source text; `tr` also handles blank entries.
 fn lookup<'a>(lang: &str, s: &'a str) -> &'a str {
+    if lang.is_empty() || lang == "en" {
+        return s;
+    }
     static GERMAN: OnceLock<HashMap<&str, &str>> = OnceLock::new();
     static JAPANESE: OnceLock<HashMap<&str, &str>> = OnceLock::new();
     static TRANSLATIONS: OnceLock<HashMap<&str, [&str; 5]>> = OnceLock::new();
+    static INDONESIAN: OnceLock<HashMap<&str, &str>> = OnceLock::new();
+    if lang == "id" {
+        return INDONESIAN.get_or_init(|| id::TABLE.iter().copied().collect()).get(s).copied().unwrap_or(s);
+    }
     static ARABIC: OnceLock<HashMap<&str, &str>> = OnceLock::new();
     static UKRAINIAN: OnceLock<HashMap<&str, &str>> = OnceLock::new();
     static PORTUGUESE_BR: OnceLock<HashMap<&str, &str>> = OnceLock::new();

@@ -1,32 +1,41 @@
 //! Headless DesignCraft publication compiler.
 //!
 //! ```text
-//! pubgen-cli compile <MANIFEST> [--pdf OUT.pdf]   # compile pubgen_project.json via a pubgen-enabled designcraft
-//! pubgen-cli info <MANIFEST>                      # summary of the manifest, no build
-//! pubgen-cli validate <MANIFEST>                  # chapters and version-2 blocks
+//! pubgen-cli compile <MANIFEST> [OPTIONS]
+//! pubgen-cli info <MANIFEST>
+//! pubgen-cli validate <MANIFEST>
+//! pubgen-cli profiles
 //! pubgen-cli --version
 //! ```
-//!
-//! `compile` spawns `designcraft --control <port>` (a pubgen-feature build), waits for the
-//! control channel, then calls `engine.execute {"command":"pubgen.compileProject"}` with
-//! `{path, pdf?}` — the only parameters that command accepts. The child is killed when this
-//! process exits.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
-use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::net::{TcpListener, TcpStream};
+mod runtime;
+
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
+use pubgen_core::{ProfileId, ProfileService};
+use runtime::{CliDesignCraftRuntime, DesignCraftRuntime, MockDesignCraftRuntime};
 use serde_json::{Value, json};
 
-const USAGE: &str = "usage: pubgen-cli compile <MANIFEST> [--pdf OUT.pdf]\n       pubgen-cli info <MANIFEST>\n       pubgen-cli validate <MANIFEST>\n       pubgen-cli --version";
+const USAGE: &str = "\
+usage: pubgen-cli compile <MANIFEST> [OPTIONS]
+       pubgen-cli info <MANIFEST>
+       pubgen-cli validate <MANIFEST>
+       pubgen-cli profiles
+       pubgen-cli --version
+
+Compile options:
+  --pdf <PATH>               Export PDF to specified path
+  --output-dir <DIR>         Directory to store output artifacts
+  --json                     Output structured JSON report to stdout
+  --dry-run                  Simulate compilation without launching DesignCraft
+  --designcraft-exe <PATH>   Explicit path to pubgen-enabled designcraft binary
+  --timeout <SECONDS>        Connection/compile timeout in seconds (default: 30)
+  --profile <PROFILE_ID>     Override publication profile (bps_brs, bps_dda, generic_book, generic_report)
+";
+
 const PUBGEN_DESIGNCRAFT_EXE: &str = "PUBGEN_DESIGNCRAFT_EXE";
-/// ms between connection attempts to the spawned control server.
-const POLL_MS: u64 = 250;
-/// Connection attempts before giving up (40 × 250 ms = 10 s).
-const CONNECT_ATTEMPTS: u32 = 40;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -38,12 +47,12 @@ fn main() {
         Some("compile") => report(run_compile(&args[1..])),
         Some("info") => report(run_info(&args[1..])),
         Some("validate") => report(run_validate(&args[1..])),
+        Some("profiles") => report(run_profiles()),
         _ => {
             eprintln!("{USAGE}");
             1
         }
     };
-    // The child guard's Drop kills designcraft even on the early-return paths.
     std::process::exit(code);
 }
 
@@ -57,99 +66,165 @@ fn report(r: Result<(), String>) -> i32 {
     }
 }
 
-/// `compile <MANIFEST> [--pdf OUT.pdf]`.
-fn run_compile(args: &[String]) -> Result<(), String> {
-    let mut manifest: Option<PathBuf> = None;
-    let mut pdf: Option<String> = None;
+/// CLI options for the `compile` command.
+#[derive(Default)]
+struct CompileOptions {
+    manifest: Option<PathBuf>,
+    pdf: Option<String>,
+    output_dir: Option<PathBuf>,
+    json_output: bool,
+    dry_run: bool,
+    designcraft_exe: Option<PathBuf>,
+    timeout_secs: Option<u64>,
+    profile: Option<String>,
+}
+
+fn parse_compile_options(args: &[String]) -> Result<CompileOptions, String> {
+    let mut opts = CompileOptions::default();
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--pdf" => {
-                i += 1;
-                pdf = Some(args.get(i).filter(|s| !s.starts_with('-')).cloned().ok_or("--pdf needs a path")?);
+                i = i.saturating_add(1);
+                opts.pdf = Some(args.get(i).filter(|s| !s.starts_with('-')).cloned().ok_or("--pdf needs a path")?);
+            }
+            "--output-dir" => {
+                i = i.saturating_add(1);
+                let dir_str = args.get(i).filter(|s| !s.starts_with('-')).ok_or("--output-dir needs a path")?;
+                opts.output_dir = Some(PathBuf::from(dir_str));
+            }
+            "--json" => {
+                opts.json_output = true;
+            }
+            "--dry-run" => {
+                opts.dry_run = true;
+            }
+            "--designcraft-exe" => {
+                i = i.saturating_add(1);
+                let exe_str = args.get(i).filter(|s| !s.starts_with('-')).ok_or("--designcraft-exe needs a path")?;
+                opts.designcraft_exe = Some(PathBuf::from(exe_str));
+            }
+            "--timeout" => {
+                i = i.saturating_add(1);
+                let sec_str = args.get(i).filter(|s| !s.starts_with('-')).ok_or("--timeout needs seconds")?;
+                let secs = sec_str.parse::<u64>().map_err(|_| "--timeout must be a positive integer")?;
+                opts.timeout_secs = Some(secs);
+            }
+            "--profile" => {
+                i = i.saturating_add(1);
+                opts.profile = Some(args.get(i).filter(|s| !s.starts_with('-')).cloned().ok_or("--profile needs a profile ID")?);
             }
             a if a.starts_with('-') => return Err(format!("unknown option {a}")),
-            a if manifest.is_none() => manifest = Some(PathBuf::from(a)),
+            a if opts.manifest.is_none() => opts.manifest = Some(PathBuf::from(a)),
             a => return Err(format!("unexpected argument {a}")),
         }
-        i += 1;
+        i = i.saturating_add(1);
     }
-    let manifest = manifest.ok_or("missing MANIFEST (pubgen_project.json)")?;
+    Ok(opts)
+}
+
+/// `compile <MANIFEST> [OPTIONS]`.
+fn run_compile(args: &[String]) -> Result<(), String> {
+    let opts = parse_compile_options(args)?;
+    let manifest = opts.manifest.ok_or("missing MANIFEST (pubgen_project.json)")?;
     if !manifest.is_file() {
         return Err(format!("{}: no such file", manifest.display()));
     }
 
-    // Try each candidate designcraft in order; the first that actually exposes the pubgen
-    // compiler wins (a checkout can hold a stock release build beside a pubgen debug build).
-    let mut tried: Vec<String> = Vec::new();
-    let mut attempt = None;
-    for exe in resolve_candidates() {
-        let port = free_port()?;
-        let mut child = match ChildGuard::spawn(&exe, port) {
-            Ok(c) => c,
-            Err(e) => {
-                tried.push(format!("{} (launch failed: {e})", exe.display()));
-                continue;
-            }
-        };
-        let mut client = match connect(port, &mut child) {
-            Ok(c) => c,
-            Err(e) => {
-                tried.push(format!("{} ({e})", exe.display()));
-                child.kill();
-                continue;
-            }
-        };
-        let has_pubgen = client
-            .call("engine.commands", json!({}))
-            .ok()
-            .and_then(|cmds| cmds.as_array().cloned())
-            .is_some_and(|a| a.iter().any(|c| c.get("id").and_then(Value::as_str) == Some("pubgen.compileProject")));
-        if has_pubgen {
-            attempt = Some((client, child));
-            break;
-        }
-        tried.push(format!("{} (no pubgen.compileProject)", exe.display()));
-        child.kill();
+    // Validate override profile if provided
+    if let Some(ref prof_str) = opts.profile
+        && ProfileService::resolve(prof_str).is_none()
+    {
+        return Err(format!("unknown publication profile `{prof_str}`. Run `pubgen-cli profiles` to list known profiles."));
     }
-    let Some((mut client, mut child)) = attempt else {
-        return Err(format!(
-            "no pubgen-enabled designcraft found (tried: {}); build one with `cargo build -p designcraft --features pubgen` or set {PUBGEN_DESIGNCRAFT_EXE}",
-            tried.join("; ")
-        ));
-    };
 
+    let timeout = Duration::from_secs(opts.timeout_secs.unwrap_or(30));
+    let started = Instant::now();
+
+    // Prepare parameters for pubgen.compileProject
     let mut params = json!({"path": manifest.to_string_lossy()});
-    if let Some(pdf) = pdf {
+    if let Some(ref pdf) = opts.pdf {
         params["pdf"] = json!(pdf);
     }
-    let started = Instant::now();
-    let report = client
-        .call("engine.execute", json!({"command": "pubgen.compileProject", "params": params}))
-        .map_err(|e| format!("pubgen.compileProject: {e}"))?;
+    if let Some(ref out_dir) = opts.output_dir {
+        params["outputDir"] = json!(out_dir.to_string_lossy());
+    }
+    if let Some(ref prof) = opts.profile {
+        params["profile"] = json!(prof);
+    }
+
+    let report = if opts.dry_run {
+        let mut mock = MockDesignCraftRuntime::default();
+        mock.execute("pubgen.compileProject", params)?
+    } else {
+        let candidates = if let Some(ref explicit) = opts.designcraft_exe {
+            if !explicit.is_file() {
+                return Err(format!("specified designcraft executable not found: {}", explicit.display()));
+            }
+            vec![explicit.clone()]
+        } else {
+            resolve_candidates()
+        };
+
+        let mut tried = Vec::new();
+        let mut active_runtime: Option<CliDesignCraftRuntime> = None;
+
+        for exe in &candidates {
+            match CliDesignCraftRuntime::spawn(exe, timeout) {
+                Ok(mut rt) => {
+                    let caps = rt.capabilities().unwrap_or_default();
+                    if caps.iter().any(|c| c == "pubgen.compileProject") {
+                        active_runtime = Some(rt);
+                        break;
+                    }
+                    tried.push(format!("{} (no pubgen.compileProject)", exe.display()));
+                }
+                Err(e) => {
+                    tried.push(format!("{} ({e})", exe.display()));
+                }
+            }
+        }
+
+        let Some(mut rt) = active_runtime else {
+            return Err(format!(
+                "no pubgen-enabled designcraft found (tried: {}); build one with `cargo build -p designcraft --features pubgen` or set {PUBGEN_DESIGNCRAFT_EXE}",
+                tried.join("; ")
+            ));
+        };
+
+        rt.execute("pubgen.compileProject", params)?
+    };
 
     let pages = report.get("pages").and_then(Value::as_u64).unwrap_or(0);
     let chapter_count = report.get("chapters").and_then(Value::as_array).map_or(0, Vec::len);
-    println!(
-        "compiled {} in {} ms: {} pages, {} chapters",
-        manifest.display(),
-        report.get("elapsedMs").and_then(Value::as_u64).unwrap_or_else(|| started.elapsed().as_millis() as u64),
-        pages,
-        chapter_count
-    );
-    if let Some(doc) = report.get("document").and_then(Value::as_str) {
-        println!("  document: {doc}");
+
+    if opts.json_output {
+        let json_str = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
+        println!("{json_str}");
+    } else {
+        let elapsed = report.get("elapsedMs").and_then(Value::as_u64).unwrap_or_else(|| started.elapsed().as_millis() as u64);
+
+        if opts.dry_run {
+            println!("[DRY RUN] plan validated for {}", manifest.display());
+        } else {
+            println!("compiled {} in {} ms: {} pages, {} chapters", manifest.display(), elapsed, pages, chapter_count);
+        }
+
+        if let Some(doc) = report.get("document").and_then(Value::as_str) {
+            println!("  document: {doc}");
+        }
+        if let Some(out) = report.get("pdf").and_then(Value::as_str) {
+            println!("  pdf: {out}");
+        }
+        for w in report.get("warnings").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]) {
+            eprintln!("  warning: {}", w.as_str().unwrap_or("?"));
+        }
     }
-    if let Some(out) = report.get("pdf").and_then(Value::as_str) {
-        println!("  pdf: {out}");
-    }
-    for w in report.get("warnings").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]) {
-        eprintln!("  warning: {}", w.as_str().unwrap_or("?"));
-    }
-    child.kill();
-    if pages == 0 {
+
+    if pages == 0 && !opts.dry_run {
         return Err("compile produced no pages".into());
     }
+
     Ok(())
 }
 
@@ -199,6 +274,27 @@ fn run_validate(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// `profiles`: lists known canonical profiles.
+fn run_profiles() -> Result<(), String> {
+    println!("Available Publication Profiles:");
+    let profiles = [ProfileId::BpsBrs, ProfileId::BpsDda, ProfileId::GenericBook, ProfileId::GenericReport];
+    for p in &profiles {
+        let prof = ProfileService::for_id(*p);
+        println!(
+            "  • {:<16} — {} (Paper: {}, Margins: T:{} B:{} L:{} R:{} mm, Facing: {})",
+            p.id_str(),
+            p.label(),
+            prof.geometry.paper_size,
+            prof.geometry.margin_top_mm,
+            prof.geometry.margin_bottom_mm,
+            prof.geometry.margin_left_mm,
+            prof.geometry.margin_right_mm,
+            if prof.geometry.facing_pages { "Yes" } else { "No" },
+        );
+    }
+    Ok(())
+}
+
 fn manifest_arg(args: &[String]) -> Result<PathBuf, String> {
     let Some(first) = args.first().filter(|a| !a.starts_with('-')) else {
         return Err(format!("missing MANIFEST\n{USAGE}"));
@@ -211,17 +307,7 @@ fn read_json(path: &Path) -> Result<Value, String> {
     serde_json::from_str(&text).map_err(|e| format!("{}: not valid JSON: {e}", path.display()))
 }
 
-/// A free localhost port (bind to :0, read it, release it).
-fn free_port() -> Result<u16, String> {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|e| format!("no free port: {e}"))?;
-    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-    drop(listener);
-    Ok(port)
-}
-
-/// Candidate designcraft executables, best first: env var, beside this exe (the portable
-/// layout: one pubgen build next to pubgen-cli, launched from any folder), dev targets (debug
-/// before release — the freshly built feature binary), the CWD bundle, then PATH.
+/// Candidate designcraft executables.
 fn resolve_candidates() -> Vec<PathBuf> {
     let ext = std::env::consts::EXE_SUFFIX;
     let mut out = Vec::new();
@@ -242,80 +328,50 @@ fn resolve_candidates() -> Vec<PathBuf> {
     out.into_iter().filter(|p| p.is_file()).collect()
 }
 
-/// Kills designcraft when dropped, so a failing CLI never leaks the windowed child.
-struct ChildGuard(Option<Child>);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-impl ChildGuard {
-    fn spawn(exe: &Path, port: u16) -> std::io::Result<Self> {
-        Command::new(exe).arg("--control").arg(port.to_string()).spawn().map(|c| Self(Some(c)))
+    #[test]
+    fn test_parse_compile_options_flags() {
+        let args = vec![
+            "my_project.json".to_string(),
+            "--pdf".to_string(),
+            "out.pdf".to_string(),
+            "--json".to_string(),
+            "--dry-run".to_string(),
+            "--timeout".to_string(),
+            "45".to_string(),
+            "--profile".to_string(),
+            "bps_brs".to_string(),
+            "--output-dir".to_string(),
+            "dist".to_string(),
+        ];
+        let opts = parse_compile_options(&args).unwrap();
+        assert_eq!(opts.manifest, Some(PathBuf::from("my_project.json")));
+        assert_eq!(opts.pdf, Some("out.pdf".to_string()));
+        assert!(opts.json_output);
+        assert!(opts.dry_run);
+        assert_eq!(opts.timeout_secs, Some(45));
+        assert_eq!(opts.profile, Some("bps_brs".to_string()));
+        assert_eq!(opts.output_dir, Some(PathBuf::from("dist")));
     }
-    fn exited(&mut self) -> bool {
-        self.0.as_mut().is_some_and(|c| c.try_wait().map(|s| s.is_some()).unwrap_or(true))
-    }
-    fn kill(&mut self) {
-        if let Some(mut c) = self.0.take() {
-            let _ = c.kill();
-            let _ = c.wait();
-        }
-    }
-}
 
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        self.kill();
+    #[test]
+    fn test_dry_run_compilation_flow() {
+        // Create temporary synthetic project manifest
+        let temp = std::env::temp_dir().join(format!("test_pubgen_{}.json", std::process::id()));
+        std::fs::write(&temp, r#"{"version":1,"publicationTitle":"Test","chapters":[{"chapter":1,"title":"Intro"}]}"#).unwrap();
+
+        let args = vec![temp.to_string_lossy().to_string(), "--dry-run".to_string(), "--json".to_string()];
+        let res = run_compile(&args);
+        let _ = std::fs::remove_file(&temp);
+
+        assert!(res.is_ok());
     }
-}
 
-/// Blocking JSON-lines client for the control channel (same protocol as pos.app's).
-struct ControlClient {
-    reader: BufReader<TcpStream>,
-    writer: BufWriter<TcpStream>,
-    next_id: u64,
-}
-
-fn connect(port: u16, child: &mut ChildGuard) -> Result<ControlClient, String> {
-    for _ in 0..CONNECT_ATTEMPTS {
-        if let Ok(stream) = TcpStream::connect(("127.0.0.1", port)) {
-            let _ = stream.set_nodelay(true);
-            return Ok(ControlClient {
-                reader: BufReader::new(stream.try_clone().map_err(|e| e.to_string())?),
-                writer: BufWriter::new(stream),
-                next_id: 1,
-            });
-        }
-        if child.exited() {
-            return Err("designcraft exited before opening the control channel".into());
-        }
-        std::thread::sleep(Duration::from_millis(POLL_MS));
-    }
-    Err("designcraft did not accept a control connection in time".into())
-}
-
-impl ControlClient {
-    /// One request/reply. No read timeout: a compile can run for minutes.
-    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
-        let id = self.next_id;
-        self.next_id += 1;
-        let line = json!({"id": id, "method": method, "params": params});
-        writeln!(self.writer, "{line}").map_err(|e| format!("write: {e}"))?;
-        self.writer.flush().map_err(|e| format!("flush: {e}"))?;
-        loop {
-            let mut buf = String::new();
-            let n = self.reader.read_line(&mut buf).map_err(|e| format!("read: {e}"))?;
-            if n == 0 {
-                return Err("control channel closed by designcraft".into());
-            }
-            let v: Value = serde_json::from_str(buf.trim()).map_err(|e| format!("bad reply: {e}"))?;
-            match v.get("id").and_then(Value::as_u64) {
-                Some(rid) if rid != id => continue,
-                _ => {
-                    return if v.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-                        Ok(v.get("result").cloned().unwrap_or(Value::Null))
-                    } else {
-                        Err(v.get("error").and_then(Value::as_str).unwrap_or("unknown error").to_string())
-                    };
-                }
-            }
-        }
+    #[test]
+    fn test_run_profiles_succeeds() {
+        assert!(run_profiles().is_ok());
     }
 }

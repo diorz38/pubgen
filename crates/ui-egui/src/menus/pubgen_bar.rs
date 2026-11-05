@@ -326,13 +326,26 @@ fn view_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
             ui.separator();
 
             submenu(ui, &lang, rtl, "Language / Bahasa", 180.0, |ui| {
-                if ui.selectable_label(app.ui.language == "id", "🇮🇩 Bahasa Indonesia").clicked() {
-                    app.ui.language = "id".into();
+                let is_id = app.ui.language == "id";
+                let is_en = app.ui.language.is_empty() || app.ui.language == "en";
+                if ui.selectable_label(is_id, "🇮🇩 Bahasa Indonesia").clicked() {
+                    let _ = app.run("app.language", serde_json::json!({"lang": "id"}));
                     ui.close();
                 }
-                if ui.selectable_label(app.ui.language == "en", "🇬🇧 English").clicked() {
-                    app.ui.language = "en".into();
+                if ui.selectable_label(is_en, "🇬🇧 English").clicked() {
+                    let _ = app.run("app.language", serde_json::json!({"lang": ""}));
                     ui.close();
+                }
+            });
+
+            submenu(ui, &lang, rtl, "Theme / Tema", 180.0, |ui| {
+                for b in crate::theme::Brightness::ALL {
+                    let is_active = app.ui.brightness == b;
+                    let label = format!("{} {}", if is_active { "✓" } else { "  " }, crate::i18n::tr(&lang, b.label()));
+                    if ui.selectable_label(is_active, label).clicked() {
+                        let _ = app.run("window.brightness", serde_json::json!({"brightness": b.id()}));
+                        ui.close();
+                    }
                 }
             });
         });
@@ -559,7 +572,6 @@ pub fn pubgen_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
 }
 
 #[cfg(test)]
-
 mod tests {
 
     use super::*;
@@ -660,6 +672,8 @@ mod tests {
 
         let ctx = egui::Context::default();
 
+        set_pubgen_menus_on(&ctx, true);
+
         crate::theme::install_fonts(&ctx, "en");
 
         let mut app = app();
@@ -689,6 +703,8 @@ mod tests {
     fn toggling_brings_designcrafts_menus_back_and_pubgens_away() {
 
         let ctx = egui::Context::default();
+
+        set_pubgen_menus_on(&ctx, true);
 
         crate::theme::install_fonts(&ctx, "en");
 
@@ -720,7 +736,7 @@ mod tests {
 
         assert!(texts.iter().any(|t| t == "Publication"), "PubGen's menus are back: {texts:?}");
 
-        assert!(texts.iter().any(|t| t == "Edit"), "the host menus stay: {texts:?}");
+        assert!(!texts.iter().any(|t| t == "Edit"), "DesignCraft's Edit menu is replaced in Orchestrator mode: {texts:?}");
 
         assert!(!texts.iter().any(|t| t == "Pubgen"), "the fallback Pubgen menu hides while its own bar shows: {texts:?}");
 
@@ -753,9 +769,7 @@ mod tests {
     }
 
     /// The Publication menu's rows, drawn like the popup draws them (the popup itself needs a
-
     /// click; the contents function is what the click opens).
-
     fn publication_rows(app: &mut DesignApp, ctx: &egui::Context) -> Vec<String> {
 
         let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))), ..Default::default() };
@@ -773,11 +787,8 @@ mod tests {
     }
 
     /// One action, one route: the Publication menu is exactly the pipeline — no second Excel row,
-
     /// no About (§2.4-1/2 of the accessibility audit).
-
     #[test]
-
     fn publication_menu_is_exactly_the_pipeline() {
 
         let ctx = egui::Context::default();
@@ -799,11 +810,8 @@ mod tests {
     }
 
     /// Opening a project without a way to save it back was the gap: both save rows ride the
-
     /// pipeline, right after Open.
-
     #[test]
-
     fn the_publication_menu_can_save_the_project_it_opens() {
 
         let ctx = egui::Context::default();
@@ -853,11 +861,8 @@ mod tests {
     }
 
     /// The dual-language toggle is an upstream `Item::Cmd` row: its checkmark comes from
-
     /// `menus::state::checked`, not a hand-drawn prefix (the audit's P1-3).
-
     #[test]
-
     fn the_dual_language_toggle_draws_an_upstream_checkmark() {
 
         let ctx = egui::Context::default();

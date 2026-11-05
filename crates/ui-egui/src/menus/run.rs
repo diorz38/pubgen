@@ -273,6 +273,7 @@ fn run_ui_part1(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value
         }
         "app.language" => {
             let Some(v) = p.get("lang").and_then(Value::as_str) else { return Some(app.run("app.preferences", json!({}))) };
+            let v = if v == "en" { "" } else { v };
             if !crate::i18n::LANGUAGES.iter().any(|(c, _)| *c == v) {
                 return Some(Err(format!("unknown language `{v}`")));
             }

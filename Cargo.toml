@@ -40,6 +40,7 @@ designcraft-mcp = { path = "crates/mcp" }
 designcraft-translate = { path = "crates/translate" }
 designcraft-imagegen = { path = "crates/imagegen" }
 designcraft-testkit = { path = "crates/testkit" }
+pubgen-core = { path = "crates/pubgen-core" }
 
 # foundation
 kurbo = { version = "0.13", features = ["serde"] }

@@ -63,7 +63,14 @@ pub const PUBGEN_PANELS: &[(&str, &str, &str)] = &[("pubgen", "PubGen", "panel-p
 
 /// The English name of panel `id`.
 pub fn panel_label(id: &str) -> &'static str {
-    DOCK_TABS.iter().chain(ICON_PANELS).chain(PUBGEN_PANELS).map(|p| (p.0, p.1)).chain(FLOATING_PANELS.iter().copied()).find(|p| p.0 == id).map_or("Panel", |p| p.1)
+    DOCK_TABS
+        .iter()
+        .chain(ICON_PANELS)
+        .chain(PUBGEN_PANELS)
+        .map(|p| (p.0, p.1))
+        .chain(FLOATING_PANELS.iter().copied())
+        .find(|p| p.0 == id)
+        .map_or("Panel", |p| p.1)
 }
 
 /// A panel's contents at most `max_h` tall, scrolling past that. The Pages panel scrolls its
@@ -409,12 +416,11 @@ mod pubgen_menu_tests {
             collect_texts(&clipped.shape, &mut texts);
         }
 
-        let pubgen_idx = texts.iter().position(|t| t == "Publication");
+        let pubgen_idx = texts.iter().position(|t| t == "Pubgen");
         let help_idx = texts.iter().position(|t| t == "Help");
         assert!(texts.iter().any(|t| t == "File"), "File menu must be present in menu bar. Got: {texts:?}");
-        assert!(texts.iter().any(|t| t == "Publication Tools"), "Publication Tools menu must be present in menu bar. Got: {texts:?}");
-        assert!(pubgen_idx.is_some(), "Publication menu must be present in menu bar. Got: {texts:?}");
+        assert!(pubgen_idx.is_some(), "Pubgen menu must be present in menu bar. Got: {texts:?}");
         assert!(help_idx.is_some(), "Help menu must be present in menu bar. Got: {texts:?}");
-        assert!(pubgen_idx.unwrap() < help_idx.unwrap(), "Publication must appear before Help");
+        assert!(pubgen_idx.unwrap() < help_idx.unwrap(), "Pubgen must appear before Help");
     }
 }

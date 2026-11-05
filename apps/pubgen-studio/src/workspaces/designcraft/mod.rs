@@ -1,6 +1,6 @@
+use crate::mode::StudioMode;
 use designcraft_ui_egui::DesignApp;
 use egui::{Color32, RichText, Ui};
-use crate::mode::StudioMode;
 
 pub fn render_designcraft(app: &mut DesignApp, ui: &mut Ui, mode: &mut StudioMode) {
     if app.session.documents().is_empty() {
@@ -23,4 +23,3 @@ pub fn render_designcraft(app: &mut DesignApp, ui: &mut Ui, mode: &mut StudioMod
         app.ui(ui);
     }
 }
-

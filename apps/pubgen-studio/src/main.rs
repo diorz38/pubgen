@@ -16,23 +16,19 @@ mod project;
 mod window_frame;
 mod workspaces;
 
-use std::ffi::OsStr;
-use std::path::PathBuf;
+use app::PubgenStudioApp;
 use designcraft_engine::Session;
 use designcraft_ui_egui::{DesignApp, Services};
-use app::PubgenStudioApp;
 use mode::StudioMode;
 use project::PubgenContainer;
+use std::ffi::OsStr;
+use std::path::PathBuf;
 
 fn services() -> Services {
     Services {
         read: Some(Box::new(|p: &str| std::fs::read(p).map_err(|e| e.to_string()))),
-        write: Some(Box::new(|p: &str, b: &[u8]| {
-            designcraft_engine::atomic::write_atomic(std::path::Path::new(p), b).map_err(|e| e.to_string())
-        })),
-        clipboard_text: Some(Box::new(|| {
-            arboard::Clipboard::new().and_then(|mut c| c.get_text()).ok()
-        })),
+        write: Some(Box::new(|p: &str, b: &[u8]| designcraft_engine::atomic::write_atomic(std::path::Path::new(p), b).map_err(|e| e.to_string()))),
+        clipboard_text: Some(Box::new(|| arboard::Clipboard::new().and_then(|mut c| c.get_text()).ok())),
         ..Default::default()
     }
 }
@@ -54,9 +50,7 @@ fn main() -> eframe::Result<()> {
             let container = PubgenContainer::open(path).ok();
             (StudioMode::Orchestrator, Some(path.clone()), container)
         }
-        Some(path) if path.extension() == Some(OsStr::new("designcraft")) => {
-            (StudioMode::DesignCraft, Some(path.clone()), None)
-        }
+        Some(path) if path.extension() == Some(OsStr::new("designcraft")) => (StudioMode::DesignCraft, Some(path.clone()), None),
         Some(path) => (StudioMode::Orchestrator, Some(path.clone()), None),
         None => (StudioMode::Orchestrator, None, None),
     };
@@ -98,15 +92,21 @@ fn main() -> eframe::Result<()> {
             // If a .designcraft file was passed, open it immediately into the engine session
             if let Some(path) = &file_to_open {
                 if path.extension() == Some(OsStr::new("designcraft")) {
-                    let _ = app.open_file("file.open", serde_json::json!({
-                        "path": path.to_string_lossy().to_string()
-                    }));
+                    let _ = app.open_file(
+                        "file.open",
+                        serde_json::json!({
+                            "path": path.to_string_lossy().to_string()
+                        }),
+                    );
                 } else if path.extension() == Some(OsStr::new("pubgen")) && has_cached_layout {
                     let sidecar = path.with_extension("designcraft");
                     if sidecar.is_file() {
-                        let _ = app.open_file("file.open", serde_json::json!({
-                            "path": sidecar.to_string_lossy().to_string()
-                        }));
+                        let _ = app.open_file(
+                            "file.open",
+                            serde_json::json!({
+                                "path": sidecar.to_string_lossy().to_string()
+                            }),
+                        );
                     }
                 }
             }

@@ -4885,7 +4885,27 @@ dependencies = [
 name = "pubgen-cli"
 version = "0.17.0-pubgen.0.8.6"
 dependencies = [
+ "pubgen-core",
+ "serde",
  "serde_json",
+ "zip 3.0.0",
+]
+
+[[package]]
+name = "pubgen-core"
+version = "0.17.0-pubgen.0.8.6"
+dependencies = [
+ "chrono",
+ "designcraft-color",
+ "designcraft-compose",
+ "designcraft-doc",
+ "designcraft-engine",
+ "designcraft-geom",
+ "designcraft-pdf",
+ "designcraft-render",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
  "zip 3.0.0",
 ]
 

@@ -1,9 +1,9 @@
 //! Project container reader and writer for `.pubgen` ZIP files.
 
+use serde_json::Value;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use serde_json::Value;
 use zip::write::SimpleFileOptions;
 use zip::{ZipArchive, ZipWriter};
 
@@ -27,18 +27,13 @@ pub struct PubgenContainer {
 
 impl PubgenContainer {
     pub fn new(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            metadata: Value::Object(Default::default()),
-            ..Default::default()
-        }
+        Self { name: name.into(), metadata: Value::Object(Default::default()), ..Default::default() }
     }
 
     /// Open and unpack an existing `.pubgen` ZIP container.
     pub fn open(path: &Path) -> Result<Self, String> {
         let file = File::open(path).map_err(|e| format!("Cannot open {}: {e}", path.display()))?;
-        let mut archive = ZipArchive::new(file)
-            .map_err(|e| format!("Invalid .pubgen zip archive {}: {e}", path.display()))?;
+        let mut archive = ZipArchive::new(file).map_err(|e| format!("Invalid .pubgen zip archive {}: {e}", path.display()))?;
 
         let mut container = Self {
             name: path.file_stem().and_then(|s| s.to_str()).unwrap_or("project").to_string(),
@@ -99,10 +94,10 @@ impl PubgenContainer {
         // Also check if a sidecar .designcraft exists next to this file if no cached layout inside
         if container.cached_layout.is_none() {
             let sidecar = path.with_extension("designcraft");
-            if sidecar.is_file() {
-                if let Ok(bytes) = std::fs::read(&sidecar) {
-                    container.cached_layout = Some(bytes);
-                }
+            if sidecar.is_file()
+                && let Ok(bytes) = std::fs::read(&sidecar)
+            {
+                container.cached_layout = Some(bytes);
             }
         }
 
@@ -156,8 +151,7 @@ impl PubgenContainer {
         writer.finish().map_err(|e| format!("Zip finalize: {e}"))?;
 
         // Atomic replace
-        std::fs::rename(&tmp, destination)
-            .map_err(|e| format!("Rename {} -> {}: {e}", tmp.display(), destination.display()))?;
+        std::fs::rename(&tmp, destination).map_err(|e| format!("Rename {} -> {}: {e}", tmp.display(), destination.display()))?;
 
         Ok(())
     }

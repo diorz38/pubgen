@@ -1,14 +1,13 @@
 //! Document ingestion and normalization into Markdown.
 
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 use std::io::Read;
 use zip::ZipArchive;
 
 /// Converts DOCX bytes into normalized Markdown text.
 pub fn docx_to_md(bytes: &[u8]) -> Result<String, String> {
-    let mut archive = ZipArchive::new(std::io::Cursor::new(bytes))
-        .map_err(|e| format!("Not a valid docx archive: {e}"))?;
+    let mut archive = ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| format!("Not a valid docx archive: {e}"))?;
 
     let mut xml_bytes = Vec::new();
     archive

@@ -262,6 +262,16 @@ pub(crate) fn ai_cover_options_pane(app: &mut DesignApp, ui: &mut egui::Ui, st: 
         ui.add(egui::Label::new(RichText::new(format!("Colours: {}", p.words)).size(9.5).color(t.text_dim)).wrap());
     }
 
+    let cur_pal = preset.palettes.get(st.cover_ai_palette).unwrap_or(&preset.palettes[0]);
+    let full_prompt = build_prompt(preset, cur_pal);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Prompt AI:").size(10.5).color(t.text));
+        if ui.button("📋 Copy AI Prompt").on_hover_text("Copy the complete Flux/SDXL prompt for this cover style to clipboard").clicked() {
+            ui.ctx().copy_text(full_prompt.clone());
+        }
+    });
+    ui.add(egui::Label::new(RichText::new(&full_prompt).size(9.5).color(t.text_dim)).wrap());
+
     // Key setup: the button mirrors the AI Translator one; Verify runs one tiny generation.
     let ready = AiCoverSetupDialog::key_configured(app);
     let (label, tip) = if !imagegen::compiled_in() {

@@ -1,8 +1,8 @@
 pub mod guard_dialog;
 
+use crate::mode::StudioMode;
 use designcraft_ui_egui::DesignApp;
 use egui::{Color32, RichText, Ui};
-use crate::mode::StudioMode;
 pub use guard_dialog::{GuardDialogAction, RecompileGuardDialog};
 
 pub fn render_orchestrator(
@@ -17,7 +17,8 @@ pub fn render_orchestrator(
         ui.horizontal(|ui| {
             ui.heading("📊 Publication Orchestrator");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(RichText::new("🚀 Compile & Open in Layout").strong().color(Color32::WHITE))
+                if ui
+                    .button(RichText::new("🚀 Compile & Open in Layout").strong().color(Color32::WHITE))
                     .on_hover_text("Compile the publication pages and switch to DesignCraft Layout canvas")
                     .clicked()
                 {
@@ -35,10 +36,8 @@ pub fn render_orchestrator(
         ui.separator();
 
         // Main Pubgen Orchestrator Panel
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                designcraft_ui_egui::dock::pubgen::show(app, ui);
-            });
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            designcraft_ui_egui::dock::pubgen::show(app, ui);
+        });
     });
 }

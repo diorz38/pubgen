@@ -22,6 +22,41 @@ struct SearchState {
     previous_focus: Option<egui::Id>,
 }
 
+fn paint_flag_id(painter: &egui::Painter, rect: egui::Rect) {
+    let half_h = rect.height() / 2.0;
+    let top_rect = egui::Rect::from_min_size(rect.min, vec2(rect.width(), half_h));
+    let bot_rect = egui::Rect::from_min_size(egui::pos2(rect.min.x, rect.min.y + half_h), vec2(rect.width(), rect.height() - half_h));
+    painter.rect_filled(top_rect, 0.0, Color32::from_rgb(231, 0, 17)); // #e70011
+    painter.rect_filled(bot_rect, 0.0, Color32::WHITE);
+    painter.rect_stroke(rect, 0.0, Stroke::new(0.5, Color32::from_gray(120)), egui::StrokeKind::Inside);
+}
+
+fn paint_flag_gb(painter: &egui::Painter, rect: egui::Rect) {
+    painter.rect_filled(rect, 0.0, Color32::from_rgb(1, 33, 105)); // #012169
+    let w = rect.width();
+    let h = rect.height();
+
+    // White diagonals (St Andrew)
+    painter.line_segment([rect.left_top(), rect.right_bottom()], Stroke::new(2.4, Color32::WHITE));
+    painter.line_segment([rect.left_bottom(), rect.right_top()], Stroke::new(2.4, Color32::WHITE));
+
+    // Red diagonals (St Patrick)
+    painter.line_segment([rect.left_top(), rect.right_bottom()], Stroke::new(1.0, Color32::from_rgb(200, 16, 46)));
+    painter.line_segment([rect.left_bottom(), rect.right_top()], Stroke::new(1.0, Color32::from_rgb(200, 16, 46)));
+
+    // White cross (St George white background)
+    let cx = rect.center().x;
+    let cy = rect.center().y;
+    painter.rect_filled(egui::Rect::from_center_size(egui::pos2(cx, cy), vec2(3.6, h)), 0.0, Color32::WHITE);
+    painter.rect_filled(egui::Rect::from_center_size(egui::pos2(cx, cy), vec2(w, 3.6)), 0.0, Color32::WHITE);
+
+    // Red cross (St George #c8102e)
+    painter.rect_filled(egui::Rect::from_center_size(egui::pos2(cx, cy), vec2(2.0, h)), 0.0, Color32::from_rgb(200, 16, 46));
+    painter.rect_filled(egui::Rect::from_center_size(egui::pos2(cx, cy), vec2(w, 2.0)), 0.0, Color32::from_rgb(200, 16, 46));
+
+    painter.rect_stroke(rect, 0.0, Stroke::new(0.5, Color32::from_gray(120)), egui::StrokeKind::Inside);
+}
+
 /// The application bar's search field: finds menu commands by their labels in the interface
 /// language. ↑/↓ move through the matches; Return or a click runs one as its menu item would.
 /// Running one or pressing Escape clears the field and gives the keyboard back to the widget that
@@ -224,7 +259,22 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
                 // (Drag-scrolling is touch-only by default, so a mouse drag on the bar moves the window.)
                 egui::ScrollArea::horizontal().id_salt("app_bar_scroll").auto_shrink([false, false]).show(ui, |ui| {
                     ui.horizontal_centered(|ui| {
-                        if icons::button(ui, "home", home, app.session.active().is_none(), crate::i18n::tr(&app.ui.language, "Home")).clicked() {
+                        #[cfg(feature = "pubgen")]
+                        let is_orchestrator = crate::menus::pubgen_bar::is_orchestrator_mode(ui.ctx());
+                        #[cfg(not(feature = "pubgen"))]
+                        let is_orchestrator = false;
+
+                        let is_home = if is_orchestrator {
+                            #[cfg(feature = "pubgen")]
+                            {
+                                crate::dock::pubgen::workspace::get_state(ui.ctx()).view == crate::dock::pubgen::workspace::OrchestratorView::Home
+                            }
+                            #[cfg(not(feature = "pubgen"))]
+                            false
+                        } else {
+                            app.session.active().is_none()
+                        };
+                        if icons::button(ui, "home", home, is_home, crate::i18n::tr(&app.ui.language, "Home")).clicked() {
                             app.session_home();
                         }
                         ui.add_space(6.0);
@@ -238,78 +288,140 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
                         menus_end = ui.min_rect().max.x;
                         // Where the menus end on screen (moves as a narrow bar scrolls).
                         ui.data_mut(|d| d.insert_temp(egui::Id::unique("app_bar_menus_end"), menus_end));
-                        let size = vec2(tools_slot_width(ui.available_width(), tools_w), ui.available_height());
-                        let tools = ui.allocate_ui_with_layout(size, egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.add_space(4.0);
-                            search_field(app, ui);
-                            ui.add_space(8.0);
-                            let current = app.ui.workspace.clone();
-                            let shown = crate::i18n::workspace_name(&app.ui.language, &current);
-                            crate::menus::menu_button(
-                                ui,
-                                crate::rtl::widget(ui, egui::RichText::new(format!("{shown} ▾")).font(semibold(11.5)).color(t.text)),
-                                |ui| {
-                                    let customs: Vec<String> = app.ui.custom_workspaces.iter().map(|w| w.name.clone()).collect();
-                                    for w in crate::menus::WORKSPACES.iter().map(|w| w.to_string()).chain(customs.iter().cloned()) {
+
+                        #[cfg(feature = "pubgen")]
+                        let is_orchestrator = crate::menus::pubgen_bar::is_orchestrator_mode(ui.ctx());
+                        #[cfg(not(feature = "pubgen"))]
+                        let is_orchestrator = false;
+
+                        if !is_orchestrator {
+                            let size = vec2(tools_slot_width(ui.available_width(), tools_w), ui.available_height());
+                            let tools = ui.allocate_ui_with_layout(size, egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.add_space(4.0);
+                                search_field(app, ui);
+                                ui.add_space(8.0);
+                                let current = app.ui.workspace.clone();
+                                let shown = crate::i18n::workspace_name(&app.ui.language, &current);
+                                crate::menus::menu_button(
+                                    ui,
+                                    crate::rtl::widget(ui, egui::RichText::new(format!("{shown} ▾")).font(semibold(11.5)).color(t.text)),
+                                    |ui| {
+                                        let customs: Vec<String> = app.ui.custom_workspaces.iter().map(|w| w.name.clone()).collect();
+                                        for w in crate::menus::WORKSPACES.iter().map(|w| w.to_string()).chain(customs.iter().cloned()) {
+                                            if ui
+                                                .selectable_label(w == current, crate::rtl::widget(ui, crate::i18n::workspace_name(&app.ui.language, &w)))
+                                                .clicked()
+                                            {
+                                                let _ = app.run("window.workspace", json!({"name": w}));
+                                                ui.close();
+                                            }
+                                        }
+                                        ui.separator();
                                         if ui
-                                            .selectable_label(w == current, crate::rtl::widget(ui, crate::i18n::workspace_name(&app.ui.language, &w)))
+                                            .button(crate::rtl::widget(
+                                                ui,
+                                                format!(
+                                                    "{} {}",
+                                                    crate::i18n::tr(&app.ui.language, "Reset"),
+                                                    crate::i18n::workspace_name(&app.ui.language, &current)
+                                                ),
+                                            ))
                                             .clicked()
                                         {
-                                            let _ = app.run("window.workspace", json!({"name": w}));
+                                            let _ = app.run("window.resetWorkspace", json!({}));
                                             ui.close();
                                         }
-                                    }
-                                    ui.separator();
-                                    if ui
-                                        .button(crate::rtl::widget(
-                                            ui,
-                                            format!(
-                                                "{} {}",
-                                                crate::i18n::tr(&app.ui.language, "Reset"),
-                                                crate::i18n::workspace_name(&app.ui.language, &current)
-                                            ),
-                                        ))
-                                        .clicked()
-                                    {
-                                        let _ = app.run("window.resetWorkspace", json!({}));
-                                        ui.close();
-                                    }
-                                    if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "New Workspace…"))).clicked() {
-                                        let _ = app.run("window.newWorkspace", json!({}));
-                                        ui.close();
-                                    }
-                                    if !customs.is_empty() {
-                                        crate::menus::menu_button(
-                                            ui,
-                                            crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Delete Workspace")),
-                                            |ui| {
-                                                for w in &customs {
-                                                    if ui.button(w).clicked() {
-                                                        let _ = app.run("window.deleteWorkspace", json!({"name": w}));
-                                                        ui.close();
+                                        if ui.button(crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "New Workspace…"))).clicked() {
+                                            let _ = app.run("window.newWorkspace", json!({}));
+                                            ui.close();
+                                        }
+                                        if !customs.is_empty() {
+                                            crate::menus::menu_button(
+                                                ui,
+                                                crate::rtl::widget(ui, crate::i18n::tr(&app.ui.language, "Delete Workspace")),
+                                                |ui| {
+                                                    for w in &customs {
+                                                        if ui.button(w).clicked() {
+                                                            let _ = app.run("window.deleteWorkspace", json!({"name": w}));
+                                                            ui.close();
+                                                        }
                                                     }
-                                                }
-                                            },
-                                        );
-                                    }
-                                },
-                            );
-                            ui.add_space(6.0);
-                            if icons::button(ui, "share", 22.0, false, crate::i18n::tr(&app.ui.language, "Share")).clicked() {
-                                app.status(crate::i18n::tr(&app.ui.language, "Export a PDF, IDML or package to share — no cloud account needed."));
+                                                },
+                                            );
+                                        }
+                                    },
+                                );
+                                ui.add_space(6.0);
+                                if icons::button(ui, "share", 22.0, false, crate::i18n::tr(&app.ui.language, "Share")).clicked() {
+                                    app.status(crate::i18n::tr(&app.ui.language, "Export a PDF, IDML or package to share — no cloud account needed."));
+                                }
+                                ui.add_space(8.0);
+                                // Always one click away: the ArtCraft community Discord.
+                                if crate::about::discord_button(ui, "Discord", vec2(78.0, 22.0)) {
+                                    let _ = app.run("help.discord", json!({}));
+                                }
+                                tools_start = ui.min_rect().min.x;
+                                ui.data_mut(|d| d.insert_temp(egui::Id::unique("app_bar_tools_start"), tools_start));
+                                ui.min_rect().width()
+                            });
+                            if (tools.inner - tools_w).abs() > 0.5 {
+                                ui.data_mut(|d| d.insert_temp(tools_w_id, tools.inner));
+                                ui.ctx().request_discard("app bar: the right-hand controls changed width");
                             }
-                            ui.add_space(8.0);
-                            // Always one click away: the ArtCraft community Discord.
-                            if crate::about::discord_button(ui, "Discord", vec2(78.0, 22.0)) {
-                                let _ = app.run("help.discord", json!({}));
+                        } else {
+                            // Orchestrator Mode: Language selector in top bar right slot with flag icons
+                            let size = vec2(tools_slot_width(ui.available_width(), tools_w), ui.available_height());
+                            let tools = ui.allocate_ui_with_layout(size, egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.add_space(8.0);
+                                let is_id = app.ui.language == "id";
+                                let cur_code = if is_id { "ID" } else { "EN" };
+                                let flag_size = vec2(16.0, 11.0);
+                                let btn_text = format!("      {} ▾", cur_code);
+                                let menu_resp = crate::menus::menu_button(
+                                    ui,
+                                    crate::rtl::widget(ui, egui::RichText::new(btn_text).font(semibold(11.5)).color(t.text)),
+                                    |ui| {
+                                        ui.spacing_mut().item_spacing = vec2(4.0, 6.0);
+                                        // Item 1: ID
+                                        let id_resp = ui.horizontal(|ui| {
+                                            let (flag_rect, _) = ui.allocate_exact_size(flag_size, Sense::hover());
+                                            paint_flag_id(ui.painter(), flag_rect);
+                                            ui.selectable_label(is_id, "Bahasa Indonesia")
+                                        });
+                                        if id_resp.inner.clicked() {
+                                            let _ = app.run("app.language", json!({"lang": "id"}));
+                                            ui.close();
+                                        }
+
+                                        // Item 2: EN
+                                        let en_resp = ui.horizontal(|ui| {
+                                            let (flag_rect, _) = ui.allocate_exact_size(flag_size, Sense::hover());
+                                            paint_flag_gb(ui.painter(), flag_rect);
+                                            ui.selectable_label(!is_id, "English")
+                                        });
+                                        if en_resp.inner.clicked() {
+                                            let _ = app.run("app.language", json!({"lang": ""}));
+                                            ui.close();
+                                        }
+                                    },
+                                );
+                                let r = menu_resp.response.rect;
+                                let flag_r = egui::Rect::from_center_size(egui::pos2(r.min.x + 12.0, r.center().y), flag_size);
+                                if is_id {
+                                    paint_flag_id(ui.painter(), flag_r);
+                                } else {
+                                    paint_flag_gb(ui.painter(), flag_r);
+                                }
+
+                                ui.add_space(6.0);
+                                tools_start = ui.min_rect().min.x;
+                                ui.data_mut(|d| d.insert_temp(egui::Id::unique("app_bar_tools_start"), tools_start));
+                                ui.min_rect().width()
+                            });
+                            if (tools.inner - tools_w).abs() > 0.5 {
+                                ui.data_mut(|d| d.insert_temp(tools_w_id, tools.inner));
+                                ui.ctx().request_discard("app bar: the right-hand controls changed width");
                             }
-                            tools_start = ui.min_rect().min.x;
-                            ui.data_mut(|d| d.insert_temp(egui::Id::unique("app_bar_tools_start"), tools_start));
-                            ui.min_rect().width()
-                        });
-                        if (tools.inner - tools_w).abs() > 0.5 {
-                            ui.data_mut(|d| d.insert_temp(tools_w_id, tools.inner));
-                            ui.ctx().request_discard("app bar: the right-hand controls changed width");
                         }
                     });
                 });

@@ -38,8 +38,12 @@ pub fn parse_brs_narrative(raw: &str) -> (String, Vec<ParsedNarrativePara>) {
             }
 
             let is_short = content.len() <= 70 && !content.ends_with('.');
-            let starts_abc = content.starts_with("A. ") || content.starts_with("B. ") || content.starts_with("C. ")
-                || content.starts_with("A.") || content.starts_with("B.") || content.starts_with("C.");
+            let starts_abc = content.starts_with("A. ")
+                || content.starts_with("B. ")
+                || content.starts_with("C. ")
+                || content.starts_with("A.")
+                || content.starts_with("B.")
+                || content.starts_with("C.");
 
             let is_indicator_h1 = content == "Nilai Tukar Petani (NTP)"
                 || content.starts_with("Indeks Harga yang Diterima")
@@ -55,7 +59,8 @@ pub fn parse_brs_narrative(raw: &str) -> (String, Vec<ParsedNarrativePara>) {
                 || content.starts_with("NTP Perikanan");
 
             let is_list = (content.len() >= 3 && content.chars().next().is_some_and(|c| c.is_ascii_digit()) && content.chars().nth(1) == Some('.'))
-                || content.starts_with("- ") || content.starts_with("* ");
+                || content.starts_with("- ")
+                || content.starts_with("* ");
 
             let (style, is_title, is_h1, is_h2) = if starts_abc {
                 ("Title".to_string(), true, false, false)
@@ -74,14 +79,7 @@ pub fn parse_brs_narrative(raw: &str) -> (String, Vec<ParsedNarrativePara>) {
             }
             full_text.push_str(content);
 
-            paras.push(ParsedNarrativePara {
-                text: content.to_string(),
-                style,
-                is_title,
-                is_h1,
-                is_h2,
-                is_list,
-            });
+            paras.push(ParsedNarrativePara { text: content.to_string(), style, is_title, is_h1, is_h2, is_list });
         }
     }
 
@@ -103,10 +101,7 @@ pub fn parse_brs_csv_table(raw: &str) -> (String, Vec<Vec<String>>, Option<Strin
         }
 
         // Split CSV cells quote-aware
-        let cells: Vec<String> = line
-            .split(',')
-            .map(|c| c.trim().trim_matches('"').to_string())
-            .collect();
+        let cells: Vec<String> = line.split(',').map(|c| c.trim().trim_matches('"').to_string()).collect();
 
         if !cells.is_empty() {
             grid.push(cells);

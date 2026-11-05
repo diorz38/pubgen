@@ -21,10 +21,7 @@ impl Default for RecompileGuardDialog {
 
 impl RecompileGuardDialog {
     pub fn new() -> Self {
-        Self {
-            open: false,
-            existing_filename: "publication.designcraft".to_string(),
-        }
+        Self { open: false, existing_filename: "publication.designcraft".to_string() }
     }
 
     pub fn prompt(&mut self, filename: impl Into<String>) {
@@ -39,24 +36,15 @@ impl RecompileGuardDialog {
 
         let mut action = GuardDialogAction::None;
 
-        Window::new("⚠️ Existing Layout Detected")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+        Window::new("⚠️ Existing Layout Detected").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(
+            ctx,
+            |ui| {
                 ui.set_width(420.0);
                 ui.add_space(8.0);
 
-                ui.label(
-                    RichText::new("A compiled layout already exists for this publication:")
-                        .size(14.0),
-                );
+                ui.label(RichText::new("A compiled layout already exists for this publication:").size(14.0));
                 ui.add_space(4.0);
-                ui.label(
-                    RichText::new(&self.existing_filename)
-                        .strong()
-                        .color(Color32::from_rgb(0x3B, 0x82, 0xF6)),
-                );
+                ui.label(RichText::new(&self.existing_filename).strong().color(Color32::from_rgb(0x3B, 0x82, 0xF6)));
                 ui.add_space(8.0);
 
                 ui.label(
@@ -82,10 +70,7 @@ impl RecompileGuardDialog {
                     }
 
                     if ui
-                        .button(
-                            RichText::new("⚠️ Overwrite Existing")
-                                .color(Color32::from_rgb(0xEF, 0x44, 0x44)),
-                        )
+                        .button(RichText::new("⚠️ Overwrite Existing").color(Color32::from_rgb(0xEF, 0x44, 0x44)))
                         .on_hover_text("Replace the current layout with freshly compiled pages")
                         .clicked()
                     {
@@ -101,9 +86,9 @@ impl RecompileGuardDialog {
                     });
                 });
                 ui.add_space(8.0);
-            });
+            },
+        );
 
         action
     }
 }
-

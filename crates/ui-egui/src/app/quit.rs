@@ -27,11 +27,20 @@ impl DesignApp {
                 self.quitting = None;
                 return;
             }
-            if self.quitting.is_none() && !self.session.documents().iter().any(|d| d.is_dirty()) {
+            #[cfg(feature = "pubgen")]
+            let orchestrator_has_workspace = crate::menus::pubgen_bar::is_orchestrator_mode(ctx)
+                && crate::dock::pubgen::workspace::get_state(ctx).has_active_workspace();
+            #[cfg(not(feature = "pubgen"))]
+            let orchestrator_has_workspace = false;
+
+            let doc_has_unsaved = self.session.documents().iter().any(|d| d.is_dirty());
+            let has_unsaved_work = orchestrator_has_workspace || doc_has_unsaved;
+
+            if self.quitting.is_none() && !has_unsaved_work {
                 return;
             }
             let approved =
-                self.quitting.as_ref().is_some_and(|q| q.pending.is_none()) && self.ui.dialog.is_none() && self.next_unapproved_document().is_none();
+                self.quitting.as_ref().is_some_and(|q| q.pending.is_none()) && self.ui.dialog.is_none() && self.next_unapproved_document().is_none() && !orchestrator_has_workspace;
             if approved {
                 // Commit only when the backend receives the final close, after checking for
                 // edits that arrived since the last answer. Closing also discards recovery data.
@@ -72,7 +81,10 @@ impl DesignApp {
             }
             return;
         }
-        if self.ui.dialog.is_some() {
+        if let Some(d) = self.ui.dialog.as_ref() {
+            if d.id == "closeWorkspace" {
+                return;
+            }
             self.cancel_quit();
             return;
         }
@@ -163,6 +175,15 @@ impl DesignApp {
 
     /// Show the next unapproved document, or request a final close that revalidates all approvals.
     fn ask_next_unsaved(&mut self, ctx: &egui::Context) {
+        #[cfg(feature = "pubgen")]
+        if crate::menus::pubgen_bar::is_orchestrator_mode(ctx)
+            && crate::dock::pubgen::workspace::get_state(ctx).has_active_workspace()
+        {
+            if self.ui.dialog.is_none() {
+                self.ui.dialog = Some(crate::dialogs::Dialog::new("closeWorkspace", json!({"quitting": true, "discard": false})));
+            }
+            return;
+        }
         let Some((i, uid)) = self.next_unapproved_document() else {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;

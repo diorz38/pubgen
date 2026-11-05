@@ -1,9 +1,9 @@
-use std::path::PathBuf;
-use designcraft_ui_egui::DesignApp;
-use egui::Context;
 use crate::mode::StudioMode;
 use crate::project::PubgenContainer;
 use crate::workspaces::orchestrator::{GuardDialogAction, RecompileGuardDialog};
+use designcraft_ui_egui::DesignApp;
+use egui::Context;
+use std::path::PathBuf;
 
 pub struct PubgenStudioApp {
     pub mode: StudioMode,
@@ -14,19 +14,8 @@ pub struct PubgenStudioApp {
 }
 
 impl PubgenStudioApp {
-    pub fn new(
-        app: DesignApp,
-        initial_mode: StudioMode,
-        project_path: Option<PathBuf>,
-        container: Option<PubgenContainer>,
-    ) -> Self {
-        Self {
-            mode: initial_mode,
-            app,
-            project_path,
-            container,
-            guard_dialog: RecompileGuardDialog::new(),
-        }
+    pub fn new(app: DesignApp, initial_mode: StudioMode, project_path: Option<PathBuf>, container: Option<PubgenContainer>) -> Self {
+        Self { mode: initial_mode, app, project_path, container, guard_dialog: RecompileGuardDialog::new() }
     }
 }
 
@@ -43,11 +32,7 @@ impl eframe::App for PubgenStudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // Sync local StudioMode with app_bar switcher state
         let is_orch = designcraft_ui_egui::menus::pubgen_bar::is_orchestrator_mode(ui.ctx());
-        self.mode = if is_orch {
-            StudioMode::Orchestrator
-        } else {
-            StudioMode::DesignCraft
-        };
+        self.mode = if is_orch { StudioMode::Orchestrator } else { StudioMode::DesignCraft };
 
         // Render DesignCraft's complete shell:
         // - Undecorated borderless custom topbar with Home icon, Mode Switcher, Menu Bar, Search, Workspaces, and Caption buttons

@@ -31,6 +31,7 @@ commands:
                   show where test corpora live; --download fetches PngSuite into corpus/pngsuite
   stats [--exact] count tests and lines per crate (--exact: ask the test harness via `-- --list`)
   parity          recompute the InDesign feature-parity summary in docs/parity-checklist.md
+  pubgen          run clippy -D warnings across all pubgen crates and feature targets
   ico <out.ico> <in.png>...
                   pack square PNGs (<= 256 px) into a Windows .ico (see packaging/icons.sh)
   diff-dock       detect drift between upstream dock.rs and dock_extended.rs
@@ -50,6 +51,7 @@ fn main() -> ExitCode {
         Some("corpus") => cmd_corpus(rest.contains(&"--download")),
         Some("stats") => stats::run(&root(), rest.contains(&"--exact")),
         Some("parity") => parity::run(&root()),
+        Some("pubgen") => cmd_pubgen(),
         Some("ico") => ico::run(&rest),
         Some("version") => version::run(&root(), &rest),
         Some("diff-dock") => diff_dock::run(&root()),
@@ -210,8 +212,28 @@ fn cmd_doctest() -> Result<(), String> {
 /// this the whole panel escapes `-D warnings`.
 fn cmd_pubgen() -> Result<(), String> {
     let mut c = cargo();
-    c.args(["clippy", "-q", "-p", "designcraft-ui-egui", "--features", "pubgen", "--all-targets", "--", "-D", "warnings"]);
-    run(c, "cargo clippy -p designcraft-ui-egui --features pubgen --all-targets -- -D warnings")
+    c.args([
+        "clippy",
+        "-q",
+        "-p",
+        "designcraft-ui-egui",
+        "--features",
+        "pubgen",
+        "-p",
+        "pubgen-core",
+        "-p",
+        "pubgen-cli",
+        "-p",
+        "pubgen-studio",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings",
+    ]);
+    run(
+        c,
+        "cargo clippy -p designcraft-ui-egui --features pubgen -p pubgen-core -p pubgen-cli -p pubgen-studio --all-targets -- -D warnings",
+    )
 }
 
 fn cmd_ci() -> Result<(), String> {
