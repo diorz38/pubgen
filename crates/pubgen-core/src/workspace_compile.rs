@@ -40,7 +40,7 @@ mod tests {
     #[test]
     fn builds_plan_for_valid_workspace() {
         let metadata = PublicationMetadata { profile_id: "bps_brs".into(), layout: PageLayout::Double, language: Language::Id, title: "T".into(), title_en: None, cards: vec![PublicationCard { id: "t1".into(), kind: CardKind::Table, scope: CardScope::NewPage, source: Some("T1.csv".into()), title: "Table".into(), settings: BTreeMap::new() }], extra: BTreeMap::new() };
-        let draft = WorkspaceDraft::from_ingest("x".into(), IngestReport { profile_id: "bps_brs".into(), metadata, csv: vec![("T1.csv".into(), b"x".to_vec())], warnings: vec![] });
+        let draft = WorkspaceDraft::from_ingest("x".into(), IngestReport { profile_id: "bps_brs".into(), metadata, csv: vec![("T1.csv".into(), b"x".to_vec())], md: vec![], assets: vec![], warnings: vec![] });
         let plan = draft.command_plan(std::path::Path::new("work")).expect("plan");
         assert_eq!(plan.len(), 2);
     }

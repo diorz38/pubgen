@@ -181,7 +181,7 @@ fn file_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
             ui.separator();
 
             let tmpl: Vec<crate::menus::Item> = [
-                "file.open",
+                "app.openDialog",
             ]
             .iter()
             .map(|id| super::cmd_item(id, serde_json::Value::Null))
@@ -277,9 +277,9 @@ fn designcraft_orchestrator_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
             ui.separator();
 
             let dc_items: Vec<crate::menus::Item> = [
-                "file.open",
-                "file.save",
-                "file.saveAs",
+                "app.openDialog",
+                "app.save",
+                "app.saveDialog",
             ]
             .iter()
             .map(|id| super::cmd_item(id, serde_json::Value::Null))

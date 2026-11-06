@@ -1991,6 +1991,32 @@ fn save_project_to(app: &mut DesignApp, path: &str) -> Result<Value, String> {
                 m.front_matter.workbook = relative_to_proj(&dir, &excel);
                 m.cover.source = m.front_matter.workbook.clone();
                 m.chapters = vec![ChapterSpec { chapter: num, path: m.front_matter.workbook.clone(), title }];
+            } else if let Some(ctx) = &ctx {
+                let orch = crate::dock::pubgen::workspace::get_state(ctx);
+                if orch.has_active_workspace() {
+                    m.publication_title = orch.meta_title.clone();
+                    if let Some(doc) = orch.recent_documents.first() {
+                        m.front_matter.workbook = relative_to_proj(&dir, doc);
+                        m.cover.source = m.front_matter.workbook.clone();
+                    }
+                    if !orch.cards.is_empty() {
+                        let doc_rel = m.front_matter.workbook.clone();
+                        m.chapters = orch
+                            .cards
+                            .iter()
+                            .enumerate()
+                            .map(|(i, c)| ChapterSpec {
+                                chapter: (i + 1) as u32,
+                                path: if c.source.is_empty() || c.source == "Tanpa sumber" {
+                                    doc_rel.clone()
+                                } else {
+                                    c.source.clone()
+                                },
+                                title: c.title.clone(),
+                            })
+                            .collect();
+                    }
+                }
             }
             m
         }
@@ -2027,6 +2053,13 @@ fn save_project_to(app: &mut DesignApp, path: &str) -> Result<Value, String> {
                 d.error_message = None;
             }
         });
+        let mut orch = crate::dock::pubgen::workspace::get_state(ctx);
+        if orch.has_active_workspace() {
+            orch.is_dirty = false;
+            let now = crate::dock::pubgen::workspace::format_now();
+            orch.execution_log.push(format!("[{now}] Proyek publikasi berhasil disimpan ke {path_str}."));
+            crate::dock::pubgen::workspace::set_state(ctx, orch);
+        }
         ctx.request_repaint();
         return Ok(serde_json::json!({"manifest": path_str, "chapters": manifest.chapters.len(), "summary": summary}));
     }

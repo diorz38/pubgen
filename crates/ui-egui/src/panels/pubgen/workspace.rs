@@ -17,7 +17,7 @@ use crate::theme::{Tokens, semibold};
 
 const WORKSPACE_STATE_ID: &str = "pubgen_orchestrator_workspace_state";
 
-fn format_now() -> String {
+pub fn format_now() -> String {
     let now = chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now());
     now.format("%H:%M:%S").to_string()
 }
@@ -515,6 +515,88 @@ impl OrchestratorWorkspaceState {
     pub fn has_active_workspace(&self) -> bool {
         self.view == OrchestratorView::Studio || !self.cards.is_empty() || self.is_dirty
     }
+
+    /// Converts the current UI workspace state into a normalized `PublicationMetadata`
+    /// ensuring all changes to page cards and document settings are recorded.
+    pub fn to_metadata(&self) -> pubgen_core::PublicationMetadata {
+        let mut extra = std::collections::BTreeMap::new();
+        if !self.meta_release_no.is_empty() {
+            extra.insert("release_no".into(), self.meta_release_no.clone());
+        }
+        if !self.meta_release_date.is_empty() {
+            extra.insert("release_date".into(), self.meta_release_date.clone());
+        }
+        if !self.meta_release_month.is_empty() {
+            extra.insert("release_month".into(), self.meta_release_month.clone());
+        }
+        if !self.meta_agency.is_empty() {
+            extra.insert("agency".into(), self.meta_agency.clone());
+        }
+
+        let cards = self
+            .cards
+            .iter()
+            .enumerate()
+            .map(|(idx, card)| {
+                let mut settings = std::collections::BTreeMap::new();
+                if !card.title_en.is_empty() {
+                    settings.insert("title_en".into(), serde_json::Value::String(card.title_en.clone()));
+                } else if !card.subtitle.is_empty() {
+                    settings.insert("title_en".into(), serde_json::Value::String(card.subtitle.clone()));
+                }
+                pubgen_core::PublicationCard {
+                    id: if card.chapter_id.is_empty() {
+                        format!("card_{}", idx + 1)
+                    } else {
+                        card.chapter_id.clone()
+                    },
+                    kind: match card.kind {
+                        CardKind::Cover => pubgen_core::CardKind::Cover,
+                        CardKind::Toc => pubgen_core::CardKind::Toc,
+                        CardKind::Table => pubgen_core::CardKind::Table,
+                        CardKind::Chart => pubgen_core::CardKind::Chart,
+                        CardKind::MapChart => pubgen_core::CardKind::MapChart,
+                        CardKind::Narrative => pubgen_core::CardKind::Narrative,
+                        CardKind::Image => pubgen_core::CardKind::Image,
+                    },
+                    scope: if card.scope_new_page {
+                        pubgen_core::CardScope::NewPage
+                    } else {
+                        pubgen_core::CardScope::NewObject
+                    },
+                    source: if card.source.is_empty() || card.source == "Tanpa sumber" {
+                        None
+                    } else {
+                        Some(card.source.clone())
+                    },
+                    title: card.title.clone(),
+                    settings,
+                }
+            })
+            .collect();
+
+        pubgen_core::PublicationMetadata {
+            profile_id: self.selected_profile.clone(),
+            layout: if self.page_layout_facing {
+                pubgen_core::PageLayout::Double
+            } else {
+                pubgen_core::PageLayout::Single
+            },
+            language: match self.doc_language.as_str() {
+                "English" => pubgen_core::Language::En,
+                "Indonesian-English" => pubgen_core::Language::IdEn,
+                _ => pubgen_core::Language::Id,
+            },
+            title: self.meta_title.clone(),
+            title_en: if self.meta_subtitle.is_empty() {
+                None
+            } else {
+                Some(self.meta_subtitle.clone())
+            },
+            cards,
+            extra,
+        }
+    }
 }
 
 #[allow(deprecated)]
@@ -530,17 +612,121 @@ pub fn set_state(ctx: &egui::Context, state: OrchestratorWorkspaceState) {
     ctx.data_mut(|d| d.insert_temp(workspace_state_id(), state));
 }
 
-pub fn sync_external_workspace(ctx: &egui::Context, source_name: &str, metadata: &pubgen_core::PublicationMetadata, csv: &[(String, Vec<u8>)], md: &[(String, Vec<u8>)], assets: &[(String, Vec<u8>)]) {
-    let mut state = get_state(ctx);
+pub fn apply_ingest_report_to_state(
+    state: &mut OrchestratorWorkspaceState,
+    source_name: &str,
+    report: &pubgen_core::excel::IngestReport,
+) {
     state.recent_documents = vec![source_name.to_owned()];
-    state.meta_title = metadata.title.clone();
-    state.meta_subtitle = metadata.title_en.clone().unwrap_or_default();
-    state.selected_profile = metadata.profile_id.clone();
-    state.page_layout_facing = matches!(metadata.layout, pubgen_core::PageLayout::Double);
-    state.doc_language = match metadata.language { pubgen_core::Language::Id => "Indonesian", pubgen_core::Language::En => "English", pubgen_core::Language::IdEn => "Indonesian-English" }.into();
-    state.content_files = csv.iter().map(|(name, bytes)| ContentItem { path: format!("csv/{name}"), size_bytes: bytes.len() }).chain(md.iter().map(|(name, bytes)| ContentItem { path: format!("md/{name}"), size_bytes: bytes.len() })).chain(assets.iter().map(|(name, bytes)| ContentItem { path: format!("assets/{name}"), size_bytes: bytes.len() })).collect();
-    state.cards = metadata.cards.iter().enumerate().map(|(index, card)| PublicationCard::new_with(match card.kind { pubgen_core::CardKind::Cover => CardKind::Cover, pubgen_core::CardKind::Toc => CardKind::Toc, pubgen_core::CardKind::Table => CardKind::Table, pubgen_core::CardKind::Chart => CardKind::Chart, pubgen_core::CardKind::MapChart => CardKind::MapChart, pubgen_core::CardKind::Narrative => CardKind::Narrative, pubgen_core::CardKind::Image => CardKind::Image, pubgen_core::CardKind::Divider => CardKind::Narrative }, &card.title, "", card.source.as_deref().unwrap_or("Tanpa sumber"), index + 1, matches!(card.scope, pubgen_core::CardScope::NewPage))).collect();
+    state.meta_title = report.metadata.title.clone();
+    state.meta_subtitle = report.metadata.title_en.clone().unwrap_or_default();
+    state.selected_profile = report.profile_id.clone();
+    state.page_layout_facing = matches!(report.metadata.layout, pubgen_core::PageLayout::Double);
+    state.doc_language = match report.metadata.language {
+        pubgen_core::Language::Id => "Indonesian",
+        pubgen_core::Language::En => "English",
+        pubgen_core::Language::IdEn => "Indonesian-English",
+    }
+    .into();
+
+    if let Some(no) = report.metadata.extra.get("release_no").or_else(|| report.metadata.extra.get("no")).or_else(|| report.metadata.extra.get("catalogue")) {
+        state.meta_release_no = no.clone();
+    }
+    if let Some(date) = report.metadata.extra.get("release_date").or_else(|| report.metadata.extra.get("date")) {
+        state.meta_release_date = date.clone();
+    }
+    if let Some(month) = report.metadata.extra.get("release_month").or_else(|| report.metadata.extra.get("month")) {
+        state.meta_release_month = month.clone();
+    }
+    if let Some(agency) = report.metadata.extra.get("agency").or_else(|| report.metadata.extra.get("pub_office")).or_else(|| report.metadata.extra.get("officename")) {
+        state.meta_agency = agency.clone();
+    }
+    if state.meta_subtitle.is_empty() && (!state.meta_release_date.is_empty() || !state.meta_agency.is_empty()) {
+        state.meta_subtitle = format!("{} · {}", state.meta_release_date, state.meta_agency);
+    }
+
+    let norm = |prefix: &str, name: &str| {
+        if name.starts_with(prefix) || name.contains('/') {
+            name.to_owned()
+        } else {
+            format!("{prefix}/{name}")
+        }
+    };
+
+    state.content_files = report
+        .csv
+        .iter()
+        .map(|(name, bytes)| ContentItem { path: norm("csv", name), size_bytes: bytes.len() })
+        .chain(report.md.iter().map(|(name, bytes)| ContentItem { path: norm("md", name), size_bytes: bytes.len() }))
+        .chain(report.assets.iter().map(|(name, bytes)| ContentItem { path: norm("assets", name), size_bytes: bytes.len() }))
+        .collect();
+
+    if !report.metadata.cards.is_empty() {
+        state.cards = report
+            .metadata
+            .cards
+            .iter()
+            .enumerate()
+            .map(|(index, card)| {
+                let subtitle = card
+                    .settings
+                    .get("title_en")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let mut pc = PublicationCard::new_with(
+                    match card.kind {
+                        pubgen_core::CardKind::Cover => CardKind::Cover,
+                        pubgen_core::CardKind::Toc => CardKind::Toc,
+                        pubgen_core::CardKind::Table => CardKind::Table,
+                        pubgen_core::CardKind::Chart => CardKind::Chart,
+                        pubgen_core::CardKind::MapChart => CardKind::MapChart,
+                        pubgen_core::CardKind::Narrative => CardKind::Narrative,
+                        pubgen_core::CardKind::Image => CardKind::Image,
+                        pubgen_core::CardKind::Divider => CardKind::Image,
+                    },
+                    &card.title,
+                    subtitle,
+                    card.source.as_deref().unwrap_or("Tanpa sumber"),
+                    index + 1,
+                    matches!(card.scope, pubgen_core::CardScope::NewPage),
+                );
+                pc.chapter_id = card.id.clone();
+                pc
+            })
+            .collect();
+    }
+
+    let now = format_now();
+    state.execution_log.push(format!("[{now}] Berhasil memuat berkas Excel: {source_name}"));
+    state.execution_log.push(format!(
+        "[{now}] Diekstrak {} berkas konten ({} CSV, {} Markdown, {} Aset).",
+        state.content_files.len(),
+        report.csv.len(),
+        report.md.len(),
+        report.assets.len(),
+    ));
+    state.status_message = Some((format!("Workbook {source_name} berhasil dimuat"), true));
     state.is_dirty = false;
+}
+
+pub fn sync_external_workspace(
+    ctx: &egui::Context,
+    source_name: &str,
+    metadata: &pubgen_core::PublicationMetadata,
+    csv: &[(String, Vec<u8>)],
+    md: &[(String, Vec<u8>)],
+    assets: &[(String, Vec<u8>)],
+) {
+    let mut state = get_state(ctx);
+    let report = pubgen_core::excel::IngestReport {
+        profile_id: metadata.profile_id.clone(),
+        metadata: metadata.clone(),
+        csv: csv.to_vec(),
+        md: md.to_vec(),
+        assets: assets.to_vec(),
+        warnings: Vec::new(),
+    };
+    apply_ingest_report_to_state(&mut state, source_name, &report);
     set_state(ctx, state);
 }
 
@@ -652,6 +838,14 @@ fn render_recent_documents(
             ui.add_space(4.0);
         }
         if let Some(doc) = clicked_doc {
+            let p = std::path::Path::new(&doc);
+            let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+            if (ext == "xlsx" || ext == "xlsm") && p.is_file() {
+                if let Ok(report) = pubgen_core::excel::ingest_workbook(p) {
+                    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(&doc);
+                    apply_ingest_report_to_state(state, name, &report);
+                }
+            }
             state.execution_log.push(format!("[{}] Membuka berkas {}", format_now(), doc));
             state.view = OrchestratorView::Studio;
         }
@@ -659,7 +853,7 @@ fn render_recent_documents(
 }
 
 pub fn render_orchestrator_home(
-    _app: &mut DesignApp,
+    app: &mut DesignApp,
     ui: &mut Ui,
     state: &mut OrchestratorWorkspaceState,
     t: &Tokens,
@@ -706,15 +900,18 @@ pub fn render_orchestrator_home(
                                 .corner_radius(16.0)
                                 .min_size(vec2(0.0, 32.0))
                         ).clicked() {
-                            #[cfg(not(target_arch = "wasm32"))]
-                            if let Some(path) = rfd::FileDialog::new().add_filter("Pubgen Project", &["pubgen"]).pick_file() {
-                                let p = path.to_string_lossy().to_string();
-                                if !state.recent_documents.contains(&p) {
-                                    state.recent_documents.insert(0, p.clone());
+                            let ctx = ui.ctx().clone();
+                            let _ = app.ask_open("pubgenProject", crate::app::file_dialogs::Bound::App, move |_app, path: String| {
+                                let mut st = get_state(&ctx);
+                                if !st.recent_documents.contains(&path) {
+                                    st.recent_documents.insert(0, path.clone());
                                 }
-                                state.execution_log.push(format!("[{}] Membuka {}", format_now(), p));
-                                state.view = OrchestratorView::Studio;
-                            }
+                                st.execution_log.push(format!("[{}] Membuka {}", format_now(), path));
+                                st.view = OrchestratorView::Studio;
+                                set_state(&ctx, st);
+                                ctx.request_repaint();
+                                Ok(serde_json::Value::Null)
+                            });
                         }
 
                         let import_label = if lang.starts_with("id") { "📊 Impor Manifest (XLSX)" } else { "📊 Import Manifest (XLSX)" };
@@ -723,15 +920,23 @@ pub fn render_orchestrator_home(
                                 .corner_radius(16.0)
                                 .min_size(vec2(0.0, 32.0))
                         ).clicked() {
-                            #[cfg(not(target_arch = "wasm32"))]
-                            if let Some(path) = rfd::FileDialog::new().add_filter("Excel Manifest", &["xlsx", "xls"]).pick_file() {
-                                let p = path.to_string_lossy().to_string();
-                                if !state.recent_documents.contains(&p) {
-                                    state.recent_documents.insert(0, p.clone());
+                            let ctx = ui.ctx().clone();
+                            let _ = app.ask_open("dataMerge", crate::app::file_dialogs::Bound::App, move |_app, path: String| {
+                                let p = std::path::Path::new(&path);
+                                let mut st = get_state(&ctx);
+                                if let Ok(report) = pubgen_core::excel::ingest_workbook(p) {
+                                    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(path.as_str());
+                                    apply_ingest_report_to_state(&mut st, name, &report);
                                 }
-                                state.execution_log.push(format!("[{}] Impor manifest {}", format_now(), p));
-                                state.view = OrchestratorView::Studio;
-                            }
+                                if !st.recent_documents.contains(&path) {
+                                    st.recent_documents.insert(0, path.clone());
+                                }
+                                st.execution_log.push(format!("[{}] Impor manifest {}", format_now(), path));
+                                st.view = OrchestratorView::Studio;
+                                set_state(&ctx, st);
+                                ctx.request_repaint();
+                                Ok(serde_json::Value::Null)
+                            });
                         }
 
                         let brs_label = if lang.starts_with("id") { "📰 Sampel BRS" } else { "📰 Sample BRS" };
@@ -740,8 +945,14 @@ pub fn render_orchestrator_home(
                                 .corner_radius(16.0)
                                 .min_size(vec2(0.0, 32.0))
                         ).clicked() {
+                            let sample = std::path::Path::new("plan/pubgen/samples/brs/ntp202610.xlsx");
+                            if sample.is_file() {
+                                if let Ok(report) = pubgen_core::excel::ingest_workbook(sample) {
+                                    apply_ingest_report_to_state(state, "ntp202610.xlsx", &report);
+                                }
+                            }
                             state.selected_profile = "bps_brs".into();
-                            state.page_layout_facing = false;
+                            state.page_layout_facing = true;
                             state.view = OrchestratorView::Studio;
                         }
 
@@ -1126,10 +1337,37 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
             .on_hover_text(crate::i18n::tr(lang, "Import Source"))
             .clicked()
         {
+            let ctx = ui.ctx().clone();
             let _ = app.ask_open("dataMerge", crate::app::file_dialogs::Bound::App, move |_app, path| {
-                let name = std::path::Path::new(&path).file_name().unwrap_or_default().to_string_lossy().to_string();
-                let size = std::fs::metadata(&path).map(|m| m.len() as usize).unwrap_or(1024);
-                eprintln!("Imported: {name} ({size} B)");
+                let p = std::path::Path::new(&path);
+                let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+                if ext == "xlsx" || ext == "xlsm" {
+                    if let Ok(report) = pubgen_core::excel::ingest_workbook(p) {
+                        let mut st = get_state(&ctx);
+                        let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(&path);
+                        apply_ingest_report_to_state(&mut st, name, &report);
+                        set_state(&ctx, st);
+                        ctx.request_repaint();
+                    }
+                } else if ext == "md" || ext == "csv" || ext == "rtf" {
+                    let mut st = get_state(&ctx);
+                    if let Ok(bytes) = std::fs::read(p) {
+                        let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+                        let target_path = if ext == "csv" {
+                            format!("csv/{name}")
+                        } else if ext == "md" {
+                            format!("md/{name}")
+                        } else {
+                            format!("md/{}.md", p.file_stem().unwrap_or_default().to_string_lossy())
+                        };
+                        st.content_files.retain(|f| f.path != target_path);
+                        st.content_files.push(ContentItem { path: target_path.clone(), size_bytes: bytes.len() });
+                        let now = format_now();
+                        st.execution_log.push(format!("[{now}] Berkas sumber ditambahkan: {target_path} ({} B)", bytes.len()));
+                        set_state(&ctx, st);
+                        ctx.request_repaint();
+                    }
+                }
                 Ok(serde_json::Value::Null)
             });
         }
@@ -1143,9 +1381,16 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
             .on_hover_text(crate::i18n::tr(lang, "Import Excel"))
             .clicked()
         {
+            let ctx = ui.ctx().clone();
             let _ = app.ask_open("dataMerge", crate::app::file_dialogs::Bound::App, move |_app, path| {
-                let name = std::path::Path::new(&path).file_name().unwrap_or_default().to_string_lossy().to_string();
-                eprintln!("Excel imported: {name}");
+                let p = std::path::Path::new(&path);
+                if let Ok(report) = pubgen_core::excel::ingest_workbook(p) {
+                    let mut st = get_state(&ctx);
+                    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(&path);
+                    apply_ingest_report_to_state(&mut st, name, &report);
+                    set_state(&ctx, st);
+                    ctx.request_repaint();
+                }
                 Ok(serde_json::Value::Null)
             });
         }
@@ -1696,11 +1941,17 @@ fn render_facing_card(ui: &mut Ui, idx: usize, card: &PublicationCard, card_w: f
             clicked_edit = true;
         }
 
+        if !ui.is_rect_visible(card_rect) {
+            return;
+        }
+
         let is_hovered = card_resp.hovered();
         let bg = if is_hovered { t.hover } else { t.panel };
         let border_c = if is_hovered { t.accent } else { t.field_border };
-        ui.painter().rect_filled(card_rect, 4.0, bg);
-        ui.painter().rect_stroke(card_rect, 4.0, Stroke::new(1.0, border_c), egui::StrokeKind::Inside);
+        let card_clip = card_rect.intersect(ui.clip_rect());
+        let painter = ui.painter().with_clip_rect(card_clip);
+        painter.rect_filled(card_rect, 4.0, bg);
+        painter.rect_stroke(card_rect, 4.0, Stroke::new(1.0, border_c), egui::StrokeKind::Inside);
 
         let inner_rect = card_rect.shrink2(vec2(10.0, 8.0));
         let thumb_w = 34.0f32;
@@ -1720,24 +1971,22 @@ fn render_facing_card(ui: &mut Ui, idx: usize, card: &PublicationCard, card_w: f
             (thumb_r, det_r)
         };
 
-        paint_card_thumbnail(ui.painter(), thumb_rect, card.kind, t);
+        paint_card_thumbnail(&painter, thumb_rect, card.kind, t);
 
-        let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(details_rect).layout(Layout::top_down(if is_verso { Align::Max } else { Align::Min })));
-        child_ui.set_clip_rect(details_rect);
+        let details_clip = details_rect.intersect(ui.clip_rect());
+        if !details_clip.is_positive() {
+            return;
+        }
+
+        let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(details_rect).layout(Layout::top_down(Align::Min)));
+        child_ui.set_clip_rect(details_clip);
         child_ui.spacing_mut().item_spacing = vec2(0.0, 2.0);
 
         // Line 1: Tags
-        if is_verso {
-            child_ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                render_tag_pill(ui, crate::i18n::tr(lang, &card.tag2), t);
-                render_tag_pill(ui, crate::i18n::tr(lang, &card.tag1), t);
-            });
-        } else {
-            child_ui.horizontal(|ui| {
-                render_tag_pill(ui, crate::i18n::tr(lang, &card.tag1), t);
-                render_tag_pill(ui, crate::i18n::tr(lang, &card.tag2), t);
-            });
-        }
+        child_ui.horizontal(|ui| {
+            render_tag_pill(ui, crate::i18n::tr(lang, &card.tag1), t);
+            render_tag_pill(ui, crate::i18n::tr(lang, &card.tag2), t);
+        });
 
         // Line 2: Title
         let title_label = egui::Label::new(RichText::new(&card.title).font(semibold(11.0)).color(t.text_strong)).truncate().sense(Sense::click());
@@ -1751,25 +2000,14 @@ fn render_facing_card(ui: &mut Ui, idx: usize, card: &PublicationCard, card_w: f
         child_ui.add(egui::Label::new(RichText::new(src_label).font(FontId::proportional(10.0)).color(t.text_dim)).truncate());
 
         // Line 4: Footer
-        if is_verso {
-            child_ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.label(RichText::new(format!("{} {}", crate::i18n::tr(lang, "Pg."), card.page)).font(semibold(10.0)).color(t.text_dim));
-                ui.add_space(8.0);
-                let edit_resp = ui.link(RichText::new(format!("✎ {}", crate::i18n::tr(lang, "Click to edit"))).font(FontId::proportional(10.0)).color(Color32::from_rgb(56, 189, 248)));
-                if edit_resp.clicked() {
-                    clicked_edit = true;
-                }
-            });
-        } else {
-            child_ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("{} {}", crate::i18n::tr(lang, "Pg."), card.page)).font(semibold(10.0)).color(t.text_dim));
-                ui.add_space(8.0);
-                let edit_resp = ui.link(RichText::new(format!("✎ {}", crate::i18n::tr(lang, "Click to edit"))).font(FontId::proportional(10.0)).color(Color32::from_rgb(56, 189, 248)));
-                if edit_resp.clicked() {
-                    clicked_edit = true;
-                }
-            });
-        }
+        child_ui.horizontal(|ui| {
+            ui.label(RichText::new(format!("{} {}", crate::i18n::tr(lang, "Pg."), card.page)).font(semibold(10.0)).color(t.text_dim));
+            ui.add_space(8.0);
+            let edit_resp = ui.link(RichText::new(format!("✎ {}", crate::i18n::tr(lang, "Click to edit"))).font(FontId::proportional(10.0)).color(Color32::from_rgb(56, 189, 248)));
+            if edit_resp.clicked() {
+                clicked_edit = true;
+            }
+        });
     });
 
     if clicked_edit { Some(idx) } else { None }
@@ -2859,5 +3097,85 @@ mod tests {
         // Back to home
         state.view = OrchestratorView::Home;
         assert_eq!(state.view, OrchestratorView::Home);
+    }
+
+    #[test]
+    fn test_dynamic_source_and_content_ingest() {
+        let mut state = OrchestratorWorkspaceState::default();
+        let sample = std::path::Path::new("../../plan/pubgen/samples/brs/ntp202610.xlsx");
+        if sample.is_file() {
+            let report = pubgen_core::excel::ingest_workbook(sample).expect("ingest sample");
+            apply_ingest_report_to_state(&mut state, "ntp202610.xlsx", &report);
+            assert_eq!(state.meta_title, "Perkembangan Nilai Tukar Petani");
+            assert_eq!(state.meta_release_no, "61/10/32/Th. XXVIII");
+            assert_eq!(state.meta_release_date, "1 Oktober 2026");
+            assert_eq!(state.meta_release_month, "September 2026");
+            assert_eq!(state.meta_agency, "BADAN PUSAT STATISTIK PROVINSI JAWA BARAT");
+            assert!(!state.content_files.is_empty());
+            assert!(state.content_files.iter().any(|f| f.path.starts_with("csv/")));
+            assert!(state.content_files.iter().any(|f| f.path.starts_with("md/")));
+        }
+    }
+
+    #[test]
+    fn test_dynamic_dda_page_structure_cards() {
+        let mut state = OrchestratorWorkspaceState::default();
+        let sample = std::path::Path::new("../../plan/pubgen/samples/SINGLE_LANG/BAB_02_2025.xlsx");
+        if sample.is_file() {
+            let report = pubgen_core::excel::ingest_workbook(sample).expect("ingest DDA sample");
+            apply_ingest_report_to_state(&mut state, "BAB_02_2025.xlsx", &report);
+            assert_eq!(state.selected_profile, "bps_dda");
+
+            // R02 must be Paragraph (Narrative)
+            let r02_card = state.cards.iter().find(|c| c.chapter_id == "R02").expect("R02 card exists");
+            assert_eq!(r02_card.kind, CardKind::Narrative);
+            assert_eq!(r02_card.tag1, "Paragraf");
+
+            // 02_01 must be Table
+            let t02_card = state.cards.iter().find(|c| c.chapter_id == "02_01").expect("02_01 card exists");
+            assert_eq!(t02_card.kind, CardKind::Table);
+            assert_eq!(t02_card.tag1, "Tabel");
+
+            // C02_01 must be Image (Gambar) because file has C02_01.png and table/chart_type are empty
+            let c02_card = state.cards.iter().find(|c| c.chapter_id == "C02_01").expect("C02_01 card exists");
+            assert_eq!(c02_card.kind, CardKind::Image);
+            assert_eq!(c02_card.tag1, "Gambar");
+            assert!(c02_card.title.contains("Panjang Jalan"));
+        }
+    }
+
+    #[test]
+    fn test_orchestrator_to_metadata_sync() {
+        let mut state = OrchestratorWorkspaceState::default();
+        state.meta_title = "Statistik Daerah Kabupaten Karawang 2026".into();
+        state.meta_subtitle = "Katalog BPS 1102001".into();
+        state.meta_release_no = "No. 3215/2026".into();
+        state.meta_agency = "BPS Kabupaten Karawang".into();
+        state.selected_profile = "bps_dda".into();
+        state.page_layout_facing = true;
+
+        // Add modified cards
+        state.cards.push(PublicationCard::new_with(
+            CardKind::MapChart,
+            "Peta Wilayah Kecamatan",
+            "Peta Tematik Batas Wilayah",
+            "maps/karawang.geojson",
+            21,
+            true,
+        ));
+
+        let meta = state.to_metadata();
+        assert_eq!(meta.title, "Statistik Daerah Kabupaten Karawang 2026");
+        assert_eq!(meta.title_en.as_deref(), Some("Katalog BPS 1102001"));
+        assert_eq!(meta.extra.get("release_no").map(|s| s.as_str()), Some("No. 3215/2026"));
+        assert_eq!(meta.extra.get("agency").map(|s| s.as_str()), Some("BPS Kabupaten Karawang"));
+        assert_eq!(meta.layout, pubgen_core::PageLayout::Double);
+        assert_eq!(meta.cards.len(), state.cards.len());
+
+        let last_card = meta.cards.last().expect("last card exists");
+        assert_eq!(last_card.title, "Peta Wilayah Kecamatan");
+        assert_eq!(last_card.kind, pubgen_core::CardKind::MapChart);
+        assert_eq!(last_card.scope, pubgen_core::CardScope::NewPage);
+        assert_eq!(last_card.source.as_deref(), Some("maps/karawang.geojson"));
     }
 }

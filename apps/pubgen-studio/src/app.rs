@@ -17,10 +17,10 @@ pub struct PubgenStudioApp {
 impl PubgenStudioApp {
     pub fn new(app: DesignApp, initial_mode: StudioMode, project_path: Option<PathBuf>, container: Option<PubgenContainer>) -> Self {
         let mut orchestrator_project = OrchestratorProject::default();
-        if let Some(path) = project_path.as_ref() {
-            if path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("pubgen")) {
-                let _ = orchestrator_project.open(path);
-            }
+        if let Some(path) = project_path.as_ref()
+            && path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("pubgen"))
+        {
+            let _ = orchestrator_project.open(path);
         }
         Self { mode: initial_mode, app, project_path, container, guard_dialog: RecompileGuardDialog::new(), orchestrator_project }
     }

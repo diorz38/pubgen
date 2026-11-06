@@ -6,7 +6,7 @@
 //! - Opening a `*.designcraft` file boots into **DesignCraft Mode**.
 //! - Launching without arguments defaults to **Orchestrator Mode**.
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
-#![allow(dead_code, unused_variables)]
+#![allow(dead_code, unused_variables, clippy::disallowed_types, clippy::collapsible_if)]
 
 mod app;
 mod chrome;

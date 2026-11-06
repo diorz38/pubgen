@@ -16,7 +16,18 @@ pub fn render_workspace_controls(ui: &mut Ui, project: &mut OrchestratorProject)
         if ui.button("Import XLSX").clicked() {
             let _ = rfd::FileDialog::new().add_filter("Excel Workbook", &["xlsx", "xlsm"]).pick_file().map(|path| {
                 if let Ok(report) = pubgen_core::excel::ingest_workbook(&path) {
-                    *project = OrchestratorProject { path: None, draft: Some(pubgen_core::WorkspaceDraft::from_ingest(path.file_stem().and_then(|name| name.to_str()).unwrap_or("publication").to_owned(), report)), status: "Workbook imported".into(), dirty: true, ..OrchestratorProject::default() };
+                    *project = OrchestratorProject {
+                        path: Some(path.clone()),
+                        draft: Some(pubgen_core::WorkspaceDraft::from_ingest(
+                            path.file_stem().and_then(|name| name.to_str()).unwrap_or("publication").to_owned(),
+                            report.clone(),
+                        )),
+                        status: "Workbook imported".into(),
+                        dirty: true,
+                        ui_synced: false,
+                        md: report.md,
+                        assets: report.assets,
+                    };
                 }
             });
         }
