@@ -205,33 +205,31 @@ pub fn menu_enabled(app: &DesignApp, id: &str) -> bool {
     }
     #[cfg(feature = "pubgen")]
     if id == "pubgen.saveProject" || id == "pubgen.saveProjectAs" || id == "pubgen.savePackageAs" {
-        let has_orchestrator = app.egui_ctx.as_ref().is_some_and(|ctx| {
-            crate::dock::pubgen::workspace::get_state(ctx).has_active_workspace()
-        });
+        let has_orchestrator = app.egui_ctx.as_ref().is_some_and(|ctx| crate::dock::pubgen::workspace::get_state(ctx).has_active_workspace());
         return app.session.active().is_some()
             || has_orchestrator
             || !app.session.prefs.pubgen_project_path.trim().is_empty()
             || app.egui_ctx.as_ref().is_some_and(|ctx| {
                 crate::dock::pubgen::with_state(ctx, |st| {
-                    !st.compile_manifest_path.trim().is_empty()
-                        || !st.excel_source_path.trim().is_empty()
-                        || st.compile_new_dialog.is_some()
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        !st.compile_manifest_path.trim().is_empty() || !st.excel_source_path.trim().is_empty() || st.compile_new_dialog.is_some()
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        !st.compile_manifest_path.trim().is_empty() || !st.excel_source_path.trim().is_empty()
+                    }
                 })
             });
     }
     #[cfg(feature = "pubgen")]
     if id == "pubgen.compileProject" {
-        let has_orchestrator = app.egui_ctx.as_ref().is_some_and(|ctx| {
-            crate::dock::pubgen::workspace::get_state(ctx).has_active_workspace()
-        });
+        let has_orchestrator = app.egui_ctx.as_ref().is_some_and(|ctx| crate::dock::pubgen::workspace::get_state(ctx).has_active_workspace());
         return app.session.active().is_some()
             || has_orchestrator
             || !app.session.prefs.pubgen_project_path.trim().is_empty()
             || app.egui_ctx.as_ref().is_some_and(|ctx| {
-                crate::dock::pubgen::with_state(ctx, |st| {
-                    !st.compile_manifest_path.trim().is_empty()
-                        || !st.excel_source_path.trim().is_empty()
-                })
+                crate::dock::pubgen::with_state(ctx, |st| !st.compile_manifest_path.trim().is_empty() || !st.excel_source_path.trim().is_empty())
             });
     }
     if ui_label(id).is_some() {

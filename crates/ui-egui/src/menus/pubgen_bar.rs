@@ -35,8 +35,7 @@ pub fn set_orchestrator_mode(ctx: &egui::Context, orchestrator: bool) {
 
 /// Whether the PubGen menu bar replaces DesignCraft's.
 pub fn pubgen_menus_on(ctx: &egui::Context) -> bool {
-    ctx.data(|d| d.get_temp::<bool>(egui::Id::unique(ON)))
-        .unwrap_or_else(|| is_orchestrator_mode(ctx))
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::unique(ON))).unwrap_or_else(|| is_orchestrator_mode(ctx))
 }
 
 /// Show the PubGen menu bar (`true`) or DesignCraft's full one (`false`).
@@ -137,16 +136,7 @@ pub fn menu_bar(app: &mut DesignApp, ui: &mut egui::Ui) -> bool {
         return false;
     }
     let rtl = crate::i18n::is_rtl(&app.ui.language);
-    let top = [
-        Top::File,
-        Top::Publication,
-        Top::PublicationTools,
-        Top::AutomationContent,
-        Top::DesignCraft,
-        Top::View,
-        Top::Shortcut,
-        Top::Help,
-    ];
+    let top = [Top::File, Top::Publication, Top::PublicationTools, Top::AutomationContent, Top::DesignCraft, Top::View, Top::Shortcut, Top::Help];
 
     for entry in if rtl { top.into_iter().rev().collect::<Vec<_>>() } else { top.to_vec() } {
         match entry {
@@ -174,41 +164,20 @@ fn file_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
 
 /// The File menu's rows: publication package open/save, template, output and quit.
 fn file_actions(app: &mut DesignApp, ui: &mut egui::Ui) {
-    let items: Vec<crate::menus::Item> = [
-        "pubgen.openProject",
-        "pubgen.saveProject",
-        "pubgen.saveProjectAs",
-    ]
-    .iter()
-    .map(|id| super::cmd_item(id, serde_json::Value::Null))
-    .collect();
+    let items: Vec<crate::menus::Item> =
+        ["pubgen.openProject", "pubgen.saveProject", "pubgen.saveProjectAs"].iter().map(|id| super::cmd_item(id, serde_json::Value::Null)).collect();
     super::bar::menu_column(app, ui, &[("Publication Project", items)]);
     ui.separator();
 
-    let tmpl: Vec<crate::menus::Item> = [
-        "app.openDialog",
-    ]
-    .iter()
-    .map(|id| super::cmd_item(id, serde_json::Value::Null))
-    .collect();
+    let tmpl: Vec<crate::menus::Item> = ["app.openDialog"].iter().map(|id| super::cmd_item(id, serde_json::Value::Null)).collect();
     super::bar::menu_column(app, ui, &[("Template", tmpl)]);
     ui.separator();
 
-    let pdf: Vec<crate::menus::Item> = [
-        "app.exportPdf",
-    ]
-    .iter()
-    .map(|id| super::cmd_item(id, serde_json::Value::Null))
-    .collect();
+    let pdf: Vec<crate::menus::Item> = ["app.exportPdf"].iter().map(|id| super::cmd_item(id, serde_json::Value::Null)).collect();
     super::bar::menu_column(app, ui, &[("Output", pdf)]);
     ui.separator();
 
-    let exit: Vec<crate::menus::Item> = [
-        "app.quit",
-    ]
-    .iter()
-    .map(|id| super::cmd_item(id, serde_json::Value::Null))
-    .collect();
+    let exit: Vec<crate::menus::Item> = ["app.quit"].iter().map(|id| super::cmd_item(id, serde_json::Value::Null)).collect();
     super::bar::menu_column(app, ui, &[("Application", exit)]);
 }
 
@@ -242,26 +211,17 @@ fn automation_content_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
     let has_doc = app.session.active().is_some();
     crate::menus::menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&lang, "Automation & Content")), |ui| {
         popup(ui, rtl, 260.0, |ui| {
-            let items: Vec<crate::menus::Item> = [
-                "pubgen.publicationCover",
-                "pubgen.vectorChart",
-                "pubgen.tableOfContents",
-            ]
-            .iter()
-            .map(|id| super::cmd_item(id, serde_json::Value::Null))
-            .collect();
+            let items: Vec<crate::menus::Item> = ["pubgen.publicationCover", "pubgen.vectorChart", "pubgen.tableOfContents"]
+                .iter()
+                .map(|id| super::cmd_item(id, serde_json::Value::Null))
+                .collect();
             super::bar::menu_column(app, ui, &[("Automation", items)]);
             ui.separator();
 
             submenu(ui, &lang, rtl, "AI Translation & Terminology", 260.0, |ui| ai_translate(app, ui, &lang, has_doc));
             ui.separator();
 
-            let batch: Vec<crate::menus::Item> = [
-                "pubgen.generateFromExcel",
-            ]
-            .iter()
-            .map(|id| super::cmd_item(id, serde_json::Value::Null))
-            .collect();
+            let batch: Vec<crate::menus::Item> = ["pubgen.generateFromExcel"].iter().map(|id| super::cmd_item(id, serde_json::Value::Null)).collect();
             super::bar::menu_column(app, ui, &[("Batch Generation", batch)]);
         });
     });
@@ -279,24 +239,13 @@ fn designcraft_orchestrator_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
             }
             ui.separator();
 
-            let dc_items: Vec<crate::menus::Item> = [
-                "app.openDialog",
-                "app.save",
-                "app.saveDialog",
-            ]
-            .iter()
-            .map(|id| super::cmd_item(id, serde_json::Value::Null))
-            .collect();
+            let dc_items: Vec<crate::menus::Item> =
+                ["app.openDialog", "app.save", "app.saveDialog"].iter().map(|id| super::cmd_item(id, serde_json::Value::Null)).collect();
             super::bar::menu_column(app, ui, &[("Layout Documents", dc_items)]);
             ui.separator();
 
-            let prefs: Vec<crate::menus::Item> = [
-                "window.shortcuts",
-                "app.preferences",
-            ]
-            .iter()
-            .map(|id| super::cmd_item(id, serde_json::Value::Null))
-            .collect();
+            let prefs: Vec<crate::menus::Item> =
+                ["window.shortcuts", "app.preferences"].iter().map(|id| super::cmd_item(id, serde_json::Value::Null)).collect();
             super::bar::menu_column(app, ui, &[("DesignCraft Settings", prefs)]);
         });
     });
@@ -319,12 +268,7 @@ fn view_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
             }
             ui.separator();
 
-            let panels: Vec<crate::menus::Item> = [
-                "window.pubgenPanel",
-            ]
-            .iter()
-            .map(|id| super::cmd_item(id, serde_json::Value::Null))
-            .collect();
+            let panels: Vec<crate::menus::Item> = ["window.pubgenPanel"].iter().map(|id| super::cmd_item(id, serde_json::Value::Null)).collect();
             super::bar::menu_column(app, ui, &[("Panels", panels)]);
             ui.separator();
 
@@ -357,16 +301,11 @@ fn view_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
 
 /// 7. Shortcut Menu: quick access to export and project operations.
 fn shortcut_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
-    let items: Vec<crate::menus::Item> = [
-        ("app.exportPdf", "{}"),
-        ("pubgen.saveProject", "{}"),
-        ("pubgen.openProject", "{}"),
-        ("preflight.run", "{}"),
-        ("app.packageDialog", "{}"),
-    ]
-    .iter()
-    .map(|(id, params)| super::cmd_item(id, serde_json::from_str(params).unwrap_or_default()))
-    .collect();
+    let items: Vec<crate::menus::Item> =
+        [("app.exportPdf", "{}"), ("pubgen.saveProject", "{}"), ("pubgen.openProject", "{}"), ("preflight.run", "{}"), ("app.packageDialog", "{}")]
+            .iter()
+            .map(|(id, params)| super::cmd_item(id, serde_json::from_str(params).unwrap_or_default()))
+            .collect();
     let lang = app.ui.language.clone();
     crate::menus::menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&lang, "Shortcut")), |ui| {
         super::bar::menu_column(app, ui, &[("Shortcut", items)]);
@@ -427,7 +366,11 @@ fn submenu(ui: &mut egui::Ui, lang: &str, rtl: bool, label: &str, min_width: f32
 
 /// The generation pipeline: Excel generate, compile, charts, ToC, cover, headers and the audit.
 fn pipeline(app: &mut DesignApp, ui: &mut egui::Ui) {
-    let (compiling, covering) = crate::dock::pubgen::with_state(ui.ctx(), |st| (st.compile_job.is_some(), st.cover_job.is_some()));
+    let covering = crate::dock::pubgen::with_state(ui.ctx(), |st| st.cover_job.is_some());
+    #[cfg(not(target_arch = "wasm32"))]
+    let compiling = crate::dock::pubgen::with_state(ui.ctx(), |st| st.compile_job.is_some());
+    #[cfg(target_arch = "wasm32")]
+    let compiling = false;
     let items: Vec<crate::menus::Item> = [
         "pubgen.generateFromExcel",
         "pubgen.compileProject",
@@ -577,7 +520,6 @@ mod tests {
     use super::*;
 
     fn frame(ctx: &egui::Context, app: &mut DesignApp, size: egui::Vec2, events: Vec<egui::Event>) -> Vec<String> {
-
         // Changing the menu set discards a pass to re-lay-out the bar; the discarded pass has no
 
         // shapes, so draw until a pass with shapes comes back.
@@ -585,11 +527,9 @@ mod tests {
         let mut texts = Vec::new();
 
         for _ in 0..3 {
-
             let time = ctx.cumulative_pass_nr() as f64 / 60.0;
 
             let input = egui::RawInput {
-
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
 
                 time: Some(time),
@@ -597,15 +537,12 @@ mod tests {
                 events: if texts.is_empty() { events.clone() } else { Vec::new() },
 
                 ..Default::default()
-
             };
 
             let mut output = ctx.run_ui(input, |ui| {
-
                 // The real entry point: `menu_bar` here would be this module's own wrapper.
 
                 egui::MenuBar::new().ui(ui, |ui| crate::menus::menu_bar(app, ui));
-
             });
 
             output.textures_delta.clear();
@@ -613,63 +550,44 @@ mod tests {
             texts = collect_texts(&output.shapes);
 
             if !texts.is_empty() {
-
                 break;
-
             }
-
         }
 
         texts
-
     }
 
     fn collect_texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {
-
         fn collect(shape: &egui::Shape, out: &mut Vec<String>) {
-
             match shape {
-
                 egui::Shape::Text(t) => out.push(t.galley.job.text.clone()),
 
                 egui::Shape::Vec(shapes) => {
-
                     for s in shapes {
-
                         collect(s, out);
-
                     }
-
                 }
 
                 _ => {}
-
             }
-
         }
 
         let mut texts = Vec::new();
 
         for clipped in shapes {
-
             collect(&clipped.shape, &mut texts);
-
         }
 
         texts
-
     }
 
     fn app() -> DesignApp {
-
         DesignApp::new(designcraft_engine::Session::new(), Default::default())
-
     }
 
     #[test]
 
     fn pubgen_bar_keeps_the_host_menus_and_adds_the_pubgen_ones() {
-
         let ctx = egui::Context::default();
 
         set_pubgen_menus_on(&ctx, true);
@@ -685,23 +603,17 @@ mod tests {
         let positions: Vec<Option<usize>> = order.iter().map(|m| texts.iter().position(|t| t == m)).collect();
 
         for (i, top) in order.iter().enumerate() {
-
             assert!(positions[i].is_some(), "missing {top} in {texts:?}");
-
         }
 
         for (i, pair) in order.windows(2).enumerate() {
-
             assert!(positions[i] < positions[i + 1], "{} must come before {}: {:?}", pair[0], pair[1], positions);
-
         }
-
     }
 
     #[test]
 
     fn toggling_brings_designcrafts_menus_back_and_pubgens_away() {
-
         let ctx = egui::Context::default();
 
         set_pubgen_menus_on(&ctx, true);
@@ -739,13 +651,11 @@ mod tests {
         assert!(!texts.iter().any(|t| t == "Edit"), "DesignCraft's Edit menu is replaced in Orchestrator mode: {texts:?}");
 
         assert!(!texts.iter().any(|t| t == "Pubgen"), "the fallback Pubgen menu hides while its own bar shows: {texts:?}");
-
     }
 
     #[test]
 
     fn every_pubgen_action_renders() {
-
         let ctx = egui::Context::default();
 
         crate::theme::install_fonts(&ctx, "en");
@@ -755,9 +665,7 @@ mod tests {
         let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))), ..Default::default() };
 
         let mut output = ctx.run_ui(input, |ui| {
-
             egui::MenuBar::new().ui(ui, |ui| pubgen_menu(&mut app, ui));
-
         });
 
         output.textures_delta.clear();
@@ -765,32 +673,26 @@ mod tests {
         let texts = collect_texts(&output.shapes);
 
         assert!(texts.iter().any(|t| t == "Pubgen"), "the menu button is drawn: {texts:?}");
-
     }
 
     /// The Publication menu's rows, drawn like the popup draws them (the popup itself needs a
     /// click; the contents function is what the click opens).
     fn publication_rows(app: &mut DesignApp, ctx: &egui::Context) -> Vec<String> {
-
         let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))), ..Default::default() };
 
         let mut output = ctx.run_ui(input, |ui| {
-
             pipeline(app, ui);
-
         });
 
         output.textures_delta.clear();
 
         collect_texts(&output.shapes)
-
     }
 
     /// One action, one route: the Publication menu is exactly the pipeline — no second Excel row,
     /// no About (§2.4-1/2 of the accessibility audit).
     #[test]
     fn publication_menu_is_exactly_the_pipeline() {
-
         let ctx = egui::Context::default();
 
         crate::theme::install_fonts(&ctx, "en");
@@ -806,30 +708,24 @@ mod tests {
         assert!(!rows.iter().any(|t| t.contains("Compile Wizard")), "the duplicate route is gone: {rows:?}");
 
         assert!(!rows.iter().any(|t| t.contains("About")), "About lives in Help: {rows:?}");
-
     }
 
     /// The File menu's rows, drawn like the popup draws them.
     fn file_rows(app: &mut DesignApp, ctx: &egui::Context) -> Vec<String> {
-
         let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))), ..Default::default() };
 
         let mut output = ctx.run_ui(input, |ui| {
-
             file_actions(app, ui);
-
         });
 
         output.textures_delta.clear();
 
         collect_texts(&output.shapes)
-
     }
 
     /// Open/Save/Save As live in File only: the Publication menu must not repeat them.
     #[test]
     fn publication_package_file_actions_live_in_the_file_menu_only() {
-
         let ctx = egui::Context::default();
 
         crate::theme::install_fonts(&ctx, "en");
@@ -853,7 +749,6 @@ mod tests {
         assert!(open < save && save < save_as, "Save follows Open: {rows:?}");
 
         assert!(rows.iter().any(|t| t.contains(".pubgen")), "file actions name the .pubgen package: {rows:?}");
-
     }
 
     /// Help carries About PubGen… and the menu-bar toggle — the one place both live.
@@ -861,7 +756,6 @@ mod tests {
     #[test]
 
     fn help_menu_ends_with_about_and_the_bar_toggle() {
-
         let ctx = egui::Context::default();
 
         crate::theme::install_fonts(&ctx, "en");
@@ -881,14 +775,12 @@ mod tests {
         assert!(texts.iter().any(|t| t.contains("About PubGen")), "{texts:?}");
 
         assert!(texts.iter().any(|t| t.contains("DesignCraft Menus") || t.contains("PubGen Menus")), "{texts:?}");
-
     }
 
     /// The dual-language toggle is an upstream `Item::Cmd` row: its checkmark comes from
     /// `menus::state::checked`, not a hand-drawn prefix (the audit's P1-3).
     #[test]
     fn the_dual_language_toggle_draws_an_upstream_checkmark() {
-
         let ctx = egui::Context::default();
 
         crate::theme::install_fonts(&ctx, "en");
@@ -898,11 +790,9 @@ mod tests {
         app.egui_ctx = Some(ctx.clone());
 
         let content = |app: &mut DesignApp| {
-
             let lang = app.ui.language.clone();
 
             let input =
-
                 egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))), ..Default::default() };
 
             let mut output = ctx.run_ui(input, |ui| content(app, ui, &lang, false));
@@ -910,19 +800,15 @@ mod tests {
             output.textures_delta.clear();
 
             collect_texts(&output.shapes)
-
         };
 
         assert!(content(&mut app).iter().any(|t| t.contains("✓") && t.contains("Dual Language Mode")), "bilingual by default, checked");
 
         crate::dock::pubgen::with_state(&ctx, |st| {
-
             st.bilingual_output = false;
-
         });
 
         assert!(content(&mut app).iter().any(|t| t.contains("Dual Language Mode") && !t.contains("✓")), "single after the toggle, unchecked");
-
     }
 
     /// Picking the BPS BRS profile turns dual-language off, so the menu row loses its checkmark.
@@ -930,7 +816,6 @@ mod tests {
     #[test]
 
     fn applying_the_brs_profile_unchecks_the_dual_language_row() {
-
         let ctx = egui::Context::default();
 
         crate::theme::install_fonts(&ctx, "en");
@@ -942,11 +827,9 @@ mod tests {
         crate::dock::pubgen::with_state(&ctx, |st| st.bilingual_output = true);
 
         let content = |app: &mut DesignApp| {
-
             let lang = app.ui.language.clone();
 
             let input =
-
                 egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))), ..Default::default() };
 
             let mut output = ctx.run_ui(input, |ui| content(app, ui, &lang, false));
@@ -954,7 +837,6 @@ mod tests {
             output.textures_delta.clear();
 
             collect_texts(&output.shapes)
-
         };
 
         assert!(content(&mut app).iter().any(|t| t.contains("✓") && t.contains("Dual Language Mode")), "seeded bilingual: checked");
@@ -966,13 +848,9 @@ mod tests {
         assert!(!is_bilingual, "BRS profile is single-language");
 
         assert!(
-
             content(&mut app).iter().any(|t| t.contains("Dual Language Mode") && !t.contains("✓")),
-
             "dual-language row is unchecked after the BRS profile"
-
         );
-
     }
 
     /// A row whose background job runs carries a ● marker (the audit's P1-6).
@@ -980,7 +858,6 @@ mod tests {
     #[test]
 
     fn a_running_job_marks_its_publication_row() {
-
         let ctx = egui::Context::default();
 
         crate::theme::install_fonts(&ctx, "en");
@@ -992,9 +869,7 @@ mod tests {
         assert!(!publication_rows(&mut app, &ctx).iter().any(|t| t.starts_with('●')), "idle: no dot");
 
         crate::dock::pubgen::with_state(&ctx, |st| {
-
             st.compile_job = Some(Box::new(crate::dock::pubgen::compile::CompileJob::fake_running()));
-
         });
 
         let rows = publication_rows(&mut app, &ctx);
@@ -1004,7 +879,6 @@ mod tests {
         assert_eq!(marked.len(), 1, "exactly the compiling row: {rows:?}");
 
         assert!(marked[0].contains("Compile Publication"), "{marked:?}");
-
     }
 
     /// Pillar 7: Publication Profile is accessible in the pipeline and via UI commands.
@@ -1012,7 +886,6 @@ mod tests {
     #[test]
 
     fn publication_profile_accessible_from_menu_and_pipeline() {
-
         let ctx = egui::Context::default();
 
         crate::theme::install_fonts(&ctx, "en");
@@ -1056,8 +929,5 @@ mod tests {
         assert!(sub_texts.iter().any(|t| t.contains("Berita Resmi Statistik")), "profiles submenu lists BRS: {sub_texts:?}");
 
         assert!(sub_texts.iter().any(|t| t.contains("Laporan Tahunan Korporat")), "profiles submenu lists Corporate: {sub_texts:?}");
-
     }
-
 }
-

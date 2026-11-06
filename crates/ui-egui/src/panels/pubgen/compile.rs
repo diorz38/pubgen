@@ -1850,8 +1850,7 @@ pub(crate) fn open_project(app: &mut DesignApp, p: &Value) -> Result<Value, Stri
     let p_path = Path::new(&path);
     let ext = p_path.extension().and_then(std::ffi::OsStr::to_str).map(|e| e.to_ascii_lowercase());
     if ext.as_deref() == Some("pubgen") {
-        let opened = pubgen_core::container::open_pubgen(p_path)
-            .map_err(|e| format!("Gagal membuka paket .pubgen: {e}"))?;
+        let opened = pubgen_core::container::open_pubgen(p_path).map_err(|e| format!("Gagal membuka paket .pubgen: {e}"))?;
         remember_manifest(app, &path)?;
         if let Some(ctx) = app.egui_ctx.clone() {
             crate::dock::pubgen::workspace::sync_external_workspace(
@@ -1972,17 +1971,17 @@ pub(crate) fn save_pubgen_package_to(app: &mut DesignApp, save_path: &Path) -> R
 
     let manifest = pubgen_core::workspace::ProjectManifest {
         format_version: pubgen_core::workspace::PUBGEN_FORMAT_VERSION,
-        name: if !orch.meta_title.trim().is_empty() {
-            orch.meta_title.clone()
-        } else {
-            "publication".into()
-        },
+        name: if !orch.meta_title.trim().is_empty() { orch.meta_title.clone() } else { "publication".into() },
         template: false,
-        slots: orch.slots.iter().map(|s| pubgen_core::workspace::Slot {
-            id: s.name.clone(),
-            word_budget: s.budget.map(|b| b as u32),
-            replacement: if s.text.is_empty() { None } else { Some(s.text.clone()) },
-        }).collect(),
+        slots: orch
+            .slots
+            .iter()
+            .map(|s| pubgen_core::workspace::Slot {
+                id: s.name.clone(),
+                word_budget: s.budget.map(|b| b as u32),
+                replacement: if s.text.is_empty() { None } else { Some(s.text.clone()) },
+            })
+            .collect(),
     };
 
     let metadata = orch.to_metadata();
@@ -2096,11 +2095,7 @@ fn save_project_with(app: &mut DesignApp, p: &Value, force_ask: bool) -> Result<
 
 /// Default file name for a Save/Save As dialog: the publication title, else `publication.pubgen`.
 fn package_file_name(app: &DesignApp) -> String {
-    let title = app
-        .egui_ctx
-        .as_ref()
-        .map(|ctx| crate::dock::pubgen::workspace::get_state(ctx).meta_title)
-        .unwrap_or_default();
+    let title = app.egui_ctx.as_ref().map(|ctx| crate::dock::pubgen::workspace::get_state(ctx).meta_title).unwrap_or_default();
     if title.trim().is_empty() {
         return "publication.pubgen".into();
     }
@@ -2179,11 +2174,7 @@ fn save_project_to(app: &mut DesignApp, path: &str) -> Result<Value, String> {
                             .enumerate()
                             .map(|(i, c)| ChapterSpec {
                                 chapter: (i + 1) as u32,
-                                path: if c.source.is_empty() || c.source == "Tanpa sumber" {
-                                    doc_rel.clone()
-                                } else {
-                                    c.source.clone()
-                                },
+                                path: if c.source.is_empty() || c.source == "Tanpa sumber" { doc_rel.clone() } else { c.source.clone() },
                                 title: c.title.clone(),
                             })
                             .collect();

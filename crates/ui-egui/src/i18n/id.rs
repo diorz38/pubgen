@@ -281,7 +281,10 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Unlock", "Buka Kunci"),
     ("Unsaved Changes", "Perubahan Belum Disimpan"),
     ("Unsaved Publication Workspace", "Workspace Publikasi Belum Disimpan"),
-    ("The active publication workspace has unsaved changes. Save before closing?", "Workspace publikasi yang aktif memiliki perubahan yang belum disimpan. Simpan sebelum menutup?"),
+    (
+        "The active publication workspace has unsaved changes. Save before closing?",
+        "Workspace publikasi yang aktif memiliki perubahan yang belum disimpan. Simpan sebelum menutup?",
+    ),
     ("View", "Tampilan"),
     ("View Latest PDF", "Lihat Hasil PDF Terakhir"),
     ("Visual Live Preview", "Visual Live Preview"),

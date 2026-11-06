@@ -105,6 +105,18 @@ pub(crate) fn save_project_as(_app: &mut DesignApp, _p: &Value) -> Result<Value,
     Err("saving a publication project needs the desktop app".to_string())
 }
 
+/// Opening a publication package reads files: the web build only explains why it can't.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn open_project(_app: &mut DesignApp, _p: &Value) -> Result<Value, String> {
+    Err("opening a publication package needs the desktop app".to_string())
+}
+
+/// As above, for Save Package As.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn save_package_as(_app: &mut DesignApp, _p: &Value) -> Result<Value, String> {
+    Err("saving a publication package needs the desktop app".to_string())
+}
+
 /// Runs any closure with mutable access to PubgenState, persisting it to Context temp storage.
 pub fn with_state<R>(ctx: &egui::Context, f: impl FnOnce(&mut PubgenState) -> R) -> R {
     let state_id = egui::Id::unique(PANEL_ID);

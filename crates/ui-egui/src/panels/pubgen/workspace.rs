@@ -47,15 +47,8 @@ pub enum CardKind {
 }
 
 impl CardKind {
-    pub const ALL: [CardKind; 7] = [
-        CardKind::Cover,
-        CardKind::Narrative,
-        CardKind::Chart,
-        CardKind::MapChart,
-        CardKind::Table,
-        CardKind::Image,
-        CardKind::Toc,
-    ];
+    pub const ALL: [CardKind; 7] =
+        [CardKind::Cover, CardKind::Narrative, CardKind::Chart, CardKind::MapChart, CardKind::Table, CardKind::Image, CardKind::Toc];
 
     pub fn label(self, lang: &str) -> &'static str {
         match self {
@@ -420,14 +413,7 @@ impl Default for OrchestratorWorkspaceState {
                 10,
                 false,
             ),
-            PublicationCard::new_with(
-                CardKind::Narrative,
-                "Ulasan Narasi U5 (U5.md)",
-                "Ulasan analisis inflasi perdesaan",
-                "md/U5.md",
-                11,
-                false,
-            ),
+            PublicationCard::new_with(CardKind::Narrative, "Ulasan Narasi U5 (U5.md)", "Ulasan analisis inflasi perdesaan", "md/U5.md", 11, false),
             PublicationCard::new_with(
                 CardKind::Table,
                 "Tabel 4 Nilai Tukar Usaha Petani per Subsektor dan Persentase Perubahannya (2018=100)",
@@ -436,22 +422,8 @@ impl Default for OrchestratorWorkspaceState {
                 12,
                 false,
             ),
-            PublicationCard::new_with(
-                CardKind::Narrative,
-                "Ulasan Narasi U6 (U6.md)",
-                "Ulasan penutup dan rekomendasi",
-                "md/U6.md",
-                13,
-                false,
-            ),
-            PublicationCard::new_with(
-                CardKind::Image,
-                "Infografis / Gambar G1 (G1.png)",
-                "Area Margin · Sumber: G1.png",
-                "G1.png",
-                14,
-                false,
-            ),
+            PublicationCard::new_with(CardKind::Narrative, "Ulasan Narasi U6 (U6.md)", "Ulasan penutup dan rekomendasi", "md/U6.md", 13, false),
+            PublicationCard::new_with(CardKind::Image, "Infografis / Gambar G1 (G1.png)", "Area Margin · Sumber: G1.png", "G1.png", 14, false),
         ];
 
         let slots = vec![
@@ -479,10 +451,7 @@ impl Default for OrchestratorWorkspaceState {
         Self {
             view: OrchestratorView::Home,
             is_dirty: false,
-            recent_documents: vec![
-                "pubgen/samples/brs/BRS_NTO_202610.pubgen".into(),
-                "pubgen/samples/brs/ntp202610.xlsx".into(),
-            ],
+            recent_documents: vec!["pubgen/samples/brs/BRS_NTO_202610.pubgen".into(), "pubgen/samples/brs/ntp202610.xlsx".into()],
             center_tab: OrchestratorTab::StrukturHalaman,
             selected_profile: "bps_brs".into(),
             right_dock_tab: OrchestratorRightTab::SumberKonten,
@@ -573,11 +542,7 @@ impl OrchestratorWorkspaceState {
                     settings.insert("map_show_legend".into(), serde_json::Value::Bool(card.map_show_legend));
                 }
                 pubgen_core::PublicationCard {
-                    id: if card.chapter_id.is_empty() {
-                        format!("card_{}", idx + 1)
-                    } else {
-                        card.chapter_id.clone()
-                    },
+                    id: if card.chapter_id.is_empty() { format!("card_{}", idx + 1) } else { card.chapter_id.clone() },
                     kind: match card.kind {
                         CardKind::Cover => pubgen_core::CardKind::Cover,
                         CardKind::Toc => pubgen_core::CardKind::Toc,
@@ -587,16 +552,8 @@ impl OrchestratorWorkspaceState {
                         CardKind::Narrative => pubgen_core::CardKind::Narrative,
                         CardKind::Image => pubgen_core::CardKind::Image,
                     },
-                    scope: if card.scope_new_page {
-                        pubgen_core::CardScope::NewPage
-                    } else {
-                        pubgen_core::CardScope::NewObject
-                    },
-                    source: if card.source.is_empty() || card.source == "Tanpa sumber" {
-                        None
-                    } else {
-                        Some(card.source.clone())
-                    },
+                    scope: if card.scope_new_page { pubgen_core::CardScope::NewPage } else { pubgen_core::CardScope::NewObject },
+                    source: if card.source.is_empty() || card.source == "Tanpa sumber" { None } else { Some(card.source.clone()) },
                     title: card.title.clone(),
                     settings,
                 }
@@ -605,22 +562,14 @@ impl OrchestratorWorkspaceState {
 
         pubgen_core::PublicationMetadata {
             profile_id: self.selected_profile.clone(),
-            layout: if self.page_layout_facing {
-                pubgen_core::PageLayout::Double
-            } else {
-                pubgen_core::PageLayout::Single
-            },
+            layout: if self.page_layout_facing { pubgen_core::PageLayout::Double } else { pubgen_core::PageLayout::Single },
             language: match self.doc_language.as_str() {
                 "English" => pubgen_core::Language::En,
                 "Indonesian-English" => pubgen_core::Language::IdEn,
                 _ => pubgen_core::Language::Id,
             },
             title: self.meta_title.clone(),
-            title_en: if self.meta_subtitle.is_empty() {
-                None
-            } else {
-                Some(self.meta_subtitle.clone())
-            },
+            title_en: if self.meta_subtitle.is_empty() { None } else { Some(self.meta_subtitle.clone()) },
             cards,
             extra,
         }
@@ -640,11 +589,7 @@ pub fn set_state(ctx: &egui::Context, state: OrchestratorWorkspaceState) {
     ctx.data_mut(|d| d.insert_temp(workspace_state_id(), state));
 }
 
-pub fn apply_ingest_report_to_state(
-    state: &mut OrchestratorWorkspaceState,
-    source_name: &str,
-    report: &pubgen_core::excel::IngestReport,
-) {
+pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, source_name: &str, report: &pubgen_core::excel::IngestReport) {
     state.recent_documents = vec![source_name.to_owned()];
     state.meta_title = report.metadata.title.clone();
     state.meta_subtitle = report.metadata.title_en.clone().unwrap_or_default();
@@ -657,7 +602,9 @@ pub fn apply_ingest_report_to_state(
     }
     .into();
 
-    if let Some(no) = report.metadata.extra.get("release_no").or_else(|| report.metadata.extra.get("no")).or_else(|| report.metadata.extra.get("catalogue")) {
+    if let Some(no) =
+        report.metadata.extra.get("release_no").or_else(|| report.metadata.extra.get("no")).or_else(|| report.metadata.extra.get("catalogue"))
+    {
         state.meta_release_no = no.clone();
     }
     if let Some(date) = report.metadata.extra.get("release_date").or_else(|| report.metadata.extra.get("date")) {
@@ -666,7 +613,9 @@ pub fn apply_ingest_report_to_state(
     if let Some(month) = report.metadata.extra.get("release_month").or_else(|| report.metadata.extra.get("month")) {
         state.meta_release_month = month.clone();
     }
-    if let Some(agency) = report.metadata.extra.get("agency").or_else(|| report.metadata.extra.get("pub_office")).or_else(|| report.metadata.extra.get("officename")) {
+    if let Some(agency) =
+        report.metadata.extra.get("agency").or_else(|| report.metadata.extra.get("pub_office")).or_else(|| report.metadata.extra.get("officename"))
+    {
         state.meta_agency = agency.clone();
     }
     if state.meta_subtitle.is_empty() && (!state.meta_release_date.is_empty() || !state.meta_agency.is_empty()) {
@@ -674,11 +623,7 @@ pub fn apply_ingest_report_to_state(
     }
 
     let norm = |prefix: &str, name: &str| {
-        if name.starts_with(prefix) || name.contains('/') {
-            name.to_owned()
-        } else {
-            format!("{prefix}/{name}")
-        }
+        if name.starts_with(prefix) || name.contains('/') { name.to_owned() } else { format!("{prefix}/{name}") }
     };
 
     state.content_files = report
@@ -707,11 +652,7 @@ pub fn apply_ingest_report_to_state(
             .iter()
             .enumerate()
             .map(|(index, card)| {
-                let subtitle = card
-                    .settings
-                    .get("title_en")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let subtitle = card.settings.get("title_en").and_then(|v| v.as_str()).unwrap_or("");
                 let mut pc = PublicationCard::new_with(
                     match card.kind {
                         pubgen_core::CardKind::Cover => CardKind::Cover,
@@ -887,15 +828,7 @@ enum ProfileCardKind {
     Generic,
 }
 
-fn render_profile_card(
-    ui: &mut Ui,
-    t: &Tokens,
-    kind: ProfileCardKind,
-    title: &str,
-    subtitle: &str,
-    spec: &str,
-    accent: Color32,
-) -> bool {
+fn render_profile_card(ui: &mut Ui, t: &Tokens, kind: ProfileCardKind, title: &str, subtitle: &str, spec: &str, accent: Color32) -> bool {
     let card_w = 230.0f32;
     let card_h = 165.0f32;
     let (rect, resp) = ui.allocate_exact_size(vec2(card_w, card_h), Sense::click());
@@ -922,8 +855,12 @@ fn render_profile_card(
             ui.painter().rect(p_left, 1.0, Color32::WHITE, Stroke::new(0.8, Color32::from_rgb(180, 180, 180)), egui::StrokeKind::Inside);
             ui.painter().rect(p_right, 1.0, Color32::WHITE, Stroke::new(0.8, Color32::from_rgb(180, 180, 180)), egui::StrokeKind::Inside);
             // Blue guide lines
-            ui.painter().line_segment([pos2(p_left.min.x + 4.0, p_left.max.y - 6.0), pos2(p_left.max.x - 4.0, p_left.max.y - 6.0)], Stroke::new(1.0, accent));
-            ui.painter().line_segment([pos2(p_right.min.x + 4.0, p_right.min.y + 6.0), pos2(p_right.max.x - 4.0, p_right.min.y + 6.0)], Stroke::new(1.0, accent));
+            ui.painter()
+                .line_segment([pos2(p_left.min.x + 4.0, p_left.max.y - 6.0), pos2(p_left.max.x - 4.0, p_left.max.y - 6.0)], Stroke::new(1.0, accent));
+            ui.painter().line_segment(
+                [pos2(p_right.min.x + 4.0, p_right.min.y + 6.0), pos2(p_right.max.x - 4.0, p_right.min.y + 6.0)],
+                Stroke::new(1.0, accent),
+            );
         }
         ProfileCardKind::Brs => {
             // Single page with blue header and orange accent
@@ -933,9 +870,18 @@ fn render_profile_card(
             ui.painter().rect(p, 1.0, Color32::WHITE, Stroke::new(0.8, Color32::from_rgb(180, 180, 180)), egui::StrokeKind::Inside);
             let banner = Rect::from_min_size(p.min, vec2(pw, 10.0));
             ui.painter().rect_filled(banner, 1.0, Color32::from_rgb(0, 114, 188));
-            ui.painter().line_segment([pos2(p.min.x, p.min.y + 10.0), pos2(p.max.x, p.min.y + 10.0)], Stroke::new(1.0, Color32::from_rgb(245, 135, 31)));
-            ui.painter().rect_filled(Rect::from_min_size(pos2(p.min.x + 3.0, p.min.y + 14.0), vec2(pw - 6.0, 3.0)), 0.0, Color32::from_rgb(190, 190, 190));
-            ui.painter().rect_filled(Rect::from_min_size(pos2(p.min.x + 3.0, p.min.y + 20.0), vec2(pw - 6.0, 14.0)), 0.0, Color32::from_rgb(230, 235, 245));
+            ui.painter()
+                .line_segment([pos2(p.min.x, p.min.y + 10.0), pos2(p.max.x, p.min.y + 10.0)], Stroke::new(1.0, Color32::from_rgb(245, 135, 31)));
+            ui.painter().rect_filled(
+                Rect::from_min_size(pos2(p.min.x + 3.0, p.min.y + 14.0), vec2(pw - 6.0, 3.0)),
+                0.0,
+                Color32::from_rgb(190, 190, 190),
+            );
+            ui.painter().rect_filled(
+                Rect::from_min_size(pos2(p.min.x + 3.0, p.min.y + 20.0), vec2(pw - 6.0, 14.0)),
+                0.0,
+                Color32::from_rgb(230, 235, 245),
+            );
         }
         ProfileCardKind::Generic => {
             // Single page with ruled lines
@@ -958,12 +904,7 @@ fn render_profile_card(
     resp.clicked()
 }
 
-fn render_recent_documents(
-    ui: &mut Ui,
-    state: &mut OrchestratorWorkspaceState,
-    t: &Tokens,
-    lang: &str,
-) {
+fn render_recent_documents(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, lang: &str) {
     if state.recent_documents.is_empty() {
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().min(720.0), 54.0), Sense::hover());
         ui.painter().rect(rect, 8.0, t.panel, Stroke::new(1.0, t.divider), egui::StrokeKind::Inside);
@@ -979,7 +920,13 @@ fn render_recent_documents(
             let filename = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.clone());
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width().min(720.0), 44.0), Sense::click());
             let hov = resp.hovered();
-            ui.painter().rect(rect, 6.0, if hov { t.hover } else { t.panel }, Stroke::new(1.0, if hov { t.accent_strong } else { t.divider }), egui::StrokeKind::Inside);
+            ui.painter().rect(
+                rect,
+                6.0,
+                if hov { t.hover } else { t.panel },
+                Stroke::new(1.0, if hov { t.accent_strong } else { t.divider }),
+                egui::StrokeKind::Inside,
+            );
             ui.painter().text(pos2(rect.min.x + 14.0, rect.min.y + 14.0), Align2::LEFT_CENTER, &filename, semibold(12.5), t.text_strong);
             ui.painter().text(pos2(rect.min.x + 14.0, rect.min.y + 30.0), Align2::LEFT_CENTER, path, FontId::proportional(10.5), t.text_dim);
             if resp.clicked() {
@@ -1002,202 +949,192 @@ fn render_recent_documents(
     }
 }
 
-pub fn render_orchestrator_home(
-    app: &mut DesignApp,
-    ui: &mut Ui,
-    state: &mut OrchestratorWorkspaceState,
-    t: &Tokens,
-    lang: &str,
-) {
+pub fn render_orchestrator_home(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, lang: &str) {
     let r = ui.available_rect_before_wrap();
     ui.painter().rect_filled(r, 0.0, t.panel_darker);
 
-    ScrollArea::vertical()
-        .id_salt("pubgen_home_scroll")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
+    ScrollArea::vertical().id_salt("pubgen_home_scroll").auto_shrink([false, false]).show(ui, |ui| {
+        ui.add_space(32.0);
+        let max_w = 980.0f32.min(ui.available_width() - 64.0);
+        ui.horizontal(|ui| {
             ui.add_space(32.0);
-            let max_w = 980.0f32.min(ui.available_width() - 64.0);
-            ui.horizontal(|ui| {
-                ui.add_space(32.0);
-                ui.allocate_ui_with_layout(vec2(max_w, 0.0), Layout::top_down(Align::Min), |ui| {
-                    // HERO
-                    ui.horizontal(|ui| {
-                        let (icon_r, _) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::hover());
-                        ui.painter().rect_filled(icon_r, 10.0, Color32::from_rgb(37, 99, 235));
-                        ui.painter().text(icon_r.center(), Align2::CENTER_CENTER, "📊", FontId::proportional(22.0), Color32::WHITE);
-                        ui.add_space(14.0);
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(crate::i18n::tr(lang, "Welcome to Publication Orchestrator")).font(semibold(24.0)).color(t.text_strong));
-                            let subtitle = if lang.starts_with("id") {
-                                "Tata letak publikasi statistik cetak dan digital — cepat, terbuka, dan otomatis."
-                            } else {
-                                "Page layout for print and screen — fast, open and scriptable."
-                            };
-                            ui.label(RichText::new(subtitle).size(13.5).color(t.text_dim));
-                        });
+            ui.allocate_ui_with_layout(vec2(max_w, 0.0), Layout::top_down(Align::Min), |ui| {
+                // HERO
+                ui.horizontal(|ui| {
+                    let (icon_r, _) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::hover());
+                    ui.painter().rect_filled(icon_r, 10.0, Color32::from_rgb(37, 99, 235));
+                    ui.painter().text(icon_r.center(), Align2::CENTER_CENTER, "📊", FontId::proportional(22.0), Color32::WHITE);
+                    ui.add_space(14.0);
+                    ui.vertical(|ui| {
+                        ui.label(
+                            RichText::new(crate::i18n::tr(lang, "Welcome to Publication Orchestrator")).font(semibold(24.0)).color(t.text_strong),
+                        );
+                        let subtitle = if lang.starts_with("id") {
+                            "Tata letak publikasi statistik cetak dan digital — cepat, terbuka, dan otomatis."
+                        } else {
+                            "Page layout for print and screen — fast, open and scriptable."
+                        };
+                        ui.label(RichText::new(subtitle).size(13.5).color(t.text_dim));
                     });
+                });
 
-                    ui.add_space(24.0);
+                ui.add_space(24.0);
 
-                    // ACTIONS ROW
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 10.0;
-                        let open_label = if lang.starts_with("id") { "📂 Buka Berkas (.pubgen)" } else { "📂 Open file (.pubgen)" };
-                        if ui.add(
+                // ACTIONS ROW
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    let open_label = if lang.starts_with("id") { "📂 Buka Berkas (.pubgen)" } else { "📂 Open file (.pubgen)" };
+                    if ui
+                        .add(
                             egui::Button::new(RichText::new(open_label).size(13.0).color(Color32::WHITE))
                                 .fill(t.accent_strong)
                                 .corner_radius(16.0)
-                                .min_size(vec2(0.0, 32.0))
-                        ).clicked() {
-                            let ctx = ui.ctx().clone();
-                            let _ = app.ask_open("pubgenPackage", crate::app::file_dialogs::Bound::App, move |_app, path: String| {
-                                let p = std::path::Path::new(&path);
-                                let opened = pubgen_core::container::open_pubgen(p).map_err(|error| format!("Gagal membuka paket .pubgen: {error}"))?;
-                                sync_external_workspace(&ctx, &path, &opened.metadata, &opened.content.csv, &opened.content.md, &opened.content.assets);
-                                let mut st = get_state(&ctx);
-                                st.view = OrchestratorView::Studio;
-                                st.execution_log.push(format!("[{}] Membuka {}", format_now(), path));
-                                set_state(&ctx, st);
-                                ctx.request_repaint();
-                                Ok(serde_json::Value::Null)
-                            });
-                        }
+                                .min_size(vec2(0.0, 32.0)),
+                        )
+                        .clicked()
+                    {
+                        let ctx = ui.ctx().clone();
+                        let _ = app.ask_open("pubgenPackage", crate::app::file_dialogs::Bound::App, move |_app, path: String| {
+                            let p = std::path::Path::new(&path);
+                            let opened = pubgen_core::container::open_pubgen(p).map_err(|error| format!("Gagal membuka paket .pubgen: {error}"))?;
+                            sync_external_workspace(&ctx, &path, &opened.metadata, &opened.content.csv, &opened.content.md, &opened.content.assets);
+                            let mut st = get_state(&ctx);
+                            st.view = OrchestratorView::Studio;
+                            st.execution_log.push(format!("[{}] Membuka {}", format_now(), path));
+                            set_state(&ctx, st);
+                            ctx.request_repaint();
+                            Ok(serde_json::Value::Null)
+                        });
+                    }
 
-                        let import_label = if lang.starts_with("id") { "📊 Impor Manifest (XLSX)" } else { "📊 Import Manifest (XLSX)" };
-                        if ui.add(
-                            egui::Button::new(RichText::new(import_label).size(13.0))
-                                .corner_radius(16.0)
-                                .min_size(vec2(0.0, 32.0))
-                        ).clicked() {
-                            let ctx = ui.ctx().clone();
-                            let _ = app.ask_open("dataMerge", crate::app::file_dialogs::Bound::App, move |_app, path: String| {
-                                let p = std::path::Path::new(&path);
-                                let mut st = get_state(&ctx);
-                                if let Ok(report) = pubgen_core::excel::ingest_workbook(p) {
-                                    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(path.as_str());
-                                    apply_ingest_report_to_state(&mut st, name, &report);
-                                }
-                                if !st.recent_documents.contains(&path) {
-                                    st.recent_documents.insert(0, path.clone());
-                                }
-                                st.execution_log.push(format!("[{}] Impor manifest {}", format_now(), path));
-                                st.view = OrchestratorView::Studio;
-                                set_state(&ctx, st);
-                                ctx.request_repaint();
-                                Ok(serde_json::Value::Null)
-                            });
-                        }
-
-                        let brs_label = if lang.starts_with("id") { "📰 Sampel BRS" } else { "📰 Sample BRS" };
-                        if ui.add(
-                            egui::Button::new(RichText::new(brs_label).size(13.0))
-                                .corner_radius(16.0)
-                                .min_size(vec2(0.0, 32.0))
-                        ).clicked() {
-                            let sample = std::path::Path::new("plan/pubgen/samples/brs/ntp202610.xlsx");
-                            if sample.is_file() {
-                                if let Ok(report) = pubgen_core::excel::ingest_workbook(sample) {
-                                    apply_ingest_report_to_state(state, "ntp202610.xlsx", &report);
-                                }
+                    let import_label = if lang.starts_with("id") { "📊 Impor Manifest (XLSX)" } else { "📊 Import Manifest (XLSX)" };
+                    if ui.add(egui::Button::new(RichText::new(import_label).size(13.0)).corner_radius(16.0).min_size(vec2(0.0, 32.0))).clicked() {
+                        let ctx = ui.ctx().clone();
+                        let _ = app.ask_open("dataMerge", crate::app::file_dialogs::Bound::App, move |_app, path: String| {
+                            let p = std::path::Path::new(&path);
+                            let mut st = get_state(&ctx);
+                            if let Ok(report) = pubgen_core::excel::ingest_workbook(p) {
+                                let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(path.as_str());
+                                apply_ingest_report_to_state(&mut st, name, &report);
                             }
-                            state.selected_profile = "bps_brs".into();
-                            state.page_layout_facing = true;
-                            state.view = OrchestratorView::Studio;
-                        }
+                            if !st.recent_documents.contains(&path) {
+                                st.recent_documents.insert(0, path.clone());
+                            }
+                            st.execution_log.push(format!("[{}] Impor manifest {}", format_now(), path));
+                            st.view = OrchestratorView::Studio;
+                            set_state(&ctx, st);
+                            ctx.request_repaint();
+                            Ok(serde_json::Value::Null)
+                        });
+                    }
 
-                        let dda_label = if lang.starts_with("id") { "📑 Sampel DDA" } else { "📑 Sample DDA" };
-                        if ui.add(
-                            egui::Button::new(RichText::new(dda_label).size(13.0))
-                                .corner_radius(16.0)
-                                .min_size(vec2(0.0, 32.0))
-                        ).clicked() {
-                            state.selected_profile = "bps_dda".into();
-                            state.page_layout_facing = true;
-                            state.view = OrchestratorView::Studio;
+                    let brs_label = if lang.starts_with("id") { "📰 Sampel BRS" } else { "📰 Sample BRS" };
+                    if ui.add(egui::Button::new(RichText::new(brs_label).size(13.0)).corner_radius(16.0).min_size(vec2(0.0, 32.0))).clicked() {
+                        let sample = std::path::Path::new("plan/pubgen/samples/brs/ntp202610.xlsx");
+                        if sample.is_file() {
+                            if let Ok(report) = pubgen_core::excel::ingest_workbook(sample) {
+                                apply_ingest_report_to_state(state, "ntp202610.xlsx", &report);
+                            }
                         }
+                        state.selected_profile = "bps_brs".into();
+                        state.page_layout_facing = true;
+                        state.view = OrchestratorView::Studio;
+                    }
 
-                        if !state.cards.is_empty() {
-                            let studio_label = if lang.starts_with("id") { "➡ Buka Studio Aktif" } else { "➡ Open Active Studio" };
-                            if ui.add(
+                    let dda_label = if lang.starts_with("id") { "📑 Sampel DDA" } else { "📑 Sample DDA" };
+                    if ui.add(egui::Button::new(RichText::new(dda_label).size(13.0)).corner_radius(16.0).min_size(vec2(0.0, 32.0))).clicked() {
+                        state.selected_profile = "bps_dda".into();
+                        state.page_layout_facing = true;
+                        state.view = OrchestratorView::Studio;
+                    }
+
+                    if !state.cards.is_empty() {
+                        let studio_label = if lang.starts_with("id") { "➡ Buka Studio Aktif" } else { "➡ Open Active Studio" };
+                        if ui
+                            .add(
                                 egui::Button::new(RichText::new(studio_label).size(13.0).color(Color32::from_rgb(16, 185, 129)))
                                     .corner_radius(16.0)
-                                    .min_size(vec2(0.0, 32.0))
-                            ).clicked() {
-                                state.view = OrchestratorView::Studio;
-                            }
-                        }
-                    });
-
-                    ui.add_space(28.0);
-
-                    // SECTION: PUBLICATION PROFILES
-                    let sec_prof = if lang.starts_with("id") { "Profil Publikasi" } else { "Publication Profiles" };
-                    ui.label(RichText::new(sec_prof).font(semibold(15.0)).color(t.text_strong));
-                    ui.add_space(10.0);
-
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 16.0;
-
-                        // 1. DDA BPS
-                        if render_profile_card(
-                            ui, t,
-                            ProfileCardKind::Dda,
-                            "DDA BPS",
-                            "Daerah Dalam Angka",
-                            "A4 (210 × 297 mm) • Facing Pages",
-                            Color32::from_rgb(59, 130, 246),
-                        ) {
-                            state.selected_profile = "bps_dda".into();
-                            state.page_layout_facing = true;
-                            state.paper_size = "A4 (210 x 297 mm)".into();
+                                    .min_size(vec2(0.0, 32.0)),
+                            )
+                            .clicked()
+                        {
                             state.view = OrchestratorView::Studio;
                         }
-
-                        // 2. BRS BPS
-                        if render_profile_card(
-                            ui, t,
-                            ProfileCardKind::Brs,
-                            "BRS BPS",
-                            "Berita Resmi Statistik",
-                            "A4 (210 × 297 mm) • Single Page",
-                            Color32::from_rgb(245, 158, 11),
-                        ) {
-                            state.selected_profile = "bps_brs".into();
-                            state.page_layout_facing = false;
-                            state.paper_size = "A4 (210 x 297 mm)".into();
-                            state.view = OrchestratorView::Studio;
-                        }
-
-                        // 3. General
-                        let gen_sub = if lang.starts_with("id") { "Laporan Standar Umum" } else { "Generic Publication Report" };
-                        if render_profile_card(
-                            ui, t,
-                            ProfileCardKind::Generic,
-                            "General",
-                            gen_sub,
-                            "A4 (210 × 297 mm) • Single Page",
-                            Color32::from_rgb(156, 163, 175),
-                        ) {
-                            state.selected_profile = "generic_report".into();
-                            state.page_layout_facing = false;
-                            state.paper_size = "A4 (210 x 297 mm)".into();
-                            state.view = OrchestratorView::Studio;
-                        }
-                    });
-
-                    ui.add_space(28.0);
-
-                    // SECTION: RECENT OPENED DOCUMENTS
-                    let sec_rec = if lang.starts_with("id") { "Dokumen Terakhir Dibuka (*.pubgen)" } else { "Recent Opened Documents (*.pubgen)" };
-                    ui.label(RichText::new(sec_rec).font(semibold(15.0)).color(t.text_strong));
-                    ui.add_space(10.0);
-
-                    render_recent_documents(ui, state, t, lang);
-                    ui.add_space(32.0);
+                    }
                 });
+
+                ui.add_space(28.0);
+
+                // SECTION: PUBLICATION PROFILES
+                let sec_prof = if lang.starts_with("id") { "Profil Publikasi" } else { "Publication Profiles" };
+                ui.label(RichText::new(sec_prof).font(semibold(15.0)).color(t.text_strong));
+                ui.add_space(10.0);
+
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 16.0;
+
+                    // 1. DDA BPS
+                    if render_profile_card(
+                        ui,
+                        t,
+                        ProfileCardKind::Dda,
+                        "DDA BPS",
+                        "Daerah Dalam Angka",
+                        "A4 (210 × 297 mm) • Facing Pages",
+                        Color32::from_rgb(59, 130, 246),
+                    ) {
+                        state.selected_profile = "bps_dda".into();
+                        state.page_layout_facing = true;
+                        state.paper_size = "A4 (210 x 297 mm)".into();
+                        state.view = OrchestratorView::Studio;
+                    }
+
+                    // 2. BRS BPS
+                    if render_profile_card(
+                        ui,
+                        t,
+                        ProfileCardKind::Brs,
+                        "BRS BPS",
+                        "Berita Resmi Statistik",
+                        "A4 (210 × 297 mm) • Single Page",
+                        Color32::from_rgb(245, 158, 11),
+                    ) {
+                        state.selected_profile = "bps_brs".into();
+                        state.page_layout_facing = false;
+                        state.paper_size = "A4 (210 x 297 mm)".into();
+                        state.view = OrchestratorView::Studio;
+                    }
+
+                    // 3. General
+                    let gen_sub = if lang.starts_with("id") { "Laporan Standar Umum" } else { "Generic Publication Report" };
+                    if render_profile_card(
+                        ui,
+                        t,
+                        ProfileCardKind::Generic,
+                        "General",
+                        gen_sub,
+                        "A4 (210 × 297 mm) • Single Page",
+                        Color32::from_rgb(156, 163, 175),
+                    ) {
+                        state.selected_profile = "generic_report".into();
+                        state.page_layout_facing = false;
+                        state.paper_size = "A4 (210 x 297 mm)".into();
+                        state.view = OrchestratorView::Studio;
+                    }
+                });
+
+                ui.add_space(28.0);
+
+                // SECTION: RECENT OPENED DOCUMENTS
+                let sec_rec = if lang.starts_with("id") { "Dokumen Terakhir Dibuka (*.pubgen)" } else { "Recent Opened Documents (*.pubgen)" };
+                ui.label(RichText::new(sec_rec).font(semibold(15.0)).color(t.text_strong));
+                ui.add_space(10.0);
+
+                render_recent_documents(ui, state, t, lang);
+                ui.add_space(32.0);
             });
         });
+    });
 }
 
 /// Main entry point for rendering the Orchestrator workspace inside CentralPanel.
@@ -1272,17 +1209,27 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
 }
 
 /// Collapsed iconic right dock (InDesign parity: icon strip with expand toggle)
-fn render_collapsed_dock(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, width: f32, total_height: f32, lang: &str) {
+fn render_collapsed_dock(
+    _app: &mut DesignApp,
+    ui: &mut Ui,
+    state: &mut OrchestratorWorkspaceState,
+    t: &Tokens,
+    width: f32,
+    total_height: f32,
+    lang: &str,
+) {
     ui.set_width(width);
     ui.set_height(total_height);
 
     let tab_bar_height = 27.0f32;
 
     // Header strip with visible expand button
-    let expand_btn = ui.add_sized(
-        [width, tab_bar_height],
-        egui::Button::new(RichText::new("«").font(semibold(13.0)).color(t.text_strong)).fill(t.tab_strip).frame(false),
-    ).on_hover_text(format!("{} (Expand Panels)", crate::i18n::tr(lang, "Expand Panels")));
+    let expand_btn = ui
+        .add_sized(
+            [width, tab_bar_height],
+            egui::Button::new(RichText::new("«").font(semibold(13.0)).color(t.text_strong)).fill(t.tab_strip).frame(false),
+        )
+        .on_hover_text(format!("{} (Expand Panels)", crate::i18n::tr(lang, "Expand Panels")));
     if expand_btn.clicked() {
         state.right_dock_expanded = true;
     }
@@ -1333,7 +1280,15 @@ fn render_collapsed_dock(_app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestr
 }
 
 /// Expanded right dock with tabs (InDesign parity: tab strip + collapse button)
-fn render_expanded_dock(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, width: f32, total_height: f32, lang: &str) {
+fn render_expanded_dock(
+    app: &mut DesignApp,
+    ui: &mut Ui,
+    state: &mut OrchestratorWorkspaceState,
+    t: &Tokens,
+    width: f32,
+    total_height: f32,
+    lang: &str,
+) {
     ui.set_width(width);
     ui.set_height(total_height);
 
@@ -1348,8 +1303,9 @@ fn render_expanded_dock(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrat
 
     // Collapse to icons button on the left of the tab strip
     let collapse_rect = Rect::from_min_size(pos2(strip.min.x + 2.0, strip.min.y + 2.0), vec2(collapse_btn_w - 4.0, tab_bar_height - 4.0));
-    let collapse_resp =
-        ui.interact(collapse_rect, ui.scope_id().with("dock_collapse_btn"), Sense::click()).on_hover_text(format!("{} (Collapse to Icons)", crate::i18n::tr(lang, "Collapse to Icons")));
+    let collapse_resp = ui
+        .interact(collapse_rect, ui.scope_id().with("dock_collapse_btn"), Sense::click())
+        .on_hover_text(format!("{} (Collapse to Icons)", crate::i18n::tr(lang, "Collapse to Icons")));
     if collapse_resp.hovered() {
         ui.painter().rect_filled(collapse_rect, 3.0, t.hover);
     }
@@ -1362,9 +1318,8 @@ fn render_expanded_dock(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrat
     // Tab 1: Sumber & Konten
     let tab1_rect = Rect::from_min_size(pos2(strip.min.x + collapse_btn_w, strip.min.y), vec2(tab_w, tab_bar_height));
     let is_tab1 = state.right_dock_tab == OrchestratorRightTab::SumberKonten;
-    let tab1_resp = ui
-        .interact(tab1_rect, ui.scope_id().with("dock_tab_1"), Sense::click())
-        .on_hover_text(crate::i18n::tr(lang, "Sources & Content"));
+    let tab1_resp =
+        ui.interact(tab1_rect, ui.scope_id().with("dock_tab_1"), Sense::click()).on_hover_text(crate::i18n::tr(lang, "Sources & Content"));
     if is_tab1 {
         ui.painter().rect_filled(tab1_rect, 0.0, t.panel);
         ui.painter().line_segment([tab1_rect.left_top(), tab1_rect.right_top()], Stroke::new(2.0, t.accent));
@@ -1391,9 +1346,8 @@ fn render_expanded_dock(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrat
     let tab2_w = (width - (collapse_btn_w + tab_w)).max(0.0);
     let tab2_rect = Rect::from_min_size(pos2(strip.min.x + collapse_btn_w + tab_w, strip.min.y), vec2(tab2_w, tab_bar_height));
     let is_tab2 = state.right_dock_tab == OrchestratorRightTab::ProfilEksekusi;
-    let tab2_resp = ui
-        .interact(tab2_rect, ui.scope_id().with("dock_tab_2"), Sense::click())
-        .on_hover_text(crate::i18n::tr(lang, "Profile & Execution"));
+    let tab2_resp =
+        ui.interact(tab2_rect, ui.scope_id().with("dock_tab_2"), Sense::click()).on_hover_text(crate::i18n::tr(lang, "Profile & Execution"));
     if is_tab2 {
         ui.painter().rect_filled(tab2_rect, 0.0, t.panel);
         ui.painter().line_segment([tab2_rect.left_top(), tab2_rect.right_top()], Stroke::new(2.0, t.accent));
@@ -1484,8 +1438,10 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         if ui
             .add_sized(
                 [btn_w, 22.0],
-                egui::Button::new(RichText::new(format!("+ {}", crate::i18n::tr(lang, "Import Source"))).font(FontId::proportional(10.5)).color(t.text))
-                    .corner_radius(CornerRadius::same(3)),
+                egui::Button::new(
+                    RichText::new(format!("+ {}", crate::i18n::tr(lang, "Import Source"))).font(FontId::proportional(10.5)).color(t.text),
+                )
+                .corner_radius(CornerRadius::same(3)),
             )
             .on_hover_text(crate::i18n::tr(lang, "Import Source"))
             .clicked()
@@ -1529,8 +1485,10 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         if ui
             .add_sized(
                 [btn_w, 22.0],
-                egui::Button::new(RichText::new(format!("📊 {}", crate::i18n::tr(lang, "Import Excel"))).font(FontId::proportional(10.5)).color(t.text))
-                    .corner_radius(CornerRadius::same(3)),
+                egui::Button::new(
+                    RichText::new(format!("📊 {}", crate::i18n::tr(lang, "Import Excel"))).font(FontId::proportional(10.5)).color(t.text),
+                )
+                .corner_radius(CornerRadius::same(3)),
             )
             .on_hover_text(crate::i18n::tr(lang, "Import Excel"))
             .clicked()
@@ -1552,7 +1510,10 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         if ui
             .add_sized(
                 [btn_w, 22.0],
-                egui::Button::new(RichText::new(format!("🎨 {}", crate::i18n::tr(lang, "Import Metadata"))).font(FontId::proportional(10.5)).color(t.text)).corner_radius(CornerRadius::same(3)),
+                egui::Button::new(
+                    RichText::new(format!("🎨 {}", crate::i18n::tr(lang, "Import Metadata"))).font(FontId::proportional(10.5)).color(t.text),
+                )
+                .corner_radius(CornerRadius::same(3)),
             )
             .on_hover_text(crate::i18n::tr(lang, "Import Metadata"))
             .clicked()
@@ -1588,8 +1549,7 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                     let combo_w = (ui.available_width() - 4.0).max(120.0);
                     craft_ui::ComboBox::from_id_salt("meta_page_layout_combo")
                         .selected_text(
-                            RichText::new(if state.page_layout_facing { facing_label } else { single_label })
-                                .font(FontId::proportional(10.5)),
+                            RichText::new(if state.page_layout_facing { facing_label } else { single_label }).font(FontId::proportional(10.5)),
                         )
                         .width(combo_w)
                         .show_ui(ui, |ui| {
@@ -1659,7 +1619,9 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         // Section 2: Collapsible Pengaturan Dokumen (Metadata Form - Image 4)
         let meta_hdr = ui.selectable_label(
             false,
-            RichText::new(format!("{} {}", if state.metadata_open { "▼" } else { "▶" }, crate::i18n::tr(lang, "Document Settings"))).font(semibold(12.0)).color(t.text_strong),
+            RichText::new(format!("{} {}", if state.metadata_open { "▼" } else { "▶" }, crate::i18n::tr(lang, "Document Settings")))
+                .font(semibold(12.0))
+                .color(t.text_strong),
         );
         if meta_hdr.clicked() {
             state.metadata_open = !state.metadata_open;
@@ -1716,9 +1678,14 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                 // Group 1: CSV
                 let csv_hdr = ui.selectable_label(
                     false,
-                    RichText::new(format!("{} {} ({})", if state.csv_group_open { "▼" } else { "▶" }, crate::i18n::tr(lang, "Data Tables (CSV)"), csv_files.len()))
-                        .font(semibold(11.0))
-                        .color(t.text),
+                    RichText::new(format!(
+                        "{} {} ({})",
+                        if state.csv_group_open { "▼" } else { "▶" },
+                        crate::i18n::tr(lang, "Data Tables (CSV)"),
+                        csv_files.len()
+                    ))
+                    .font(semibold(11.0))
+                    .color(t.text),
                 );
                 if csv_hdr.clicked() {
                     state.csv_group_open = !state.csv_group_open;
@@ -1740,9 +1707,14 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                 // Group 2: Markdown
                 let md_hdr = ui.selectable_label(
                     false,
-                    RichText::new(format!("{} {} ({})", if state.md_group_open { "▼" } else { "▶" }, crate::i18n::tr(lang, "Narrative (Markdown)"), md_files.len()))
-                        .font(semibold(11.0))
-                        .color(t.text),
+                    RichText::new(format!(
+                        "{} {} ({})",
+                        if state.md_group_open { "▼" } else { "▶" },
+                        crate::i18n::tr(lang, "Narrative (Markdown)"),
+                        md_files.len()
+                    ))
+                    .font(semibold(11.0))
+                    .color(t.text),
                 );
                 if md_hdr.clicked() {
                     state.md_group_open = !state.md_group_open;
@@ -1807,8 +1779,10 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
 
         if ui
             .add(
-                egui::Button::new(RichText::new(format!("🔍 {}", crate::i18n::tr(lang, "Run QA Audit"))).font(FontId::proportional(10.5)).color(t.text))
-                    .corner_radius(CornerRadius::same(3)),
+                egui::Button::new(
+                    RichText::new(format!("🔍 {}", crate::i18n::tr(lang, "Run QA Audit"))).font(FontId::proportional(10.5)).color(t.text),
+                )
+                .corner_radius(CornerRadius::same(3)),
             )
             .on_hover_text(crate::i18n::tr(lang, "Run QA Audit"))
             .clicked()
@@ -1823,7 +1797,9 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
             if ui
                 .add(
                     egui::Button::new(
-                        RichText::new(format!("👁 {}", crate::i18n::tr(lang, "View Latest PDF"))).font(FontId::proportional(10.5)).color(Color32::from_rgb(56, 189, 248)),
+                        RichText::new(format!("👁 {}", crate::i18n::tr(lang, "View Latest PDF")))
+                            .font(FontId::proportional(10.5))
+                            .color(Color32::from_rgb(56, 189, 248)),
                     )
                     .corner_radius(CornerRadius::same(3)),
                 )
@@ -1838,9 +1814,17 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if state.last_qa_clean {
-                ui.label(RichText::new(format!("● {}", crate::i18n::tr(lang, "Clean (QA Fit 100%)"))).font(semibold(10.5)).color(Color32::from_rgb(74, 222, 128)));
+                ui.label(
+                    RichText::new(format!("● {}", crate::i18n::tr(lang, "Clean (QA Fit 100%)")))
+                        .font(semibold(10.5))
+                        .color(Color32::from_rgb(74, 222, 128)),
+                );
             } else {
-                ui.label(RichText::new(format!("● {}", crate::i18n::tr(lang, "Issues Detected"))).font(semibold(10.5)).color(Color32::from_rgb(248, 113, 113)));
+                ui.label(
+                    RichText::new(format!("● {}", crate::i18n::tr(lang, "Issues Detected")))
+                        .font(semibold(10.5))
+                        .color(Color32::from_rgb(248, 113, 113)),
+                );
             }
         });
     });
@@ -1990,9 +1974,20 @@ fn paint_card_thumbnail(painter: &egui::Painter, rect: Rect, kind: CardKind, t: 
             painter.rect(rect, CornerRadius::same(2), t.panel_darker, Stroke::new(1.0, Color32::from_rgb(99, 102, 241)), StrokeKind::Inside);
             for line in 0..4 {
                 let y = rect.min.y + 10.0 + (line as f32 * 8.0);
-                painter.rect_filled(Rect::from_min_size(egui::pos2(rect.min.x + 6.0, y), vec2(14.0, 2.0)), CornerRadius::same(1), Color32::from_rgb(165, 180, 252));
-                painter.line_segment([egui::pos2(rect.min.x + 22.0, y + 1.0), egui::pos2(rect.min.x + 28.0, y + 1.0)], Stroke::new(1.0, Color32::from_rgb(129, 140, 248)));
-                painter.rect_filled(Rect::from_min_size(egui::pos2(rect.min.x + 30.0, y), vec2(4.0, 2.0)), CornerRadius::same(1), Color32::from_rgb(199, 210, 254));
+                painter.rect_filled(
+                    Rect::from_min_size(egui::pos2(rect.min.x + 6.0, y), vec2(14.0, 2.0)),
+                    CornerRadius::same(1),
+                    Color32::from_rgb(165, 180, 252),
+                );
+                painter.line_segment(
+                    [egui::pos2(rect.min.x + 22.0, y + 1.0), egui::pos2(rect.min.x + 28.0, y + 1.0)],
+                    Stroke::new(1.0, Color32::from_rgb(129, 140, 248)),
+                );
+                painter.rect_filled(
+                    Rect::from_min_size(egui::pos2(rect.min.x + 30.0, y), vec2(4.0, 2.0)),
+                    CornerRadius::same(1),
+                    Color32::from_rgb(199, 210, 254),
+                );
             }
         }
     }
@@ -2001,7 +1996,6 @@ fn paint_card_thumbnail(painter: &egui::Painter, rect: Rect, kind: CardKind, t: 
 fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, lang: &str) {
     let avail_w = ui.available_width();
     let gap = 8.0f32;
-    let card_h = 84.0f32;
     let mut clicked_edit_idx = None;
 
     if state.page_layout_facing {
@@ -2009,15 +2003,17 @@ fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         // Row 1: Page 1 (Cover / Sampul) alone on left with empty right slot (matching trailing last card)
         // Subsequent rows: Pairs of Left Page (Verso, spine right) and Right Page (Recto, spine left)
         let col_w = ((avail_w - gap) / 2.0).max(120.0);
+        let det_w = card_details_width(col_w);
 
         if let Some(cover_card) = state.cards.first() {
+            let row_h = card_row_height(ui.painter(), std::slice::from_ref(cover_card), det_w, lang);
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing = vec2(gap, 0.0);
-                if let Some(idx) = render_facing_card(ui, 0, cover_card, col_w, false, t, lang) {
+                if let Some(idx) = render_facing_card(ui, 0, cover_card, col_w, false, row_h, t, lang) {
                     clicked_edit_idx = Some(idx);
                 }
-                // Empty right slot so cover card length is identical to col_w and height matches card_h
-                ui.allocate_exact_size(vec2(col_w, card_h), Sense::hover());
+                // Empty right slot so cover card width is col_w and height matches the row
+                ui.allocate_exact_size(vec2(col_w, row_h), Sense::hover());
             });
             ui.add_space(gap);
         }
@@ -2026,24 +2022,25 @@ fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         if state.cards.len() > 1 {
             let body_cards = &state.cards[1..];
             for (chunk_idx, pair) in body_cards.chunks(2).enumerate() {
+                let row_h = card_row_height(ui.painter(), pair, det_w, lang);
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing = vec2(gap, 0.0);
                     let actual_idx_left = 1 + chunk_idx * 2;
                     // Left page (Verso: thumbnail on right facing spine, text right-aligned)
                     let is_single_trailing = pair.len() == 1;
-                    if let Some(idx) = render_facing_card(ui, actual_idx_left, &pair[0], col_w, !is_single_trailing, t, lang) {
+                    if let Some(idx) = render_facing_card(ui, actual_idx_left, &pair[0], col_w, !is_single_trailing, row_h, t, lang) {
                         clicked_edit_idx = Some(idx);
                     }
 
                     if pair.len() > 1 {
                         let actual_idx_right = actual_idx_left + 1;
                         // Right page (Recto: thumbnail on left facing spine, text left-aligned)
-                        if let Some(idx) = render_facing_card(ui, actual_idx_right, &pair[1], col_w, false, t, lang) {
+                        if let Some(idx) = render_facing_card(ui, actual_idx_right, &pair[1], col_w, false, row_h, t, lang) {
                             clicked_edit_idx = Some(idx);
                         }
                     } else {
                         // Empty slot on right for trailing single page
-                        ui.allocate_exact_size(vec2(col_w, card_h), Sense::hover());
+                        ui.allocate_exact_size(vec2(col_w, row_h), Sense::hover());
                     }
                 });
                 ui.add_space(gap);
@@ -2053,19 +2050,21 @@ fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         // SINGLE PAGE GRID LAYOUT (2 Columns standard)
         let col_count = if avail_w > 520.0 { 2 } else { 1 };
         let card_w = ((avail_w - (col_count as f32 - 1.0) * gap) / (col_count as f32)).max(120.0);
+        let det_w = card_details_width(card_w);
         let chunk_size = col_count;
         for (row_idx, chunk) in state.cards.chunks(chunk_size).enumerate() {
+            let row_h = card_row_height(ui.painter(), chunk, det_w, lang);
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing = vec2(gap, 0.0);
                 for (col_idx, card) in chunk.iter().enumerate() {
                     let actual_idx = row_idx * chunk_size + col_idx;
-                    if let Some(idx) = render_facing_card(ui, actual_idx, card, card_w, false, t, lang) {
+                    if let Some(idx) = render_facing_card(ui, actual_idx, card, card_w, false, row_h, t, lang) {
                         clicked_edit_idx = Some(idx);
                     }
                 }
                 if chunk.len() < chunk_size {
                     for _ in chunk.len()..chunk_size {
-                        ui.allocate_exact_size(vec2(card_w, card_h), Sense::hover());
+                        ui.allocate_exact_size(vec2(card_w, row_h), Sense::hover());
                     }
                 }
             });
@@ -2085,12 +2084,44 @@ fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
     }
 }
 
-fn render_facing_card(ui: &mut Ui, idx: usize, card: &PublicationCard, card_w: f32, is_verso: bool, t: &Tokens, lang: &str) -> Option<usize> {
-    const CARD_HEIGHT: f32 = 84.0;
+/// Horizontal text width inside a page card, beside the 34px thumbnail
+/// (10px padding each side + 8px gutter; see `render_facing_card`).
+fn card_details_width(card_w: f32) -> f32 {
+    (card_w - 62.0).max(40.0)
+}
+
+/// Height a page card needs so every text line stays visible: pill row +
+/// wrapped title + wrapped source + footer, with the card's inner padding.
+fn measured_card_height(painter: &egui::Painter, card: &PublicationCard, details_w: f32, lang: &str) -> f32 {
+    let title = painter.layout(card.title.clone(), semibold(12.0), Color32::WHITE, details_w);
+    let src = format!("{}: {}", crate::i18n::tr(lang, "Source:"), card.source);
+    let source = painter.layout(src, FontId::proportional(11.0), Color32::WHITE, details_w);
+    const PILL_H: f32 = 16.0;
+    const FOOTER_H: f32 = 16.0;
+    const LINE_GAP: f32 = 2.0;
+    const PAD_Y: f32 = 12.0; // 6px top + 6px bottom inner padding
+    PAD_Y + PILL_H + LINE_GAP + title.size().y.max(16.0) + LINE_GAP + source.size().y.max(15.0) + LINE_GAP + FOOTER_H
+}
+
+/// Uniform row height: the tallest card in the row, never below the legacy 84px.
+fn card_row_height(painter: &egui::Painter, cards: &[PublicationCard], details_w: f32, lang: &str) -> f32 {
+    cards.iter().map(|c| measured_card_height(painter, c, details_w, lang)).fold(84.0, f32::max)
+}
+
+fn render_facing_card(
+    ui: &mut Ui,
+    idx: usize,
+    card: &PublicationCard,
+    card_w: f32,
+    is_verso: bool,
+    card_h: f32,
+    t: &Tokens,
+    lang: &str,
+) -> Option<usize> {
     let mut clicked_edit = false;
 
     ui.push_id(idx, |ui| {
-        let (card_rect, card_resp) = ui.allocate_exact_size(vec2(card_w, CARD_HEIGHT), Sense::click());
+        let (card_rect, card_resp) = ui.allocate_exact_size(vec2(card_w, card_h), Sense::click());
         if card_resp.clicked() {
             clicked_edit = true;
         }
@@ -2107,7 +2138,7 @@ fn render_facing_card(ui: &mut Ui, idx: usize, card: &PublicationCard, card_w: f
         painter.rect_filled(card_rect, 4.0, bg);
         painter.rect_stroke(card_rect, 4.0, Stroke::new(1.0, border_c), egui::StrokeKind::Inside);
 
-        let inner_rect = card_rect.shrink2(vec2(10.0, 8.0));
+        let inner_rect = card_rect.shrink2(vec2(10.0, 6.0));
         let thumb_w = 34.0f32;
         let thumb_h = 48.0f32;
         let thumb_size = vec2(thumb_w, thumb_h);
@@ -2143,7 +2174,7 @@ fn render_facing_card(ui: &mut Ui, idx: usize, card: &PublicationCard, card_w: f
         });
 
         // Line 2: Title
-        let title_label = egui::Label::new(RichText::new(&card.title).font(semibold(11.0)).color(t.text_strong)).truncate().sense(Sense::click());
+        let title_label = egui::Label::new(RichText::new(&card.title).font(semibold(12.0)).color(t.text_strong)).sense(Sense::click());
         let title_resp = child_ui.add(title_label);
         if title_resp.clicked() {
             clicked_edit = true;
@@ -2151,13 +2182,17 @@ fn render_facing_card(ui: &mut Ui, idx: usize, card: &PublicationCard, card_w: f
 
         // Line 3: Source
         let src_label = format!("{}: {}", crate::i18n::tr(lang, "Source:"), card.source);
-        child_ui.add(egui::Label::new(RichText::new(src_label).font(FontId::proportional(10.0)).color(t.text_dim)).truncate());
+        child_ui.add(egui::Label::new(RichText::new(src_label).font(FontId::proportional(11.0)).color(t.text_dim)));
 
         // Line 4: Footer
         child_ui.horizontal(|ui| {
-            ui.label(RichText::new(format!("{} {}", crate::i18n::tr(lang, "Pg."), card.page)).font(semibold(10.0)).color(t.text_dim));
+            ui.label(RichText::new(format!("{} {}", crate::i18n::tr(lang, "Pg."), card.page)).font(semibold(11.0)).color(t.text_dim));
             ui.add_space(8.0);
-            let edit_resp = ui.link(RichText::new(format!("✎ {}", crate::i18n::tr(lang, "Click to edit"))).font(FontId::proportional(10.0)).color(Color32::from_rgb(56, 189, 248)));
+            let edit_resp = ui.link(
+                RichText::new(format!("✎ {}", crate::i18n::tr(lang, "Click to edit")))
+                    .font(FontId::proportional(11.0))
+                    .color(Color32::from_rgb(56, 189, 248)),
+            );
             if edit_resp.clicked() {
                 clicked_edit = true;
             }
@@ -2261,9 +2296,9 @@ fn render_card_action_bar(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t
 }
 
 fn render_tag_pill(ui: &mut Ui, label: &str, t: &Tokens) {
-    let font = FontId::proportional(9.0);
+    let font = FontId::proportional(10.0);
     let galley = ui.painter().layout_no_wrap(label.to_string(), font, t.text);
-    let size = vec2(galley.size().x + 8.0, 14.0);
+    let size = vec2(galley.size().x + 8.0, 16.0);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
 
     ui.painter().rect(rect, CornerRadius::same(2), t.well, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
@@ -2425,9 +2460,11 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
     if ui
         .add_sized(
             [ui.available_width(), btn_h],
-            egui::Button::new(RichText::new(format!("⚡ {}", crate::i18n::tr(lang, "Generate Publication"))).font(semibold(12.0)).color(Color32::WHITE))
-                .fill(Color32::from_rgb(14, 116, 144))
-                .corner_radius(CornerRadius::same(4)),
+            egui::Button::new(
+                RichText::new(format!("⚡ {}", crate::i18n::tr(lang, "Generate Publication"))).font(semibold(12.0)).color(Color32::WHITE),
+            )
+            .fill(Color32::from_rgb(14, 116, 144))
+            .corner_radius(CornerRadius::same(4)),
         )
         .on_hover_text(crate::i18n::tr(lang, "Generate Publication"))
         .clicked()
@@ -2445,9 +2482,11 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
     if ui
         .add_sized(
             [ui.available_width(), btn_h],
-            egui::Button::new(RichText::new(format!("🚀 {}", crate::i18n::tr(lang, "Generate & Publish PDF"))).font(semibold(12.0)).color(Color32::WHITE))
-                .fill(Color32::from_rgb(22, 101, 52))
-                .corner_radius(CornerRadius::same(4)),
+            egui::Button::new(
+                RichText::new(format!("🚀 {}", crate::i18n::tr(lang, "Generate & Publish PDF"))).font(semibold(12.0)).color(Color32::WHITE),
+            )
+            .fill(Color32::from_rgb(22, 101, 52))
+            .corner_radius(CornerRadius::same(4)),
         )
         .on_hover_text(crate::i18n::tr(lang, "Generate & Publish PDF"))
         .clicked()
@@ -3136,12 +3175,9 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
     let mut chosen_action = None;
 
     let guard_title = format!("⚠️ {}", crate::i18n::tr(lang, "Compilation Safety Guard"));
-    egui::Window::new(guard_title)
-        .collapsible(false)
-        .resizable(false)
-        .fixed_size([460.0, 240.0])
-        .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, |ui| {
+    egui::Window::new(guard_title).collapsible(false).resizable(false).fixed_size([460.0, 240.0]).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).show(
+        ctx,
+        |ui| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
 
             ui.label(
@@ -3195,7 +3231,8 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
                     }
                 });
             });
-        });
+        },
+    );
 
     if close {
         state.show_guard_dialog = false;
@@ -3323,14 +3360,7 @@ mod tests {
 
     #[test]
     fn test_card_kind_map_chart_and_rule_based_defaults() {
-        let card = PublicationCard::new_with(
-            CardKind::MapChart,
-            "Peta Tematik Sebaran NTP",
-            "Peta Kloroplet",
-            "maps/jabar.geojson",
-            15,
-            true,
-        );
+        let card = PublicationCard::new_with(CardKind::MapChart, "Peta Tematik Sebaran NTP", "Peta Kloroplet", "maps/jabar.geojson", 15, true);
         assert_eq!(card.kind, CardKind::MapChart);
         assert_eq!(card.kind.icon(), "🗺️");
         assert_eq!(card.map_chart_type, "Choropleth");
@@ -3453,14 +3483,8 @@ mod tests {
         stock_card.map_data_csv = "maps/contoh.csv".into();
         state.cards.push(stock_card);
 
-        let mut custom_card = PublicationCard::new_with(
-            CardKind::MapChart,
-            "Peta Tematik Khusus",
-            "Custom GeoJSON Map",
-            "maps/custom_border.geojson",
-            6,
-            false,
-        );
+        let mut custom_card =
+            PublicationCard::new_with(CardKind::MapChart, "Peta Tematik Khusus", "Custom GeoJSON Map", "maps/custom_border.geojson", 6, false);
         custom_card.map_is_custom = true;
         custom_card.map_custom_geojson = "maps/custom_border.geojson".into();
         custom_card.map_data_csv = "maps/data_custom.csv".into();
@@ -3501,5 +3525,61 @@ mod tests {
         assert!(res_custom.map_is_custom);
         assert_eq!(res_custom.map_custom_geojson, "maps/custom_border.geojson");
         assert_eq!(res_custom.map_data_csv, "maps/data_custom.csv");
+    }
+
+    /// Opt-in evidence (`CRAFT_UI_VISUAL_FIXTURES=dir cargo test capture_page_structure`):
+    /// the Page Structure card grid with long real-world titles/sources — every text line
+    /// must stay fully visible (no truncation) at the bumped 1pt-larger font sizes.
+    #[test]
+    fn capture_page_structure_cards_fixture() {
+        let Some(directory) = std::env::var_os("CRAFT_UI_VISUAL_FIXTURES").map(std::path::PathBuf::from) else { return };
+        std::fs::create_dir_all(&directory).unwrap();
+        let app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let mut ready = false;
+        let mut harness = egui_kittest::Harness::builder().with_size(vec2(1100.0, 760.0)).with_accessibility_check(false).wgpu().build_ui_state(
+            move |ui, app: &mut DesignApp| {
+                let t = Tokens::for_brightness(crate::theme::Brightness::MediumDark);
+                if !ready {
+                    crate::theme::install_fonts(ui.ctx(), "en");
+                    crate::theme::apply(ui.ctx(), &t);
+                    // The kittest font set lacks U+270E (✎) used by the edit link; the real app
+                    // font stack covers it. Tofu keeps the fixture about the card text layout.
+                    ui.ctx().set_missing_glyph_policy(egui::MissingGlyphPolicy::Tofu);
+                    ready = true;
+                }
+                let mut state = OrchestratorWorkspaceState::default();
+                state.page_layout_facing = true;
+                state.cards.push(PublicationCard::new_with(CardKind::Cover, "Sampul Statistik Daerah", "Cover Depan", "cover.ai", 1, true));
+                state.cards.push(PublicationCard::new_with(
+                    CardKind::Narrative,
+                    "Analisis Pertumbuhan Ekonomi dan Struktur Perdagangan Daerah 2026",
+                    "Paragraf",
+                    "md/analisis-pertumbuhan-ekonomi.md",
+                    2,
+                    true,
+                ));
+                state.cards.push(PublicationCard::new_with(
+                    CardKind::Chart,
+                    "Grafik Perkembangan Nilai Tukar Petani Menurut Komoditas",
+                    "Grafik Vektor",
+                    "csv/ntp-komoditas.csv",
+                    3,
+                    true,
+                ));
+                state.cards.push(PublicationCard::new_with(
+                    CardKind::MapChart,
+                    "Peta Tematik Sebaran NTP Kabupaten/Kota Se-Jawa Barat",
+                    "Peta Kloroplet",
+                    "maps/jabar.geojson",
+                    4,
+                    true,
+                ));
+                render_card_grid(app, ui, &mut state, &t, "id");
+            },
+            app,
+        );
+        harness.input_mut().max_texture_side = Some(8192);
+        harness.run_steps(4);
+        harness.render().unwrap().save(directory.join("page-structure-cards.png")).unwrap();
     }
 }

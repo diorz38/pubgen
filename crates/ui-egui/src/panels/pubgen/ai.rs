@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
@@ -624,6 +625,19 @@ impl TranslateJob {
         _ctx: egui::Context,
     ) -> Self {
         Self { drafts: false, done: 0, total: 0, finished: true }
+    }
+
+    /// Draft mode on the web build: nothing can run, so report the job as already finished.
+    #[cfg(target_arch = "wasm32")]
+    pub fn spawn_drafts(
+        _provider: &str,
+        _key: &str,
+        _model: &str,
+        _units: Vec<(String, String)>,
+        _glossary: Vec<(String, String)>,
+        _ctx: egui::Context,
+    ) -> Self {
+        Self { drafts: true, done: 0, total: 0, finished: true }
     }
 
     /// Drain progress messages; on Done, store the pairs into \`st.translations\` and

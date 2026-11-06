@@ -309,7 +309,10 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
                                         let customs: Vec<String> = app.ui.custom_workspaces.iter().map(|w| w.name.clone()).collect();
                                         for w in crate::menus::WORKSPACES.iter().map(|w| w.to_string()).chain(customs.iter().cloned()) {
                                             if ui
-                                                .selectable_label(w == current, crate::rtl::widget(ui, crate::i18n::workspace_name(&app.ui.language, &w)))
+                                                .selectable_label(
+                                                    w == current,
+                                                    crate::rtl::widget(ui, crate::i18n::workspace_name(&app.ui.language, &w)),
+                                                )
                                                 .clicked()
                                             {
                                                 let _ = app.run("window.workspace", json!({"name": w}));
@@ -353,7 +356,10 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
                                 );
                                 ui.add_space(6.0);
                                 if icons::button(ui, "share", 22.0, false, crate::i18n::tr(&app.ui.language, "Share")).clicked() {
-                                    app.status(crate::i18n::tr(&app.ui.language, "Export a PDF, IDML or package to share — no cloud account needed."));
+                                    app.status(crate::i18n::tr(
+                                        &app.ui.language,
+                                        "Export a PDF, IDML or package to share — no cloud account needed.",
+                                    ));
                                 }
                                 ui.add_space(8.0);
                                 // Always one click away: the ArtCraft community Discord.
