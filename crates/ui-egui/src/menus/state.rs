@@ -204,7 +204,7 @@ pub fn menu_enabled(app: &DesignApp, id: &str) -> bool {
         return true;
     }
     #[cfg(feature = "pubgen")]
-    if id == "pubgen.saveProject" || id == "pubgen.saveProjectAs" {
+    if id == "pubgen.saveProject" || id == "pubgen.saveProjectAs" || id == "pubgen.savePackageAs" {
         let has_orchestrator = app.egui_ctx.as_ref().is_some_and(|ctx| {
             crate::dock::pubgen::workspace::get_state(ctx).has_active_workspace()
         });

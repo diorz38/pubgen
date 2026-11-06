@@ -277,6 +277,8 @@ pub struct OrchestratorWorkspaceState {
     pub md_group_open: bool,
     pub metadata_open: bool,
     pub content_files: Vec<ContentItem>,
+    #[serde(default)]
+    pub cached_content: std::collections::BTreeMap<String, Vec<u8>>,
     // Metadata form
     pub meta_title: String,
     pub meta_subtitle: String,
@@ -490,6 +492,7 @@ impl Default for OrchestratorWorkspaceState {
             md_group_open: true,
             metadata_open: true,
             content_files,
+            cached_content: std::collections::BTreeMap::new(),
             meta_title: "Perkembangan Nilai Tukar Petani".into(),
             meta_subtitle: "1 Oktober 2026 · BADAN PUSAT STATISTIK PROVINSI JAWA BARAT".into(),
             meta_release_no: "BRS No. 01/01/Th. XXVI, 15".into(),
@@ -660,6 +663,17 @@ pub fn apply_ingest_report_to_state(
         .chain(report.md.iter().map(|(name, bytes)| ContentItem { path: norm("md", name), size_bytes: bytes.len() }))
         .chain(report.assets.iter().map(|(name, bytes)| ContentItem { path: norm("assets", name), size_bytes: bytes.len() }))
         .collect();
+
+    state.cached_content.clear();
+    for (name, bytes) in &report.csv {
+        state.cached_content.insert(norm("csv", name), bytes.clone());
+    }
+    for (name, bytes) in &report.md {
+        state.cached_content.insert(norm("md", name), bytes.clone());
+    }
+    for (name, bytes) in &report.assets {
+        state.cached_content.insert(norm("assets", name), bytes.clone());
+    }
 
     if !report.metadata.cards.is_empty() {
         state.cards = report
@@ -845,6 +859,19 @@ fn render_recent_documents(
                     let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(&doc);
                     apply_ingest_report_to_state(state, name, &report);
                 }
+            } else if ext == "pubgen" && p.is_file() {
+                if let Ok(opened) = pubgen_core::container::open_pubgen(p) {
+                    let report = pubgen_core::excel::IngestReport {
+                        profile_id: opened.metadata.profile_id.clone(),
+                        metadata: opened.metadata,
+                        csv: opened.content.csv,
+                        md: opened.content.md,
+                        assets: opened.content.assets,
+                        warnings: Vec::new(),
+                    };
+                    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(&doc);
+                    apply_ingest_report_to_state(state, name, &report);
+                }
             }
             state.execution_log.push(format!("[{}] Membuka berkas {}", format_now(), doc));
             state.view = OrchestratorView::Studio;
@@ -902,7 +929,23 @@ pub fn render_orchestrator_home(
                         ).clicked() {
                             let ctx = ui.ctx().clone();
                             let _ = app.ask_open("pubgenProject", crate::app::file_dialogs::Bound::App, move |_app, path: String| {
+                                let p = std::path::Path::new(&path);
+                                let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
                                 let mut st = get_state(&ctx);
+                                if ext == "pubgen" && p.is_file() {
+                                    if let Ok(opened) = pubgen_core::container::open_pubgen(p) {
+                                        let report = pubgen_core::excel::IngestReport {
+                                            profile_id: opened.metadata.profile_id.clone(),
+                                            metadata: opened.metadata,
+                                            csv: opened.content.csv,
+                                            md: opened.content.md,
+                                            assets: opened.content.assets,
+                                            warnings: Vec::new(),
+                                        };
+                                        let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(path.as_str());
+                                        apply_ingest_report_to_state(&mut st, name, &report);
+                                    }
+                                }
                                 if !st.recent_documents.contains(&path) {
                                     st.recent_documents.insert(0, path.clone());
                                 }
@@ -1310,15 +1353,26 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                 state.view = OrchestratorView::Home;
             }
 
+            // Save .pubgen package button
+            let pkg_tip = if lang.starts_with("id") { "Simpan Paket Publikasi (.pubgen)..." } else { "Save Publication Package (.pubgen)..." };
+            if ui
+                .add(egui::Button::new(RichText::new("📦 .pubgen").font(semibold(11.0))).frame(true).corner_radius(CornerRadius::same(3)))
+                .on_hover_text(pkg_tip)
+                .clicked()
+            {
+                let _ = app.run("pubgen.savePackageAs", serde_json::json!({}));
+            }
+
             // Save button
             if ui
                 .add(egui::Button::new(RichText::new("💾").font(semibold(12.0))).frame(true).corner_radius(CornerRadius::same(3)))
                 .on_hover_text(crate::i18n::tr(lang, "Save"))
                 .clicked()
             {
+                let _ = app.run("pubgen.saveProject", serde_json::json!({}));
                 let now = format_now();
                 state.is_dirty = false;
-                state.execution_log.push(format!("[{now}] Proyek publikasi berhasil disimpan ke cache."));
+                state.execution_log.push(format!("[{now}] Proyek publikasi berhasil disimpan."));
                 state.status_message = Some(("Proyek disimpan".into(), true));
             }
         });
@@ -1362,6 +1416,7 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                         };
                         st.content_files.retain(|f| f.path != target_path);
                         st.content_files.push(ContentItem { path: target_path.clone(), size_bytes: bytes.len() });
+                        st.cached_content.insert(target_path.clone(), bytes.clone());
                         let now = format_now();
                         st.execution_log.push(format!("[{now}] Berkas sumber ditambahkan: {target_path} ({} B)", bytes.len()));
                         set_state(&ctx, st);

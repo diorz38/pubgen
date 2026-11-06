@@ -89,7 +89,14 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
         "pubgen.openProject",
         "Open Publication Project...",
         None,
-        "{path? (default: the manifest last opened)} — read an existing pubgen_project.json, validate it and load its summary into the Publication Compiler without building",
+        "{path? (default: the manifest last opened)} — read an existing pubgen_project.json or .pubgen package, validate it and load it into the workspace",
+    ),
+    #[cfg(feature = "pubgen")]
+    (
+        "pubgen.savePackageAs",
+        "Save Publication Package (.pubgen)...",
+        None,
+        "{path?} — package the current publication workspace into a portable .pubgen ZIP container (with metadata.json, pubgen.json, csv, and markdown content)",
     ),
     #[cfg(feature = "pubgen")]
     (

@@ -1848,6 +1848,28 @@ pub(crate) fn open_project(app: &mut DesignApp, p: &Value) -> Result<Value, Stri
     if path.chars().count() > MAX_PATH_CHARS {
         return Err("path: too long".into());
     }
+
+    let p_path = Path::new(&path);
+    let ext = p_path.extension().and_then(std::ffi::OsStr::to_str).map(|e| e.to_ascii_lowercase());
+    if ext.as_deref() == Some("pubgen") {
+        let opened = pubgen_core::container::open_pubgen(p_path)
+            .map_err(|e| format!("Gagal membuka paket .pubgen: {e}"))?;
+        remember_manifest(app, &path)?;
+        if let Some(ctx) = app.egui_ctx.clone() {
+            let doc_name = p_path.file_name().and_then(|n| n.to_str()).unwrap_or("publication.pubgen");
+            crate::dock::pubgen::workspace::sync_external_workspace(
+                &ctx,
+                doc_name,
+                &opened.metadata,
+                &opened.content.csv,
+                &opened.content.md,
+                &opened.content.assets,
+            );
+            ctx.request_repaint();
+        }
+        return Ok(serde_json::json!({"package": path, "cards": opened.metadata.cards.len()}));
+    }
+
     let plan = CompilePlan::load(Path::new(&path))?;
     remember_manifest(app, &path)?;
     let summary = plan.summary_line();
@@ -1874,10 +1896,29 @@ pub(crate) fn open_project(app: &mut DesignApp, p: &Value) -> Result<Value, Stri
     Ok(serde_json::json!({"manifest": path, "summary": summary, "chapters": plan.manifest.chapters.len()}))
 }
 
-/// Ask for a `pubgen_project.json` and hand the pick to the Publication Compiler.
+/// Ask for a `pubgen_project.json` or `.pubgen` package and load it.
 fn ask_for_manifest(app: &mut DesignApp) {
     let ctx = app.egui_ctx.clone();
     let _ = app.ask_open("pubgenProject", crate::app::file_dialogs::Bound::App, move |_app, path| {
+        let p_path = Path::new(&path);
+        let ext = p_path.extension().and_then(std::ffi::OsStr::to_str).map(|e| e.to_ascii_lowercase());
+        if ext.as_deref() == Some("pubgen") {
+            if let Ok(opened) = pubgen_core::container::open_pubgen(p_path) {
+                if let Some(ctx) = &ctx {
+                    let doc_name = p_path.file_name().and_then(|n| n.to_str()).unwrap_or("publication.pubgen");
+                    crate::dock::pubgen::workspace::sync_external_workspace(
+                        ctx,
+                        doc_name,
+                        &opened.metadata,
+                        &opened.content.csv,
+                        &opened.content.md,
+                        &opened.content.assets,
+                    );
+                    ctx.request_repaint();
+                }
+                return Ok(Value::Null);
+            }
+        }
         if let Some(ctx) = &ctx {
             super::with_state(ctx, |st| {
                 st.compile_manifest_path = path;
@@ -1900,6 +1941,124 @@ pub(crate) fn save_project(app: &mut DesignApp, p: &Value) -> Result<Value, Stri
 /// The `pubgen.saveProjectAs` UI command: the same save, always naming the target file.
 pub(crate) fn save_project_as(app: &mut DesignApp, p: &Value) -> Result<Value, String> {
     save_project_with(app, p, true)
+}
+
+/// The `pubgen.savePackageAs` UI command: package the current Orchestrator publication workspace
+/// and all cached content into a portable `.pubgen` container file.
+pub(crate) fn save_package_as(app: &mut DesignApp, p: &Value) -> Result<Value, String> {
+    if let Some(path) = p.get("path").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()) {
+        if path.chars().count() > MAX_PATH_CHARS {
+            return Err("path: too long".into());
+        }
+        return save_pubgen_package_to(app, Path::new(path));
+    }
+    if app.egui_ctx.is_none() {
+        return Ok(Value::Null);
+    }
+    let default_name = app.egui_ctx.as_ref().map(|ctx| {
+        let orch = crate::dock::pubgen::workspace::get_state(ctx);
+        if !orch.meta_title.trim().is_empty() {
+            let sanitized = orch.meta_title.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+            format!("{sanitized}.pubgen")
+        } else {
+            "publication.pubgen".into()
+        }
+    }).unwrap_or_else(|| "publication.pubgen".into());
+
+    let _ = app.ask_save(&default_name, crate::app::file_dialogs::Bound::App, move |app, path| {
+        save_pubgen_package_to(app, Path::new(&path)).map(|_| Value::Null)
+    });
+    Ok(serde_json::json!({"dialog": "pubgenPackage", "open": true}))
+}
+
+/// Package the current publication workspace into a `.pubgen` ZIP archive.
+pub(crate) fn save_pubgen_package_to(app: &mut DesignApp, save_path: &Path) -> Result<Value, String> {
+    let ctx = app.egui_ctx.clone();
+    let Some(ctx) = ctx else {
+        return Err("cannot save publication package without UI context".into());
+    };
+    let mut orch = crate::dock::pubgen::workspace::get_state(&ctx);
+    if !orch.has_active_workspace() && orch.cards.is_empty() {
+        return Err("no active publication workspace to package".into());
+    }
+
+    let manifest = pubgen_core::workspace::ProjectManifest {
+        format_version: pubgen_core::workspace::PUBGEN_FORMAT_VERSION,
+        name: if !orch.meta_title.trim().is_empty() {
+            orch.meta_title.clone()
+        } else {
+            "publication".into()
+        },
+        template: false,
+        slots: orch.slots.iter().map(|s| pubgen_core::workspace::Slot {
+            id: s.name.clone(),
+            word_budget: s.budget.map(|b| b as u32),
+            replacement: if s.text.is_empty() { None } else { Some(s.text.clone()) },
+        }).collect(),
+    };
+
+    let metadata = orch.to_metadata();
+    let glossary = pubgen_core::workspace::Glossary::default();
+
+    let mut content = pubgen_core::container::ProjectContent::default();
+
+    for (key, bytes) in &orch.cached_content {
+        let clean = key.replace('\\', "/");
+        if let Some(name) = clean.strip_prefix("csv/") {
+            content.csv.push((name.to_string(), bytes.clone()));
+        } else if let Some(name) = clean.strip_prefix("md/") {
+            content.md.push((name.to_string(), bytes.clone()));
+        } else if let Some(name) = clean.strip_prefix("assets/") {
+            content.assets.push((name.to_string(), bytes.clone()));
+        }
+    }
+
+    for item in &orch.content_files {
+        let p_disk = Path::new(&item.path);
+        if p_disk.is_file() {
+            let clean = item.path.replace('\\', "/");
+            if clean.ends_with(".csv") && !content.csv.iter().any(|(n, _)| clean.ends_with(n)) {
+                if let Ok(bytes) = std::fs::read(p_disk) {
+                    let fname = p_disk.file_name().and_then(|s| s.to_str()).unwrap_or(&item.path);
+                    content.csv.push((fname.to_string(), bytes));
+                }
+            } else if clean.ends_with(".md") && !content.md.iter().any(|(n, _)| clean.ends_with(n)) {
+                if let Ok(bytes) = std::fs::read(p_disk) {
+                    let fname = p_disk.file_name().and_then(|s| s.to_str()).unwrap_or(&item.path);
+                    content.md.push((fname.to_string(), bytes));
+                }
+            } else if !content.assets.iter().any(|(n, _)| clean.ends_with(n)) {
+                if let Ok(bytes) = std::fs::read(p_disk) {
+                    let fname = p_disk.file_name().and_then(|s| s.to_str()).unwrap_or(&item.path);
+                    content.assets.push((fname.to_string(), bytes));
+                }
+            }
+        }
+    }
+
+    pubgen_core::container::save_pubgen(save_path, &manifest, &metadata, &glossary, &content)
+        .map_err(|e| format!("failed to save .pubgen package: {e}"))?;
+
+    let path_str = save_path.to_string_lossy().to_string();
+    remember_manifest(app, &path_str)?;
+
+    orch.is_dirty = false;
+    let now = crate::dock::pubgen::workspace::format_now();
+    orch.execution_log.push(format!("[{now}] Paket publikasi berhasil diekspor ke {path_str}."));
+    let fname = save_path.file_name().and_then(|s| s.to_str()).unwrap_or("publication.pubgen");
+    orch.status_message = Some((format!("Paket {fname} berhasil disimpan"), true));
+    if !orch.recent_documents.contains(&path_str) {
+        orch.recent_documents.insert(0, path_str.clone());
+    }
+    crate::dock::pubgen::workspace::set_state(&ctx, orch);
+    ctx.request_repaint();
+
+    Ok(serde_json::json!({
+        "package": path_str,
+        "cards": metadata.cards.len(),
+        "csv_count": content.csv.len(),
+        "md_count": content.md.len()
+    }))
 }
 
 fn save_project_with(app: &mut DesignApp, p: &Value, force_ask: bool) -> Result<Value, String> {
@@ -1944,11 +2103,15 @@ fn save_project_with(app: &mut DesignApp, p: &Value, force_ask: bool) -> Result<
 /// open New Project dialog, or the last Master Excel workbook) as the base, with the panel's
 /// current language mode, cover style and profile overlaid.
 fn save_project_to(app: &mut DesignApp, path: &str) -> Result<Value, String> {
-    let ctx = app.egui_ctx.clone();
     let save_path = PathBuf::from(path.trim());
-    if save_path.extension().and_then(std::ffi::OsStr::to_str).map(|e| e.to_ascii_lowercase()) != Some("json".into()) {
-        return Err(format!("{}: manifest file must have a .json extension", save_path.display()));
+    let ext = save_path.extension().and_then(std::ffi::OsStr::to_str).map(|e| e.to_ascii_lowercase());
+    if ext.as_deref() == Some("pubgen") {
+        return save_pubgen_package_to(app, &save_path);
     }
+    if ext != Some("json".into()) {
+        return Err(format!("{}: manifest file must have a .json or .pubgen extension", save_path.display()));
+    }
+    let ctx = app.egui_ctx.clone();
     let dir = save_path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new(".")).to_path_buf();
 
     let glossary = app.session.prefs.pubgen_glossary_path.clone();
@@ -3535,12 +3698,54 @@ Grafik,01.02,Kepadatan,
 
     #[test]
     fn the_save_project_commands_are_registered() {
-        for (id, label) in [("pubgen.saveProject", "Save Publication Project"), ("pubgen.saveProjectAs", "Save Publication Project As...")] {
+        for (id, label) in [
+            ("pubgen.saveProject", "Save Publication Project"),
+            ("pubgen.saveProjectAs", "Save Publication Project As..."),
+            ("pubgen.savePackageAs", "Save Publication Package (.pubgen)..."),
+        ] {
             let entry = crate::menus::UI_COMMANDS.iter().find(|c| c.0 == id);
             let (_, l, _, params) = entry.unwrap_or_else(|| panic!("{id} must be a UI command"));
             assert_eq!(*l, label);
             assert!(params.contains("path"), "params doc names `path`: {params}");
         }
+    }
+
+    #[test]
+    fn saving_and_opening_a_pubgen_package_roundtrips_workspace_state() {
+        let dir = temp_dir("pubgen-package-roundtrip");
+        let pkg_path = dir.join("test_output.pubgen");
+        let ctx = egui::Context::default();
+        let mut app = app();
+        app.egui_ctx = Some(ctx.clone());
+
+        let mut orch = crate::dock::pubgen::workspace::get_state(&ctx);
+        orch.meta_title = "Kabupaten Karawang Dalam Angka 2026".into();
+        orch.meta_subtitle = "BPS Karawang".into();
+        orch.meta_release_no = "1234.56".into();
+        orch.cached_content.insert("csv/test.csv".into(), b"col1,col2\nval1,val2\n".to_vec());
+        orch.cached_content.insert("md/test.md".into(), b"# Chapter 1\n".to_vec());
+        crate::dock::pubgen::workspace::set_state(&ctx, orch);
+
+        let res = save_package_as(&mut app, &serde_json::json!({"path": pkg_path.to_string_lossy()})).unwrap();
+        assert_eq!(res["csv_count"], 1);
+        assert_eq!(res["md_count"], 1);
+        assert!(pkg_path.is_file());
+
+        // Clear state and open package
+        let mut fresh = crate::dock::pubgen::workspace::OrchestratorWorkspaceState::default();
+        fresh.meta_title.clear();
+        fresh.cached_content.clear();
+        crate::dock::pubgen::workspace::set_state(&ctx, fresh);
+
+        let open_res = open_project(&mut app, &serde_json::json!({"path": pkg_path.to_string_lossy()})).unwrap();
+        assert_eq!(open_res["package"], pkg_path.to_string_lossy().as_ref());
+
+        let restored = crate::dock::pubgen::workspace::get_state(&ctx);
+        assert_eq!(restored.meta_title, "Kabupaten Karawang Dalam Angka 2026");
+        assert_eq!(restored.cached_content.get("csv/test.csv").map(Vec::as_slice), Some(&b"col1,col2\nval1,val2\n"[..]));
+        assert_eq!(restored.cached_content.get("md/test.md").map(Vec::as_slice), Some(&b"# Chapter 1\n"[..]));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

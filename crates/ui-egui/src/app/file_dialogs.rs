@@ -345,7 +345,8 @@ fn open_filters(purpose: &str) -> &'static [OpenFilter] {
         "relink" => &[OpenFilter { name: "Graphics", extensions: GRAPHICS }],
         "dataMerge" => &[OpenFilter { name: "Data source (CSV, TSV, text, Excel)", extensions: &["csv", "tsv", "tab", "txt", "xlsx"] }],
         "glossary" => &[OpenFilter { name: "Glossary sheet (Indonesian, English)", extensions: &["csv", "tsv", "tab", "txt"] }],
-        "pubgenProject" => &[OpenFilter { name: "Publication manifest (JSON)", extensions: &["json"] }],
+        "pubgenPackage" => &[OpenFilter { name: "Publication package (*.pubgen)", extensions: &["pubgen"] }],
+        "pubgenProject" => &[OpenFilter { name: "Publication project (*.pubgen, *.json)", extensions: &["pubgen", "json"] }],
         "place" => &[
             OpenFilter {
                 name: "Graphics and text",

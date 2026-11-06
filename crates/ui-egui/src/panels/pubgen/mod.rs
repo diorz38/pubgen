@@ -37,7 +37,7 @@ pub mod workspace;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod compile;
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use compile::{compile_card_ui, compile_project, open_project, poll_compile_job, save_project, save_project_as};
+pub(crate) use compile::{compile_card_ui, compile_project, open_project, poll_compile_job, save_package_as, save_project, save_project_as};
 mod cover_art;
 mod covers;
 mod csv;

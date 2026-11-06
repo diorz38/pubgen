@@ -171,6 +171,7 @@ fn file_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
         popup(ui, rtl, 240.0, |ui| {
             let items: Vec<crate::menus::Item> = [
                 "pubgen.openProject",
+                "pubgen.savePackageAs",
                 "pubgen.saveProject",
                 "pubgen.saveProjectAs",
             ]
