@@ -1,6 +1,6 @@
 use crate::mode::StudioMode;
 use crate::project::PubgenContainer;
-use crate::workspaces::orchestrator::{GuardDialogAction, RecompileGuardDialog};
+use crate::workspaces::orchestrator::{GuardDialogAction, RecompileGuardDialog, OrchestratorProject};
 use designcraft_ui_egui::DesignApp;
 use egui::Context;
 use std::path::PathBuf;
@@ -11,11 +11,18 @@ pub struct PubgenStudioApp {
     pub project_path: Option<PathBuf>,
     pub container: Option<PubgenContainer>,
     pub guard_dialog: RecompileGuardDialog,
+    pub orchestrator_project: OrchestratorProject,
 }
 
 impl PubgenStudioApp {
     pub fn new(app: DesignApp, initial_mode: StudioMode, project_path: Option<PathBuf>, container: Option<PubgenContainer>) -> Self {
-        Self { mode: initial_mode, app, project_path, container, guard_dialog: RecompileGuardDialog::new() }
+        let mut orchestrator_project = OrchestratorProject::default();
+        if let Some(path) = project_path.as_ref() {
+            if path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("pubgen")) {
+                let _ = orchestrator_project.open(path);
+            }
+        }
+        Self { mode: initial_mode, app, project_path, container, guard_dialog: RecompileGuardDialog::new(), orchestrator_project }
     }
 }
 
@@ -38,6 +45,10 @@ impl eframe::App for PubgenStudioApp {
         // - Undecorated borderless custom topbar with Home icon, Mode Switcher, Menu Bar, Search, Workspaces, and Caption buttons
         // - Tool palettes, status bar, docking system with Pubgen and standard panels, and document canvas
         self.app.ui(ui);
+        if self.mode == StudioMode::Orchestrator {
+            self.orchestrator_project.sync_ui(ui.ctx());
+            crate::workspaces::orchestrator::render_workspace_controls(ui, &mut self.orchestrator_project);
+        }
 
         // Handle Guard Dialog actions when triggered
         match self.guard_dialog.show(ui.ctx()) {

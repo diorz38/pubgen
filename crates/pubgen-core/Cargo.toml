@@ -21,5 +21,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
+calamine = { workspace = true }
+csv = { workspace = true }
+rust_xlsxwriter = { workspace = true }
 zip = { workspace = true }
+tempfile = { workspace = true }
 

@@ -78,6 +78,9 @@ flo_curves = "0.8"
 # QR codes (Object › Generate QR Code); MIT.
 qrcodegen = "1.8"
 quick-xml = "0.41"
+calamine = "0.28"
+csv = "1"
+rust_xlsxwriter = "0.93"
 zip = { version = "3", default-features = false, features = ["deflate"] }
 # INDD/INDT → IDML conversion for File › Open: storytold/indd-utils, pinned by rev as every other
 # git dependency here is. It parses untrusted INDD files, and `branch = "main"` meant any

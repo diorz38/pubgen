@@ -517,12 +517,31 @@ impl OrchestratorWorkspaceState {
     }
 }
 
+#[allow(deprecated)]
+fn workspace_state_id() -> egui::Id {
+    egui::Id::new(WORKSPACE_STATE_ID)
+}
+
 pub fn get_state(ctx: &egui::Context) -> OrchestratorWorkspaceState {
-    ctx.data(|d| d.get_temp(egui::Id::unique(WORKSPACE_STATE_ID))).unwrap_or_default()
+    ctx.data(|d| d.get_temp(workspace_state_id())).unwrap_or_default()
 }
 
 pub fn set_state(ctx: &egui::Context, state: OrchestratorWorkspaceState) {
-    ctx.data_mut(|d| d.insert_temp(egui::Id::unique(WORKSPACE_STATE_ID), state));
+    ctx.data_mut(|d| d.insert_temp(workspace_state_id(), state));
+}
+
+pub fn sync_external_workspace(ctx: &egui::Context, source_name: &str, metadata: &pubgen_core::PublicationMetadata, csv: &[(String, Vec<u8>)], md: &[(String, Vec<u8>)], assets: &[(String, Vec<u8>)]) {
+    let mut state = get_state(ctx);
+    state.recent_documents = vec![source_name.to_owned()];
+    state.meta_title = metadata.title.clone();
+    state.meta_subtitle = metadata.title_en.clone().unwrap_or_default();
+    state.selected_profile = metadata.profile_id.clone();
+    state.page_layout_facing = matches!(metadata.layout, pubgen_core::PageLayout::Double);
+    state.doc_language = match metadata.language { pubgen_core::Language::Id => "Indonesian", pubgen_core::Language::En => "English", pubgen_core::Language::IdEn => "Indonesian-English" }.into();
+    state.content_files = csv.iter().map(|(name, bytes)| ContentItem { path: format!("csv/{name}"), size_bytes: bytes.len() }).chain(md.iter().map(|(name, bytes)| ContentItem { path: format!("md/{name}"), size_bytes: bytes.len() })).chain(assets.iter().map(|(name, bytes)| ContentItem { path: format!("assets/{name}"), size_bytes: bytes.len() })).collect();
+    state.cards = metadata.cards.iter().enumerate().map(|(index, card)| PublicationCard::new_with(match card.kind { pubgen_core::CardKind::Cover => CardKind::Cover, pubgen_core::CardKind::Toc => CardKind::Toc, pubgen_core::CardKind::Table => CardKind::Table, pubgen_core::CardKind::Chart => CardKind::Chart, pubgen_core::CardKind::MapChart => CardKind::MapChart, pubgen_core::CardKind::Narrative => CardKind::Narrative, pubgen_core::CardKind::Image => CardKind::Image, pubgen_core::CardKind::Divider => CardKind::Narrative }, &card.title, "", card.source.as_deref().unwrap_or("Tanpa sumber"), index + 1, matches!(card.scope, pubgen_core::CardScope::NewPage))).collect();
+    state.is_dirty = false;
+    set_state(ctx, state);
 }
 
 #[derive(Clone, Copy)]
@@ -1061,6 +1080,12 @@ fn render_expanded_dock(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrat
 fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, lang: &str) {
     ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
 
+    if !state.content_files.is_empty() {
+        let source_label = state.recent_documents.first().map(String::as_str).unwrap_or("Workspace source");
+        ui.label(RichText::new(format!("Source: {source_label}")).font(FontId::proportional(10.5)).color(t.text_dim));
+        ui.label(RichText::new(format!("{} embedded content file(s)", state.content_files.len())).font(FontId::proportional(10.5)).color(t.text_dim));
+    }
+
     // Header row
     ui.horizontal(|ui| {
         ui.label(RichText::new(crate::i18n::tr(lang, "Sources & Content")).font(semibold(13.5)).color(t.text_strong));
@@ -1186,6 +1211,7 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                         .show_ui(ui, |ui| {
                             ui.selectable_value(&mut state.doc_language, "Indonesian".into(), indonesian_label);
                             ui.selectable_value(&mut state.doc_language, "English".into(), english_label);
+                            ui.selectable_value(&mut state.doc_language, "Indonesian-English".into(), "Indonesian-English / Indonesia-Inggris");
                         });
                 });
 
