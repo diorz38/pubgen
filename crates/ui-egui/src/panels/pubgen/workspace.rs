@@ -779,6 +779,85 @@ pub fn apply_ingest_report_to_state(
     state.is_dirty = false;
 }
 
+const HOST_TABS_ID: &str = "pubgen_orchestrator_host_tabs";
+const HOST_TAB_ACTION_ID: &str = "pubgen_orchestrator_host_tab_action";
+
+#[derive(Clone, Debug, Default)]
+pub struct HostTabs {
+    pub titles: Vec<(String, bool)>,
+    pub active: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HostTabAction {
+    Activate(usize),
+    Close(usize),
+    #[default]
+    New,
+    Open,
+    Import,
+    Save,
+    ExportXlsx,
+}
+
+#[allow(deprecated)]
+fn host_tabs_id() -> egui::Id {
+    egui::Id::new(HOST_TABS_ID)
+}
+
+#[allow(deprecated)]
+fn host_tab_action_id() -> egui::Id {
+    egui::Id::new(HOST_TAB_ACTION_ID)
+}
+
+/// The Studio host declares the Orchestrator workspace tabs before the panel is drawn.
+pub fn set_host_tabs(ctx: &egui::Context, titles: Vec<(String, bool)>, active: usize) {
+    ctx.data_mut(|d| d.insert_temp(host_tabs_id(), HostTabs { titles, active }));
+}
+
+/// The tab bar's click, handled by the host after the frame (it owns the workspaces).
+pub fn take_host_tab_action(ctx: &egui::Context) -> Option<HostTabAction> {
+    ctx.data_mut(|d| d.remove_temp(host_tab_action_id()))
+}
+
+/// Draws the workspace tab strip at the top of the Orchestrator panel.
+fn render_host_tabs(ui: &mut Ui, t: &Tokens) -> Option<HostTabAction> {
+    let tabs: HostTabs = ui.ctx().data(|d| d.get_temp(host_tabs_id())).unwrap_or_default();
+    let mut action = None;
+    egui::Frame::NONE.fill(t.tab_strip).inner_margin(Margin::symmetric(8, 4)).show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            for (index, (title, dirty)) in tabs.titles.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    if ui.selectable_label(index == tabs.active, format!("{}{}", if *dirty { "*" } else { "" }, title)).clicked() {
+                        action = Some(HostTabAction::Activate(index));
+                    }
+                    if ui.small_button("×").on_hover_text("Close workspace").clicked() {
+                        action = Some(HostTabAction::Close(index));
+                    }
+                });
+            }
+            if ui.button("+ New").on_hover_text("New publication workspace").clicked() {
+                action = Some(HostTabAction::New);
+            }
+            if ui.button("+ Open .pubgen").on_hover_text("Open a publication package in a new tab").clicked() {
+                action = Some(HostTabAction::Open);
+            }
+            if ui.button("+ Import XLSX").on_hover_text("Import an Excel manifest into a new tab").clicked() {
+                action = Some(HostTabAction::Import);
+            }
+            ui.separator();
+            if ui.button("Save").on_hover_text("Save the active publication package").clicked() {
+                action = Some(HostTabAction::Save);
+            }
+            if ui.button("Export XLSX").on_hover_text("Export the active workspace to Excel").clicked() {
+                action = Some(HostTabAction::ExportXlsx);
+            }
+        });
+    });
+    ui.add_space(2.0);
+    action
+}
+
 pub fn sync_external_workspace(
     ctx: &egui::Context,
     source_name: &str,
@@ -788,6 +867,7 @@ pub fn sync_external_workspace(
     assets: &[(String, Vec<u8>)],
 ) {
     let mut state = get_state(ctx);
+    state.view = OrchestratorView::Studio;
     let report = pubgen_core::excel::IngestReport {
         profile_id: metadata.profile_id.clone(),
         metadata: metadata.clone(),
@@ -971,13 +1051,13 @@ pub fn render_orchestrator_home(
                                 .min_size(vec2(0.0, 32.0))
                         ).clicked() {
                             let ctx = ui.ctx().clone();
-                            let _ = app.ask_open("pubgenProject", crate::app::file_dialogs::Bound::App, move |_app, path: String| {
+                            let _ = app.ask_open("pubgenPackage", crate::app::file_dialogs::Bound::App, move |_app, path: String| {
+                                let p = std::path::Path::new(&path);
+                                let opened = pubgen_core::container::open_pubgen(p).map_err(|error| format!("Gagal membuka paket .pubgen: {error}"))?;
+                                sync_external_workspace(&ctx, &path, &opened.metadata, &opened.content.csv, &opened.content.md, &opened.content.assets);
                                 let mut st = get_state(&ctx);
-                                if !st.recent_documents.contains(&path) {
-                                    st.recent_documents.insert(0, path.clone());
-                                }
-                                st.execution_log.push(format!("[{}] Membuka {}", format_now(), path));
                                 st.view = OrchestratorView::Studio;
+                                st.execution_log.push(format!("[{}] Membuka {}", format_now(), path));
                                 set_state(&ctx, st);
                                 ctx.request_repaint();
                                 Ok(serde_json::Value::Null)
@@ -1123,6 +1203,9 @@ pub fn render_orchestrator_home(
 /// Main entry point for rendering the Orchestrator workspace inside CentralPanel.
 pub fn show(app: &mut DesignApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
+    if let Some(action) = render_host_tabs(ui, &t) {
+        ui.ctx().data_mut(|d| d.insert_temp(host_tab_action_id(), action));
+    }
     let mut state = get_state(ui.ctx());
     let lang = app.ui.language.clone();
 

@@ -1837,13 +1837,11 @@ pub(crate) fn compile_project(app: &mut DesignApp, p: &Value) -> Result<Value, S
 /// Publication Compiler without building. `path` defaults to the manifest last opened; without one
 /// it asks for the file (the panel's Open... does the same).
 pub(crate) fn open_project(app: &mut DesignApp, p: &Value) -> Result<Value, String> {
-    let path = p.get("path").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).or_else(|| {
-        let remembered = app.session.prefs.pubgen_project_path.trim();
-        (!remembered.is_empty()).then(|| remembered.to_string())
-    });
+    // File ▸ Open Publication always asks for a package; only an explicit `path` skips the dialog.
+    let path = p.get("path").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
     let Some(path) = path else {
         ask_for_manifest(app);
-        return Ok(serde_json::json!({"dialog": "pubgenProject", "open": true}));
+        return Ok(serde_json::json!({"dialog": "pubgenPackage", "open": true}));
     };
     if path.chars().count() > MAX_PATH_CHARS {
         return Err("path: too long".into());
@@ -1856,10 +1854,9 @@ pub(crate) fn open_project(app: &mut DesignApp, p: &Value) -> Result<Value, Stri
             .map_err(|e| format!("Gagal membuka paket .pubgen: {e}"))?;
         remember_manifest(app, &path)?;
         if let Some(ctx) = app.egui_ctx.clone() {
-            let doc_name = p_path.file_name().and_then(|n| n.to_str()).unwrap_or("publication.pubgen");
             crate::dock::pubgen::workspace::sync_external_workspace(
                 &ctx,
-                doc_name,
+                &path,
                 &opened.metadata,
                 &opened.content.csv,
                 &opened.content.md,
@@ -1896,19 +1893,18 @@ pub(crate) fn open_project(app: &mut DesignApp, p: &Value) -> Result<Value, Stri
     Ok(serde_json::json!({"manifest": path, "summary": summary, "chapters": plan.manifest.chapters.len()}))
 }
 
-/// Ask for a `pubgen_project.json` or `.pubgen` package and load it.
+/// Ask for a portable `.pubgen` publication package and load it.
 fn ask_for_manifest(app: &mut DesignApp) {
     let ctx = app.egui_ctx.clone();
-    let _ = app.ask_open("pubgenProject", crate::app::file_dialogs::Bound::App, move |_app, path| {
+    let _ = app.ask_open("pubgenPackage", crate::app::file_dialogs::Bound::App, move |_app, path| {
         let p_path = Path::new(&path);
         let ext = p_path.extension().and_then(std::ffi::OsStr::to_str).map(|e| e.to_ascii_lowercase());
         if ext.as_deref() == Some("pubgen") {
             if let Ok(opened) = pubgen_core::container::open_pubgen(p_path) {
                 if let Some(ctx) = &ctx {
-                    let doc_name = p_path.file_name().and_then(|n| n.to_str()).unwrap_or("publication.pubgen");
                     crate::dock::pubgen::workspace::sync_external_workspace(
                         ctx,
-                        doc_name,
+                        &path,
                         &opened.metadata,
                         &opened.content.csv,
                         &opened.content.md,
@@ -1955,15 +1951,7 @@ pub(crate) fn save_package_as(app: &mut DesignApp, p: &Value) -> Result<Value, S
     if app.egui_ctx.is_none() {
         return Ok(Value::Null);
     }
-    let default_name = app.egui_ctx.as_ref().map(|ctx| {
-        let orch = crate::dock::pubgen::workspace::get_state(ctx);
-        if !orch.meta_title.trim().is_empty() {
-            let sanitized = orch.meta_title.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
-            format!("{sanitized}.pubgen")
-        } else {
-            "publication.pubgen".into()
-        }
-    }).unwrap_or_else(|| "publication.pubgen".into());
+    let default_name = package_file_name(app);
 
     let _ = app.ask_save(&default_name, crate::app::file_dialogs::Bound::App, move |app, path| {
         save_pubgen_package_to(app, Path::new(&path)).map(|_| Value::Null)
@@ -2078,25 +2066,46 @@ fn save_project_with(app: &mut DesignApp, p: &Value, force_ask: bool) -> Result<
     });
     let remembered = app.session.prefs.pubgen_project_path.trim().to_string();
     let known = known.as_deref().unwrap_or("");
+    let is_package = |path: &str| path.to_ascii_lowercase().ends_with(".pubgen");
+    // File ▸ Save writes the portable publication package. A legacy `.json` manifest the panel
+    // remembers is not overwritten: the user is asked for a `.pubgen` target instead.
     let target = if force_ask {
         String::new()
-    } else if !known.is_empty() {
+    } else if is_package(known) {
         known.to_string()
-    } else {
+    } else if is_package(&remembered) {
         remembered
+    } else {
+        String::new()
     };
     if !target.is_empty() {
         if target.chars().count() > MAX_PATH_CHARS {
             return Err("path: too long".into());
         }
-        return save_project_to(app, &target);
+        return save_pubgen_package_to(app, Path::new(&target));
     }
     if app.egui_ctx.is_none() {
         return Ok(Value::Null);
     }
-    let _ =
-        app.ask_save("pubgen_project.json", crate::app::file_dialogs::Bound::App, move |app, path| save_project_to(app, &path).map(|_| Value::Null));
-    Ok(serde_json::json!({"dialog": "pubgenProject", "open": true}))
+    let default_name = package_file_name(app);
+    let _ = app.ask_save(&default_name, crate::app::file_dialogs::Bound::App, move |app, path| {
+        save_pubgen_package_to(app, Path::new(&path)).map(|_| Value::Null)
+    });
+    Ok(serde_json::json!({"dialog": "pubgenPackage", "open": true}))
+}
+
+/// Default file name for a Save/Save As dialog: the publication title, else `publication.pubgen`.
+fn package_file_name(app: &DesignApp) -> String {
+    let title = app
+        .egui_ctx
+        .as_ref()
+        .map(|ctx| crate::dock::pubgen::workspace::get_state(ctx).meta_title)
+        .unwrap_or_default();
+    if title.trim().is_empty() {
+        return "publication.pubgen".into();
+    }
+    let sanitized = title.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+    format!("{}.pubgen", sanitized.trim())
 }
 
 /// Assemble the project from what the panel holds and write it: the manifest on disk (or the
@@ -3647,7 +3656,7 @@ Grafik,01.02,Kepadatan,
     fn the_open_project_command_is_registered() {
         let entry = crate::menus::UI_COMMANDS.iter().find(|c| c.0 == "pubgen.openProject");
         let (_, label, _, params) = entry.expect("pubgen.openProject must be a UI command");
-        assert_eq!(*label, "Open Publication Project...");
+        assert_eq!(*label, "Open Publication (.pubgen)...");
         assert!(params.contains("path"), "params doc names `path`: {params}");
     }
 
@@ -3699,8 +3708,8 @@ Grafik,01.02,Kepadatan,
     #[test]
     fn the_save_project_commands_are_registered() {
         for (id, label) in [
-            ("pubgen.saveProject", "Save Publication Project"),
-            ("pubgen.saveProjectAs", "Save Publication Project As..."),
+            ("pubgen.saveProject", "Save Publication (.pubgen)"),
+            ("pubgen.saveProjectAs", "Save Publication As (.pubgen)..."),
             ("pubgen.savePackageAs", "Save Publication Package (.pubgen)..."),
         ] {
             let entry = crate::menus::UI_COMMANDS.iter().find(|c| c.0 == id);
@@ -3767,7 +3776,7 @@ Grafik,01.02,Kepadatan,
             st.active_profile_id = "bps_brs".into();
         });
 
-        let report = save_project(&mut app, &serde_json::json!({})).unwrap();
+        let report = save_project_to(&mut app, &manifest_path.to_string_lossy()).unwrap();
         assert_eq!(report["chapters"], 2);
         assert!(app.session.prefs.pubgen_project_path.ends_with("pubgen_project.json"), "path remembered");
 
@@ -3785,6 +3794,10 @@ Grafik,01.02,Kepadatan,
         let dir = temp_dir("save-empty");
         let ctx = egui::Context::default();
         let mut app = app();
+        crate::dock::pubgen::workspace::set_state(
+            &ctx,
+            crate::dock::pubgen::workspace::OrchestratorWorkspaceState { cards: Vec::new(), content_files: Vec::new(), ..Default::default() },
+        );
         app.egui_ctx = Some(ctx);
         let error = save_project(&mut app, &serde_json::json!({"path": dir.join("out.json").to_string_lossy()})).unwrap_err();
         assert!(error.contains("nothing to save"), "{error}");
@@ -3835,7 +3848,7 @@ Grafik,01.02,Kepadatan,
             st.compile_new_dialog = Some(Box::new(dialog));
         });
 
-        save_project(&mut app, &serde_json::json!({})).unwrap();
+        save_project_to(&mut app, &manifest_path.to_string_lossy()).unwrap();
 
         let saved: ProjectManifest = serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
         assert_eq!(saved.publication_title, "Karawang 2026", "the dialog's title wins");
@@ -4034,7 +4047,7 @@ Grafik,01.02,Kepadatan,
             st.card2_placement = 1;
         });
 
-        save_project(&mut app, &serde_json::json!({})).unwrap();
+        save_project_to(&mut app, &manifest_path.to_string_lossy()).unwrap();
         let saved: ProjectManifest = serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
         assert_eq!(saved.version, 2);
         assert_eq!(saved.profile_data.as_ref().map(|p| p.id.as_str()), Some("corporate_annual"), "the full profile rides along");

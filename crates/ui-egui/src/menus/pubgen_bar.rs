@@ -168,46 +168,48 @@ fn file_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
     let lang = app.ui.language.clone();
     let rtl = crate::i18n::is_rtl(&lang);
     crate::menus::menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&lang, "File")), |ui| {
-        popup(ui, rtl, 240.0, |ui| {
-            let items: Vec<crate::menus::Item> = [
-                "pubgen.openProject",
-                "pubgen.savePackageAs",
-                "pubgen.saveProject",
-                "pubgen.saveProjectAs",
-            ]
-            .iter()
-            .map(|id| super::cmd_item(id, serde_json::Value::Null))
-            .collect();
-            super::bar::menu_column(app, ui, &[("Publication Project", items)]);
-            ui.separator();
-
-            let tmpl: Vec<crate::menus::Item> = [
-                "app.openDialog",
-            ]
-            .iter()
-            .map(|id| super::cmd_item(id, serde_json::Value::Null))
-            .collect();
-            super::bar::menu_column(app, ui, &[("Template", tmpl)]);
-            ui.separator();
-
-            let pdf: Vec<crate::menus::Item> = [
-                "app.exportPdf",
-            ]
-            .iter()
-            .map(|id| super::cmd_item(id, serde_json::Value::Null))
-            .collect();
-            super::bar::menu_column(app, ui, &[("Output", pdf)]);
-            ui.separator();
-
-            let exit: Vec<crate::menus::Item> = [
-                "app.quit",
-            ]
-            .iter()
-            .map(|id| super::cmd_item(id, serde_json::Value::Null))
-            .collect();
-            super::bar::menu_column(app, ui, &[("Application", exit)]);
-        });
+        popup(ui, rtl, 240.0, |ui| file_actions(app, ui));
     });
+}
+
+/// The File menu's rows: publication package open/save, template, output and quit.
+fn file_actions(app: &mut DesignApp, ui: &mut egui::Ui) {
+    let items: Vec<crate::menus::Item> = [
+        "pubgen.openProject",
+        "pubgen.saveProject",
+        "pubgen.saveProjectAs",
+    ]
+    .iter()
+    .map(|id| super::cmd_item(id, serde_json::Value::Null))
+    .collect();
+    super::bar::menu_column(app, ui, &[("Publication Project", items)]);
+    ui.separator();
+
+    let tmpl: Vec<crate::menus::Item> = [
+        "app.openDialog",
+    ]
+    .iter()
+    .map(|id| super::cmd_item(id, serde_json::Value::Null))
+    .collect();
+    super::bar::menu_column(app, ui, &[("Template", tmpl)]);
+    ui.separator();
+
+    let pdf: Vec<crate::menus::Item> = [
+        "app.exportPdf",
+    ]
+    .iter()
+    .map(|id| super::cmd_item(id, serde_json::Value::Null))
+    .collect();
+    super::bar::menu_column(app, ui, &[("Output", pdf)]);
+    ui.separator();
+
+    let exit: Vec<crate::menus::Item> = [
+        "app.quit",
+    ]
+    .iter()
+    .map(|id| super::cmd_item(id, serde_json::Value::Null))
+    .collect();
+    super::bar::menu_column(app, ui, &[("Application", exit)]);
 }
 
 /// 2. Publication Menu: compilation pipeline and publication profiles.
@@ -428,9 +430,6 @@ fn pipeline(app: &mut DesignApp, ui: &mut egui::Ui) {
     let (compiling, covering) = crate::dock::pubgen::with_state(ui.ctx(), |st| (st.compile_job.is_some(), st.cover_job.is_some()));
     let items: Vec<crate::menus::Item> = [
         "pubgen.generateFromExcel",
-        "pubgen.openProject",
-        "pubgen.saveProject",
-        "pubgen.saveProjectAs",
         "pubgen.compileProject",
         "pubgen.profileCustomize",
         "pubgen.vectorChart",
@@ -800,9 +799,9 @@ mod tests {
 
         let rows = publication_rows(&mut app, &ctx);
 
-        let excel = rows.iter().filter(|t| t.contains("Excel")).count();
+        let excel = rows.iter().filter(|t| t.contains("Excel") || t.contains("XLSX")).count();
 
-        assert_eq!(excel, 1, "one Excel route only: {rows:?}");
+        assert_eq!(excel, 1, "one manifest import route only: {rows:?}");
 
         assert!(!rows.iter().any(|t| t.contains("Compile Wizard")), "the duplicate route is gone: {rows:?}");
 
@@ -810,10 +809,26 @@ mod tests {
 
     }
 
-    /// Opening a project without a way to save it back was the gap: both save rows ride the
-    /// pipeline, right after Open.
+    /// The File menu's rows, drawn like the popup draws them.
+    fn file_rows(app: &mut DesignApp, ctx: &egui::Context) -> Vec<String> {
+
+        let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))), ..Default::default() };
+
+        let mut output = ctx.run_ui(input, |ui| {
+
+            file_actions(app, ui);
+
+        });
+
+        output.textures_delta.clear();
+
+        collect_texts(&output.shapes)
+
+    }
+
+    /// Open/Save/Save As live in File only: the Publication menu must not repeat them.
     #[test]
-    fn the_publication_menu_can_save_the_project_it_opens() {
+    fn publication_package_file_actions_live_in_the_file_menu_only() {
 
         let ctx = egui::Context::default();
 
@@ -821,15 +836,23 @@ mod tests {
 
         let mut app = app();
 
-        let rows = publication_rows(&mut app, &ctx);
+        let publication = publication_rows(&mut app, &ctx);
 
-        let open = rows.iter().position(|t| t.contains("Open Publication Project")).expect("Open row: {rows:?}");
+        assert!(!publication.iter().any(|t| t.contains("Open Publication")), "Open is in File: {publication:?}");
 
-        let save = rows.iter().position(|t| t.contains("Save Publication Project")).expect("Save row: {rows:?}");
+        assert!(!publication.iter().any(|t| t.contains("Save Publication")), "Save is in File: {publication:?}");
 
-        let save_as = rows.iter().position(|t| t.contains("Save Publication Project As")).expect("Save As row: {rows:?}");
+        let rows = file_rows(&mut app, &ctx);
+
+        let open = rows.iter().position(|t| t.contains("Open Publication")).expect("Open row: {rows:?}");
+
+        let save = rows.iter().position(|t| t.contains("Save Publication (")).expect("Save row: {rows:?}");
+
+        let save_as = rows.iter().position(|t| t.contains("Save Publication As")).expect("Save As row: {rows:?}");
 
         assert!(open < save && save < save_as, "Save follows Open: {rows:?}");
+
+        assert!(rows.iter().any(|t| t.contains(".pubgen")), "file actions name the .pubgen package: {rows:?}");
 
     }
 

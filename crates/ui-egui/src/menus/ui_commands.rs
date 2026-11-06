@@ -87,30 +87,30 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     #[cfg(feature = "pubgen")]
     (
         "pubgen.openProject",
-        "Open Publication Project...",
+        "Open Publication (.pubgen)...",
         None,
-        "{path? (default: the manifest last opened)} — read an existing pubgen_project.json or .pubgen package, validate it and load it into the workspace",
+        "{path?} — open a portable .pubgen publication package in a new Orchestrator tab; without a path it asks for the file",
     ),
     #[cfg(feature = "pubgen")]
     (
         "pubgen.savePackageAs",
         "Save Publication Package (.pubgen)...",
         None,
-        "{path?} — package the current publication workspace into a portable .pubgen ZIP container (with metadata.json, pubgen.json, csv, and markdown content)",
+        "{path?} — package the current publication workspace into a portable .pubgen ZIP container (with metadata.json, pubgen.json, csv, markdown and asset content)",
     ),
     #[cfg(feature = "pubgen")]
     (
         "pubgen.saveProject",
-        "Save Publication Project",
+        "Save Publication (.pubgen)",
         Some("Ctrl+Shift+S"),
-        "{path?} — write the publication project to its pubgen_project.json: the manifest last opened, the open New Publication Project dialog or the Master Excel workbook (with the panel's current language mode, cover style and profile); with no known target, or with path, asks where to save",
+        "{path?} — write the publication workspace to its .pubgen package (metadata, cards, csv, markdown and assets); with no known package target, asks where to save",
     ),
     #[cfg(feature = "pubgen")]
     (
         "pubgen.saveProjectAs",
-        "Save Publication Project As...",
+        "Save Publication As (.pubgen)...",
         None,
-        "{path?} — save the publication project, always naming the pubgen_project.json: with path it is written there, otherwise the app asks",
+        "{path?} — save the publication workspace to a .pubgen package, always asking for the target; with path it is written there",
     ),
     #[cfg(feature = "pubgen")]
     (
@@ -127,7 +127,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
         "{edit?: bool} — open the vector chart options popup to add or edit a statistical chart on the active spread",
     ),
     #[cfg(feature = "pubgen")]
-    ("pubgen.generateFromExcel", "Generate from Excel", Some("Ctrl+Shift+G"), "{} — open the Master Excel import and generate the pages"),
+    ("pubgen.generateFromExcel", "Import Manifest (XLSX)", Some("Ctrl+Shift+G"), "{} — open the Master Excel import dialog and generate the pages"),
     #[cfg(feature = "pubgen")]
     ("pubgen.profileCustomize", "Publication Profile", None, "{} — open the Publication Profile and Customizer dialog"),
     #[cfg(feature = "pubgen")]

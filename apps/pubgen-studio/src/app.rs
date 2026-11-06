@@ -1,6 +1,6 @@
 use crate::mode::StudioMode;
 use crate::project::PubgenContainer;
-use crate::workspaces::orchestrator::{GuardDialogAction, RecompileGuardDialog, OrchestratorProject};
+use crate::workspaces::orchestrator::{GuardDialogAction, OrchestratorTabs, RecompileGuardDialog};
 use designcraft_ui_egui::DesignApp;
 use egui::Context;
 use std::path::PathBuf;
@@ -11,18 +11,25 @@ pub struct PubgenStudioApp {
     pub project_path: Option<PathBuf>,
     pub container: Option<PubgenContainer>,
     pub guard_dialog: RecompileGuardDialog,
-    pub orchestrator_project: OrchestratorProject,
+    pub orchestrator_tabs: OrchestratorTabs,
+    pending_open: Option<PathBuf>,
 }
 
 impl PubgenStudioApp {
     pub fn new(app: DesignApp, initial_mode: StudioMode, project_path: Option<PathBuf>, container: Option<PubgenContainer>) -> Self {
-        let mut orchestrator_project = OrchestratorProject::default();
-        if let Some(path) = project_path.as_ref()
-            && path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("pubgen"))
-        {
-            let _ = orchestrator_project.open(path);
+        let pending_open = project_path
+            .as_ref()
+            .filter(|path| path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("pubgen")))
+            .cloned();
+        Self {
+            mode: initial_mode,
+            app,
+            project_path,
+            container,
+            guard_dialog: RecompileGuardDialog::new(),
+            orchestrator_tabs: OrchestratorTabs::default(),
+            pending_open,
         }
-        Self { mode: initial_mode, app, project_path, container, guard_dialog: RecompileGuardDialog::new(), orchestrator_project }
     }
 }
 
@@ -41,13 +48,57 @@ impl eframe::App for PubgenStudioApp {
         let is_orch = designcraft_ui_egui::menus::pubgen_bar::is_orchestrator_mode(ui.ctx());
         self.mode = if is_orch { StudioMode::Orchestrator } else { StudioMode::DesignCraft };
 
+        if self.mode == StudioMode::Orchestrator {
+            if let Some(path) = self.pending_open.take() {
+                let _ = self.orchestrator_tabs.open(ui.ctx(), &path);
+            } else {
+                self.orchestrator_tabs.sync_from_ui(ui.ctx());
+            }
+            designcraft_ui_egui::dock::pubgen::workspace::set_host_tabs(
+                ui.ctx(),
+                self.orchestrator_tabs.host_titles(),
+                self.orchestrator_tabs.active,
+            );
+        }
+
         // Render DesignCraft's complete shell:
         // - Undecorated borderless custom topbar with Home icon, Mode Switcher, Menu Bar, Search, Workspaces, and Caption buttons
         // - Tool palettes, status bar, docking system with Pubgen and standard panels, and document canvas
         self.app.ui(ui);
         if self.mode == StudioMode::Orchestrator {
-            self.orchestrator_project.sync_ui(ui.ctx());
-            crate::workspaces::orchestrator::render_workspace_controls(ui, &mut self.orchestrator_project);
+            let ctx = ui.ctx().clone();
+            // A File-menu open or Save As changes the visible workspace during the frame.
+            self.orchestrator_tabs.sync_from_ui(&ctx);
+            if let Some(action) = designcraft_ui_egui::dock::pubgen::workspace::take_host_tab_action(&ctx) {
+                use designcraft_ui_egui::dock::pubgen::workspace::HostTabAction;
+                match action {
+                    HostTabAction::Activate(index) => self.orchestrator_tabs.activate(&ctx, index),
+                    HostTabAction::Close(index) => self.orchestrator_tabs.request_close(&ctx, index),
+                    HostTabAction::New => self.orchestrator_tabs.new_tab(&ctx),
+                    HostTabAction::Open => {
+                        if let Some(path) = rfd::FileDialog::new().add_filter("Pubgen Project", &["pubgen"]).pick_file() {
+                            let _ = self.orchestrator_tabs.open(&ctx, &path);
+                        }
+                    }
+                    HostTabAction::Import => {
+                        if let Some(path) = rfd::FileDialog::new().add_filter("Excel Workbook", &["xlsx", "xlsm"]).pick_file() {
+                            let _ = self.orchestrator_tabs.import(&ctx, &path);
+                        }
+                    }
+                    HostTabAction::Save => {
+                        let _ = self.app.run("pubgen.saveProject", serde_json::Value::Null);
+                    }
+                    HostTabAction::ExportXlsx => {
+                        if let Some(path) = rfd::FileDialog::new().add_filter("Excel Workbook", &["xlsx"]).save_file()
+                            && let Some(project) = self.orchestrator_tabs.active_project_mut()
+                        {
+                            let _ = project.export_xlsx(&path);
+                        }
+                    }
+                }
+            }
+            crate::workspaces::orchestrator::render_close_dialog(ui, &mut self.orchestrator_tabs);
+            self.orchestrator_tabs.publish_snapshot(&ctx);
         }
 
         // Handle Guard Dialog actions when triggered

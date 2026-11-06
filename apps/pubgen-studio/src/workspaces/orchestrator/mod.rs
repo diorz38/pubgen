@@ -5,44 +5,33 @@ use crate::mode::StudioMode;
 use designcraft_ui_egui::DesignApp;
 use egui::{Color32, RichText, Ui};
 pub use guard_dialog::{GuardDialogAction, RecompileGuardDialog};
-pub use project::OrchestratorProject;
+pub use project::OrchestratorTabs;
 
-pub fn render_workspace_controls(ui: &mut Ui, project: &mut OrchestratorProject) {
-    ui.separator();
-    ui.horizontal_wrapped(|ui| {
-        if ui.button("Open .pubgen").clicked() {
-            let _ = rfd::FileDialog::new().add_filter("Pubgen Project", &["pubgen"]).pick_file().map(|path| { let _ = project.open(&path); });
-        }
-        if ui.button("Import XLSX").clicked() {
-            let _ = rfd::FileDialog::new().add_filter("Excel Workbook", &["xlsx", "xlsm"]).pick_file().map(|path| {
-                if let Ok(report) = pubgen_core::excel::ingest_workbook(&path) {
-                    *project = OrchestratorProject {
-                        path: Some(path.clone()),
-                        draft: Some(pubgen_core::WorkspaceDraft::from_ingest(
-                            path.file_stem().and_then(|name| name.to_str()).unwrap_or("publication").to_owned(),
-                            report.clone(),
-                        )),
-                        status: "Workbook imported".into(),
-                        dirty: true,
-                        ui_synced: false,
-                        md: report.md,
-                        assets: report.assets,
-                    };
+/// Close confirmation for a dirty workspace tab, like DesignCraft's unsaved-document prompt.
+pub fn render_close_dialog(ui: &mut Ui, tabs: &mut OrchestratorTabs) {
+    let Some(index) = tabs.pending_close else { return };
+    let title = tabs.title(index);
+    let mut confirm = false;
+    let mut cancel = false;
+    egui::Window::new("Close publication workspace?")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .show(ui.ctx(), |ui| {
+            ui.label(format!("\"{title}\" has unsaved changes."));
+            ui.horizontal(|ui| {
+                if ui.button("Close without saving").clicked() {
+                    confirm = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    cancel = true;
                 }
             });
-        }
-        if ui.button("Save .pubgen").clicked() {
-            let path = project.path.clone().or_else(|| rfd::FileDialog::new().add_filter("Pubgen Project", &["pubgen"]).save_file());
-            if let Some(path) = path { let _ = project.save(&path); }
-        }
-        if ui.button("Export XLSX").clicked() {
-            if let Some(path) = rfd::FileDialog::new().add_filter("Excel Workbook", &["xlsx"]).save_file() { let _ = project.export_xlsx(&path); }
-        }
-    });
-    if !project.status.is_empty() { ui.label(&project.status); }
-    if let Some(draft) = &project.draft {
-        ui.label(format!("{} · {} cards · {} CSV files", draft.metadata.title, draft.metadata.cards.len(), draft.csv.len()));
-        for diagnostic in draft.validate() { ui.colored_label(if diagnostic.severity == pubgen_core::ValidationSeverity::Error { Color32::RED } else { Color32::YELLOW }, diagnostic.message); }
+        });
+    if confirm {
+        tabs.close(ui.ctx(), index);
+    } else if cancel {
+        tabs.pending_close = None;
     }
 }
 
