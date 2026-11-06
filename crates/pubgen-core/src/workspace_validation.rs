@@ -6,10 +6,17 @@ use crate::workspace::{ProjectManifest, PublicationMetadata};
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ValidationSeverity { Warning, Error }
+pub enum ValidationSeverity {
+    Warning,
+    Error,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkspaceDiagnostic { pub code: &'static str, pub severity: ValidationSeverity, pub message: String }
+pub struct WorkspaceDiagnostic {
+    pub code: &'static str,
+    pub severity: ValidationSeverity,
+    pub message: String,
+}
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceDraft {
@@ -122,6 +129,15 @@ mod tests {
             warnings: Vec::new(),
         }
     }
-    #[test] fn missing_source_is_error() { let draft = WorkspaceDraft::from_ingest("x".into(), report(Some("T1.csv"), vec![])); assert!(!draft.is_valid()); assert_eq!(draft.validate()[0].code, "card.source_missing"); }
-    #[test] fn matching_source_is_valid() { let draft = WorkspaceDraft::from_ingest("x".into(), report(Some("T1.csv"), vec![("T1.csv", b"x") ])); assert!(draft.is_valid()); }
+    #[test]
+    fn missing_source_is_error() {
+        let draft = WorkspaceDraft::from_ingest("x".into(), report(Some("T1.csv"), vec![]));
+        assert!(!draft.is_valid());
+        assert_eq!(draft.validate()[0].code, "card.source_missing");
+    }
+    #[test]
+    fn matching_source_is_valid() {
+        let draft = WorkspaceDraft::from_ingest("x".into(), report(Some("T1.csv"), vec![("T1.csv", b"x")]));
+        assert!(draft.is_valid());
+    }
 }

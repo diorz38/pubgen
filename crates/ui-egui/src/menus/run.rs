@@ -208,6 +208,8 @@ fn run_ui_part1(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value
         #[cfg(feature = "pubgen")]
         "pubgen.compileProject" => crate::dock::pubgen::compile_project(app, p),
         #[cfg(feature = "pubgen")]
+        "pubgen.newProject" => crate::dock::pubgen::new_project(app, p),
+        #[cfg(feature = "pubgen")]
         "pubgen.openProject" => crate::dock::pubgen::open_project(app, p),
         #[cfg(feature = "pubgen")]
         "pubgen.saveProject" => crate::dock::pubgen::save_project(app, p),
@@ -215,6 +217,10 @@ fn run_ui_part1(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value
         "pubgen.saveProjectAs" => crate::dock::pubgen::save_project_as(app, p),
         #[cfg(feature = "pubgen")]
         "pubgen.savePackageAs" => crate::dock::pubgen::save_package_as(app, p),
+        #[cfg(feature = "pubgen")]
+        "pubgen.importXlsx" => crate::dock::pubgen::import_xlsx(app, p),
+        #[cfg(feature = "pubgen")]
+        "pubgen.exportXlsx" => crate::dock::pubgen::export_xlsx(app, p),
         "window.hideMenuItem" => {
             let Some(item) = p.get("item").and_then(Value::as_str) else { return Some(Err("missing item".into())) };
             let hide = p.get("hidden").and_then(Value::as_bool).unwrap_or(true);

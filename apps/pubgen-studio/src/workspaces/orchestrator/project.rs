@@ -1,5 +1,5 @@
 use designcraft_ui_egui::dock::pubgen::workspace::{self, OrchestratorView, OrchestratorWorkspaceState};
-use pubgen_core::{export_workbook, open_pubgen, save_pubgen, ProjectContent, WorkspaceDraft};
+use pubgen_core::{ProjectContent, WorkspaceDraft, export_workbook, open_pubgen, save_pubgen};
 use std::path::{Path, PathBuf};
 
 #[derive(Default)]
@@ -73,12 +73,7 @@ impl OrchestratorProject {
         {
             return draft.metadata.title.clone();
         }
-        self.path
-            .as_ref()
-            .and_then(|path| path.file_stem())
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("Untitled publication")
-            .to_string()
+        self.path.as_ref().and_then(|path| path.file_stem()).and_then(|stem| stem.to_str()).unwrap_or("Untitled publication").to_string()
     }
 }
 
@@ -140,7 +135,13 @@ impl OrchestratorTabs {
         let name = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("publication").to_owned();
         let draft = WorkspaceDraft::from_ingest(name, report);
         self.snapshot_active(ctx);
-        let project = OrchestratorProject { draft: Some(draft), status: "Workbook imported".into(), dirty: true, ..OrchestratorProject::default() };
+        let project = OrchestratorProject {
+            draft: Some(draft),
+            path: Some(path.to_path_buf()),
+            status: "Workbook imported".into(),
+            dirty: true,
+            ..OrchestratorProject::default()
+        };
         self.tabs.push(WorkspaceTab { project, ui_state: None, dirty: true });
         self.active = self.tabs.len().saturating_sub(1);
         self.restore_active(ctx);
@@ -234,7 +235,9 @@ impl OrchestratorTabs {
     /// Capture the visible workspace state and the active tab's dirty flag.
     pub fn publish_snapshot(&mut self, ctx: &egui::Context) {
         let state = workspace::get_state(ctx);
-        let ui_state = serde_json::to_string(&state).ok();
+        let mut tab_state = state.clone();
+        tab_state.view = OrchestratorView::Studio;
+        let ui_state = serde_json::to_string(&tab_state).ok();
         if let Some(tab) = self.tabs.get_mut(self.active) {
             tab.dirty = state.is_dirty;
             tab.ui_state = ui_state;
@@ -280,7 +283,8 @@ impl OrchestratorTabs {
         if self.tabs.is_empty() {
             return;
         }
-        let state = workspace::get_state(ctx);
+        let mut state = workspace::get_state(ctx);
+        state.view = OrchestratorView::Studio;
         if let Some(tab) = self.tabs.get_mut(self.active) {
             tab.dirty = state.is_dirty;
             tab.ui_state = serde_json::to_string(&state).ok();
@@ -289,7 +293,13 @@ impl OrchestratorTabs {
 }
 
 fn empty_state() -> OrchestratorWorkspaceState {
-    OrchestratorWorkspaceState { view: OrchestratorView::Home, cards: Vec::new(), content_files: Vec::new(), recent_documents: Vec::new(), ..Default::default() }
+    OrchestratorWorkspaceState {
+        view: OrchestratorView::Home,
+        cards: Vec::new(),
+        content_files: Vec::new(),
+        recent_documents: Vec::new(),
+        ..Default::default()
+    }
 }
 
 fn normalized(value: &serde_json::Value) -> serde_json::Value {
@@ -409,5 +419,49 @@ mod tests {
         tabs.new_tab(&ctx);
         assert_eq!(tabs.tabs.len(), 2);
         assert_eq!(workspace::get_state(&ctx).view, OrchestratorView::Studio);
+    }
+
+    #[test]
+    fn importing_xlsx_from_home_page_adds_a_new_tab_without_replacing_active_pubgen_tab() {
+        let dir = std::env::temp_dir().join(format!("pubgen-studio-import-home-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let pkg_path = dir.join("active.pubgen");
+        write_package(&pkg_path, "Existing Active Publication");
+
+        let ctx = egui::Context::default();
+        let mut tabs = OrchestratorTabs::default();
+        // 1. User opens active .pubgen publication
+        tabs.open(&ctx, &pkg_path).expect("open pubgen package");
+        assert_eq!(tabs.tabs.len(), 1);
+        assert_eq!(tabs.active, 0);
+        assert_eq!(tabs.title(0), "Existing Active Publication");
+
+        // 2. User goes to Home Orchestrator Page
+        let mut state = workspace::get_state(&ctx);
+        state.view = OrchestratorView::Home;
+        workspace::set_state(&ctx, state);
+        tabs.publish_snapshot(&ctx);
+
+        // 3. User imports manifest XLSX from Home Orchestrator Page
+        let sample = Path::new("plan/pubgen/samples/brs/ntp202610.xlsx");
+        if sample.is_file() {
+            tabs.import(&ctx, sample).expect("import sample xlsx");
+
+            // 4. Must load as a new worksheet tab (2 tabs total), NOT replace the active tab!
+            assert_eq!(tabs.tabs.len(), 2, "XLSX import must create a new worksheet tab");
+            assert_eq!(tabs.active, 1, "New imported tab should become active");
+            assert_eq!(tabs.title(0), "Existing Active Publication", "First tab title must be preserved");
+            assert_ne!(tabs.title(1), "Existing Active Publication", "Second tab must hold the imported workbook");
+            assert_eq!(workspace::get_state(&ctx).view, OrchestratorView::Studio, "Imported tab must open into Studio view");
+
+            // 5. Switching back to tab 0 restores the original publication
+            tabs.activate(&ctx, 0);
+            assert_eq!(tabs.active, 0);
+            let restored = workspace::get_state(&ctx);
+            assert_eq!(restored.meta_title, "Existing Active Publication");
+            assert_eq!(restored.view, OrchestratorView::Studio);
+        }
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

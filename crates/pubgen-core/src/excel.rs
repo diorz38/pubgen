@@ -2,7 +2,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use crate::workspace::{CardKind, CardScope, Language, PageLayout, PublicationCard, PublicationMetadata};
-use calamine::{open_workbook_auto, Data, Reader, Sheets};
+use calamine::{Data, Reader, Sheets, open_workbook_auto};
 use chrono::{Datelike, NaiveDate};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -28,8 +28,8 @@ pub struct IngestReport {
 }
 
 pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
-    let mut workbook = open_workbook_auto(path)
-        .map_err(|source| IngestError::Open { path: path.display().to_string(), message: source.to_string() })?;
+    let mut workbook =
+        open_workbook_auto(path).map_err(|source| IngestError::Open { path: path.display().to_string(), message: source.to_string() })?;
     let names = workbook.sheet_names().to_vec();
     if names.is_empty() {
         return Err(IngestError::Invalid("workbook has no worksheets".into()));
@@ -51,16 +51,14 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
 
     let base_dir = path.parent().unwrap_or_else(|| Path::new(""));
 
-    ingest_cover_sheet(&mut workbook, &names, base_dir, &mut metadata, &mut warnings, &mut assets)?;
+    ingest_cover_sheet(&mut workbook, &names, base_dir, &mut metadata, &mut warnings, &mut assets, &mut csv)?;
 
     // 2. Process all data sheets
     for name in &names {
         if is_cover(name) || is_ignored_sheet(name) {
             continue;
         }
-        let range = workbook
-            .worksheet_range(name)
-            .map_err(|source| IngestError::Sheet { sheet: name.clone(), message: source.to_string() })?;
+        let range = workbook.worksheet_range(name).map_err(|source| IngestError::Sheet { sheet: name.clone(), message: source.to_string() })?;
         let rows: Vec<Vec<String>> = range.rows().map(|row| row.iter().map(cell_text).collect()).collect();
 
         let kv = extract_sheet_kv(&rows);
@@ -71,9 +69,7 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
         csv.push((csv_path.clone(), csv_bytes));
 
         let mut card_source = Some(csv_path);
-        let mut card_title = kv.get("title").cloned().unwrap_or_else(|| {
-            first_nonempty_row(&rows).unwrap_or_else(|| name.clone())
-        });
+        let mut card_title = kv.get("title").cloned().unwrap_or_else(|| first_nonempty_row(&rows).unwrap_or_else(|| name.clone()));
 
         let mut card_settings = BTreeMap::new();
         if let Some(ten) = kv.get("title_en").or_else(|| kv.get("judul_en")) {
@@ -101,14 +97,7 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
             }
         }
 
-        metadata.cards.push(PublicationCard {
-            id: file_name,
-            kind,
-            scope,
-            source: card_source,
-            title: card_title,
-            settings: card_settings,
-        });
+        metadata.cards.push(PublicationCard { id: file_name, kind, scope, source: card_source, title: card_title, settings: card_settings });
     }
 
     Ok(IngestReport { profile_id: profile_id.to_string(), metadata, csv, md, assets, warnings })
@@ -121,32 +110,63 @@ fn ingest_cover_sheet(
     metadata: &mut PublicationMetadata,
     warnings: &mut Vec<String>,
     assets: &mut Vec<(String, Vec<u8>)>,
+    csv: &mut Vec<(String, Vec<u8>)>,
 ) -> Result<(), IngestError> {
     for name in names {
         if is_cover(name) {
-            let range = workbook
-                .worksheet_range(name)
-                .map_err(|source| IngestError::Sheet { sheet: name.clone(), message: source.to_string() })?;
+            let range = workbook.worksheet_range(name).map_err(|source| IngestError::Sheet { sheet: name.clone(), message: source.to_string() })?;
             let rows: Vec<Vec<String>> = range.rows().map(|row| row.iter().map(cell_text).collect()).collect();
             parse_cover(&rows, metadata, warnings);
 
+            let file_name = safe_sheet_name(name);
+            let csv_path = format!("csv/{file_name}.csv");
+            let csv_bytes = rows_to_csv(&rows)?;
+            csv.push((csv_path.clone(), csv_bytes));
+
+            let mut card_settings = BTreeMap::new();
+            for (k, v) in &metadata.extra {
+                card_settings.insert(k.clone(), serde_json::Value::String(v.clone()));
+            }
+            if !metadata.title.is_empty() {
+                card_settings.insert("title".to_string(), serde_json::Value::String(metadata.title.clone()));
+            }
+            if let Some(ref ten) = metadata.title_en {
+                card_settings.insert("title_en".to_string(), serde_json::Value::String(ten.clone()));
+            }
+
             metadata.cards.push(PublicationCard {
-                id: safe_sheet_name(name),
+                id: file_name,
                 kind: CardKind::Cover,
                 scope: CardScope::NewPage,
-                source: None,
+                source: Some(csv_path),
                 title: if !metadata.title.is_empty() {
                     format!("Sampul Rilis: {}", metadata.title)
                 } else {
                     "Sampul Berita Resmi Statistik (COV)".to_string()
                 },
-                settings: BTreeMap::new(),
+                settings: card_settings,
             });
             break;
         }
     }
 
-    for key in ["image_theme1", "image_theme2", "qr", "pic_photo", "image", "imagehero", "theme1", "theme2"] {
+    for key in [
+        "image_theme1",
+        "image_theme2",
+        "qr",
+        "pic_photo",
+        "image",
+        "imagehero",
+        "image_hero",
+        "imagelandscape",
+        "image_landscape",
+        "logo",
+        "officelogo",
+        "event_theme",
+        "themeevent",
+        "theme1",
+        "theme2",
+    ] {
         let Some(file_name) = metadata.extra.get(key) else { continue };
         let Some(resolved) = resolve_file(base_dir, file_name) else { continue };
         let Ok(bytes) = std::fs::read(&resolved) else { continue };
@@ -168,24 +188,14 @@ fn process_narrative_sheet(
     md: &mut Vec<(String, Vec<u8>)>,
 ) -> (String, Option<String>) {
     let explicit_file = kv.get("file").or_else(|| kv.get("berkas")).cloned();
-    let candidate_name = explicit_file.unwrap_or_else(|| {
-        if name.starts_with('U') || name.starts_with('u') {
-            format!("{name}.rtf")
-        } else {
-            format!("{file_name}.rtf")
-        }
-    });
+    let candidate_name = explicit_file
+        .unwrap_or_else(|| if name.starts_with('U') || name.starts_with('u') { format!("{name}.rtf") } else { format!("{file_name}.rtf") });
 
-    let stem = Path::new(&candidate_name)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(file_name);
+    let stem = Path::new(&candidate_name).file_stem().and_then(|s| s.to_str()).unwrap_or(file_name);
     let md_path = format!("md/{stem}.md");
 
     let mut resolved_md = None;
-    if let Some((path, bytes)) = resolve_narrative_file(base_dir, &candidate_name, name)
-        .and_then(|p| std::fs::read(&p).ok().map(|b| (p, b)))
-    {
+    if let Some((path, bytes)) = resolve_narrative_file(base_dir, &candidate_name, name).and_then(|p| std::fs::read(&p).ok().map(|b| (p, b))) {
         let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
         if ext == "rtf" {
             if let Ok(converted) = rtf_to_md(&bytes) {
@@ -249,7 +259,12 @@ fn process_image_or_divider_sheet(
     mut card_title: String,
     assets: &mut Vec<(String, Vec<u8>)>,
 ) -> (String, Option<String>) {
-    let img_candidate = kv.get("file").or_else(|| kv.get("image")).or_else(|| kv.get("berkas")).or_else(|| kv.get("gambar")).cloned()
+    let img_candidate = kv
+        .get("file")
+        .or_else(|| kv.get("image"))
+        .or_else(|| kv.get("berkas"))
+        .or_else(|| kv.get("gambar"))
+        .cloned()
         .unwrap_or_else(|| format!("{name}.png"));
     let just_name = Path::new(&img_candidate).file_name().and_then(|s| s.to_str()).unwrap_or(&img_candidate).to_string();
     if let Some(bytes) = resolve_file(base_dir, &img_candidate).and_then(|p| std::fs::read(&p).ok()) {
@@ -279,8 +294,15 @@ fn process_map_chart_sheet(
     assets: &mut Vec<(String, Vec<u8>)>,
 ) -> (String, Option<String>) {
     let map_val = kv.get("map").or_else(|| kv.get("peta")).map(|s| s.trim()).filter(|s| !s.is_empty());
-    let geojson_val = kv.get("geojson").or_else(|| kv.get("geojson_path")).or_else(|| kv.get("file_geojson")).map(|s| s.trim()).filter(|s| !s.is_empty());
-    let data_val = kv.get("data").or_else(|| kv.get("csv")).or_else(|| kv.get("tabel")).or_else(|| kv.get("data_csv")).map(|s| s.trim()).filter(|s| !s.is_empty());
+    let geojson_val =
+        kv.get("geojson").or_else(|| kv.get("geojson_path")).or_else(|| kv.get("file_geojson")).map(|s| s.trim()).filter(|s| !s.is_empty());
+    let data_val = kv
+        .get("data")
+        .or_else(|| kv.get("csv"))
+        .or_else(|| kv.get("tabel"))
+        .or_else(|| kv.get("data_csv"))
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
 
     if let Some(data) = data_val {
         card_settings.insert("map_data_csv".to_string(), serde_json::Value::String(data.to_string()));
@@ -435,16 +457,18 @@ fn classify_cxx_sheet(kv: &BTreeMap<String, String>) -> (CardKind, CardScope) {
     let has_chart_type = kv.get("chart_type").or_else(|| kv.get("type")).or_else(|| kv.get("tipe_grafik")).is_some_and(|v| !v.trim().is_empty());
 
     let file_candidate = kv.get("file").or_else(|| kv.get("berkas")).or_else(|| kv.get("image")).or_else(|| kv.get("gambar"));
-    let is_file_image = file_candidate.map(|f| {
-        let lower = f.to_ascii_lowercase();
-        lower.ends_with(".png")
-            || lower.ends_with(".jpg")
-            || lower.ends_with(".jpeg")
-            || lower.ends_with(".webp")
-            || lower.ends_with(".svg")
-            || lower.ends_with(".gif")
-            || lower.ends_with(".bmp")
-    }).unwrap_or(false);
+    let is_file_image = file_candidate
+        .map(|f| {
+            let lower = f.to_ascii_lowercase();
+            lower.ends_with(".png")
+                || lower.ends_with(".jpg")
+                || lower.ends_with(".jpeg")
+                || lower.ends_with(".webp")
+                || lower.ends_with(".svg")
+                || lower.ends_with(".gif")
+                || lower.ends_with(".bmp")
+        })
+        .unwrap_or(false);
 
     if has_table && has_chart_type {
         (CardKind::Chart, CardScope::NewPage)
@@ -507,36 +531,100 @@ fn parse_cover(rows: &[Vec<String>], metadata: &mut PublicationMetadata, warning
             continue;
         }
         let norm: String = raw_key.to_ascii_lowercase().chars().filter(|c| !matches!(c, '_' | ' ' | '-')).collect();
+        metadata.extra.insert(raw_key.to_ascii_lowercase(), value.clone());
         match norm.as_str() {
             "title" | "title1" | "titleid" => {
                 metadata.title = value.clone();
-                metadata.extra.insert("title".into(), value);
+                metadata.extra.insert("title".into(), value.clone());
+                metadata.extra.insert("title1".into(), value);
             }
             "titleen" | "title2" | "title_en" => {
                 metadata.title_en = Some(value.clone());
-                metadata.extra.insert("title_en".into(), value);
+                metadata.extra.insert("title_en".into(), value.clone());
+                metadata.extra.insert("title2".into(), value);
             }
             "no" | "nomor" | "releaseno" | "volumeno" | "katalog" | "catalogue" | "nocatalogue" => {
                 release_no = value.clone();
-                metadata.extra.insert("release_no".into(), value);
+                metadata.extra.insert("release_no".into(), value.clone());
+                metadata.extra.insert("no".into(), value);
             }
             "date" | "tanggal" | "tgl" | "releasedate" | "volumedate" => {
                 let fmt = format_excel_date(&value);
                 release_date = fmt.clone();
-                metadata.extra.insert("release_date".into(), fmt);
+                metadata.extra.insert("release_date".into(), fmt.clone());
+                metadata.extra.insert("date".into(), fmt);
             }
             "month" | "bulan" | "releasemonth" => {
                 let fmt = format_excel_month_year(&value);
                 release_month = fmt.clone();
-                metadata.extra.insert("release_month".into(), fmt);
+                metadata.extra.insert("release_month".into(), fmt.clone());
+                metadata.extra.insert("month".into(), fmt);
             }
             "agency" | "puboffice" | "officename" | "instansi" | "lembaga" => {
                 agency = value.clone();
-                metadata.extra.insert("agency".into(), value);
+                metadata.extra.insert("agency".into(), value.clone());
+                metadata.extra.insert("pub_office".into(), value);
             }
-            _ => {
-                metadata.extra.insert(raw_key.to_ascii_lowercase(), value);
+            "year" | "tahun" => {
+                metadata.extra.insert("year".into(), value);
             }
+            "volume" | "vol" => {
+                metadata.extra.insert("volume".into(), value);
+            }
+            "code" | "issn" | "isbn" => {
+                metadata.extra.insert("code".into(), value);
+            }
+            "picname" | "pic" | "narasumber" | "nama" => {
+                metadata.extra.insert("pic_name".into(), value);
+            }
+            "picphoto" | "photo" | "foto" => {
+                metadata.extra.insert("pic_photo".into(), value);
+            }
+            "picposition" | "position" | "jabatan" => {
+                metadata.extra.insert("pic_position".into(), value);
+            }
+            "picoffice" | "office" | "kantor" => {
+                metadata.extra.insert("pic_office".into(), value);
+            }
+            "picphone" | "phone" | "telepon" | "telp" => {
+                metadata.extra.insert("pic_phone".into(), value);
+            }
+            "picemail" | "email" | "surel" => {
+                metadata.extra.insert("pic_email".into(), value);
+            }
+            "style" | "coverstyle" | "template" => {
+                metadata.extra.insert("style".into(), value.clone());
+                metadata.extra.insert("template".into(), value);
+            }
+            "theme" | "tabletheme" | "colortheme" | "warna" => {
+                metadata.extra.insert("theme".into(), value);
+            }
+            "palette" | "aipalette" | "colorpalette" | "palet" => {
+                metadata.extra.insert("palette".into(), value);
+            }
+            "image1" | "imagehero" | "image" => {
+                metadata.extra.insert("image_hero".into(), value.clone());
+                metadata.extra.insert("imagehero".into(), value);
+            }
+            "imagelandscape" | "imagelanscape" | "landscape" => {
+                metadata.extra.insert("image_landscape".into(), value);
+            }
+            "logo" | "officelogo" => {
+                metadata.extra.insert("logo".into(), value);
+            }
+            "officeaddress" | "address" | "alamat" | "alamatkantor" => {
+                metadata.extra.insert("office_address".into(), value);
+            }
+            "eventtheme" | "themeevent" | "backimage" | "backcover" => {
+                metadata.extra.insert("event_theme".into(), value);
+            }
+            "point" | "poin" | "highlight" => {
+                metadata.extra.insert("point".into(), value);
+            }
+            "qr" | "qrcode" => {
+                metadata.extra.insert("qr".into(), value);
+            }
+            _ => {}
         }
     }
 
@@ -579,16 +667,9 @@ pub fn format_excel_date(raw: &str) -> String {
     let Some(date) = base.checked_add_signed(chrono::Duration::days(serial)) else {
         return trimmed.to_string();
     };
-    let months = [
-        "Januari", "Februari", "Maret", "April", "Mei", "Juni",
-        "Juli", "Agustus", "September", "Oktober", "November", "Desember",
-    ];
+    let months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
     let m_idx = (date.month() as usize).saturating_sub(1);
-    if let Some(m_str) = months.get(m_idx) {
-        format!("{} {} {}", date.day(), m_str, date.year())
-    } else {
-        trimmed.to_string()
-    }
+    if let Some(m_str) = months.get(m_idx) { format!("{} {} {}", date.day(), m_str, date.year()) } else { trimmed.to_string() }
 }
 
 pub fn format_excel_month_year(raw: &str) -> String {
@@ -608,16 +689,9 @@ pub fn format_excel_month_year(raw: &str) -> String {
     let Some(date) = base.checked_add_signed(chrono::Duration::days(serial)) else {
         return trimmed.to_string();
     };
-    let months = [
-        "Januari", "Februari", "Maret", "April", "Mei", "Juni",
-        "Juli", "Agustus", "September", "Oktober", "November", "Desember",
-    ];
+    let months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
     let m_idx = (date.month() as usize).saturating_sub(1);
-    if let Some(m_str) = months.get(m_idx) {
-        format!("{} {}", m_str, date.year())
-    } else {
-        trimmed.to_string()
-    }
+    if let Some(m_str) = months.get(m_idx) { format!("{} {}", m_str, date.year()) } else { trimmed.to_string() }
 }
 
 fn resolve_file(base: &Path, name: &str) -> Option<PathBuf> {
@@ -712,9 +786,19 @@ pub fn rtf_to_md(bytes: &[u8]) -> Result<String, IngestError> {
     let mut i = 0usize;
 
     let skipped = [
-        "fonttbl", "colortbl", "stylesheet", "info", "pict", "objdata",
-        "header", "footer", "listtable", "listoverridetable", "generator",
-        "pntext", "pn",
+        "fonttbl",
+        "colortbl",
+        "stylesheet",
+        "info",
+        "pict",
+        "objdata",
+        "header",
+        "footer",
+        "listtable",
+        "listoverridetable",
+        "generator",
+        "pntext",
+        "pn",
     ];
 
     fn push_run(para: &mut String, run: &mut String, bold: bool, italic: bool) {
@@ -751,14 +835,7 @@ pub fn rtf_to_md(bytes: &[u8]) -> Result<String, IngestError> {
         }
     }
 
-    fn flush(
-        para: &mut String,
-        run: &mut String,
-        run_bold: &mut bool,
-        run_italic: &mut bool,
-        out: &mut String,
-        prefix: &mut String,
-    ) {
+    fn flush(para: &mut String, run: &mut String, run_bold: &mut bool, run_italic: &mut bool, out: &mut String, prefix: &mut String) {
         push_run(para, run, *run_bold, *run_italic);
         let line = para.trim().to_owned();
         if !line.is_empty() {
@@ -975,10 +1052,7 @@ fn rtf_parse_stylesheet(data: &str) -> HashMap<u32, String> {
                         segments.push(seg);
                     }
 
-                    let name = segments
-                        .last()
-                        .map(|s| s.trim().trim_end_matches(';').trim().to_ascii_lowercase())
-                        .unwrap_or_default();
+                    let name = segments.last().map(|s| s.trim().trim_end_matches(';').trim().to_ascii_lowercase()).unwrap_or_default();
 
                     let prefix = if name.contains("heading 1") || name.contains("judul 1") {
                         Some("# ".to_string())
@@ -1032,19 +1106,13 @@ fn cell_text(cell: &Data) -> String {
 fn rows_to_csv(rows: &[Vec<String>]) -> Result<Vec<u8>, IngestError> {
     let mut writer = csv::WriterBuilder::new().from_writer(Vec::new());
     for row in rows {
-        writer
-            .write_record(row)
-            .map_err(|e| IngestError::Invalid(format!("CSV conversion failed: {e}")))?;
+        writer.write_record(row).map_err(|e| IngestError::Invalid(format!("CSV conversion failed: {e}")))?;
     }
-    writer
-        .into_inner()
-        .map_err(|e| IngestError::Invalid(format!("CSV finalize failed: {e}")))
+    writer.into_inner().map_err(|e| IngestError::Invalid(format!("CSV finalize failed: {e}")))
 }
 
 fn safe_sheet_name(name: &str) -> String {
-    name.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
-        .collect()
+    name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' }).collect()
 }
 
 fn first_nonempty_row(rows: &[Vec<String>]) -> Option<String> {
@@ -1174,6 +1242,15 @@ mod tests {
             assert!(!report.csv.is_empty(), "CSV files extracted");
             assert!(!report.md.is_empty(), "MD files extracted from linked RTF");
             assert_eq!(report.metadata.extra.get("release_no").map(String::as_str), Some("61/10/32/Th. XXVIII"));
+
+            // Verify sheet COV is converted to CSV and updates card Cover
+            assert!(report.csv.iter().any(|(p, _)| p == "csv/COV.csv"), "COV sheet converted to CSV");
+            let cov_card = report.metadata.cards.first().expect("Cover card exists");
+            assert_eq!(cov_card.kind, CardKind::Cover);
+            assert_eq!(cov_card.source.as_deref(), Some("csv/COV.csv"));
+            assert!(cov_card.settings.contains_key("release_no"));
+            assert!(cov_card.settings.contains_key("release_date"));
+            assert!(cov_card.settings.contains_key("agency"));
         }
     }
 }

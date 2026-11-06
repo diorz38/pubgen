@@ -447,13 +447,9 @@ pub(crate) fn card_header_footer_body_ui(app: &mut DesignApp, ui: &mut Ui, st: &
         let combo_w = (ui.available_width() - 80.0).clamp(110.0, 200.0);
         let mut picked_template: Option<Value> = None;
 
-        let is_brs_active = st.active_profile().id == "bps_brs";
         let combo = craft_ui::ComboBox::from_id_salt("pubgen_hf_style").selected_text(&cur_style).width(combo_w).show_ui(ui, |ui| {
             for tpl in &templates {
                 let name = tpl.get("name").and_then(Value::as_str).unwrap_or("Template");
-                if name.eq_ignore_ascii_case("hf-brs") && !is_brs_active && !cur_style.eq_ignore_ascii_case("hf-brs") {
-                    continue;
-                }
                 let is_builtin = tpl.get("builtIn").and_then(Value::as_bool).unwrap_or(false);
                 let label = if is_builtin { name.to_string() } else { format!("{name} ★") };
                 let is_selected = cur_style == name;
@@ -525,7 +521,7 @@ pub(crate) fn card_header_footer_body_ui(app: &mut DesignApp, ui: &mut Ui, st: &
             .on_hover_text("Footer offset from bottom of page");
     });
 
-    // 2b. Scope: which pages this template applies to (all, one section, or a page range).
+    // 2b. Scope: which pages this template applies to (all, one section, a page range, this page only, or this page forward).
     ui.horizontal(|ui| {
         ui.label(RichText::new("Scope:").size(11.0).color(t.text));
         let (page_count, sections) = app
@@ -533,10 +529,17 @@ pub(crate) fn card_header_footer_body_ui(app: &mut DesignApp, ui: &mut Ui, st: &
             .active()
             .map(|a| (a.doc.page_count(), a.doc.sections.iter().map(|s| (s.prefix.clone(), s.start)).collect::<Vec<_>>()))
             .unwrap_or((1, Vec::new()));
-        let scope_options = ["All Pages", "Section", "Pages"];
-        let cur_scope = scope_options.get(st.hf_scope).copied().unwrap_or("All Pages");
-        craft_ui::ComboBox::from_id_salt("pubgen_hf_scope").selected_text(cur_scope).width(85.0).show_ui(ui, |ui| {
+        let cur_scope = match st.hf_scope {
+            1 => "Section",
+            2 => "Pages",
+            3 => "This Page Only",
+            4 => "This Page Forward",
+            _ => "All Pages",
+        };
+        craft_ui::ComboBox::from_id_salt("pubgen_hf_scope").selected_text(cur_scope).width(115.0).show_ui(ui, |ui| {
             ui.selectable_value(&mut st.hf_scope, 0, "All Pages");
+            ui.selectable_value(&mut st.hf_scope, 3, "This Page Only");
+            ui.selectable_value(&mut st.hf_scope, 4, "This Page Forward");
             ui.selectable_value(&mut st.hf_scope, 1, "Section");
             ui.selectable_value(&mut st.hf_scope, 2, "Pages");
         });
@@ -566,10 +569,31 @@ pub(crate) fn card_header_footer_body_ui(app: &mut DesignApp, ui: &mut Ui, st: &
                 ui.add(egui::DragValue::new(&mut st.hf_scope_start).range(1..=page_count.max(1)).prefix("From: "));
                 ui.add(egui::DragValue::new(&mut st.hf_scope_end).range(st.hf_scope_start..=page_count.max(1)).prefix("To: "));
             }
+            3 => {
+                let p = st.hf_scope_start.clamp(1, page_count.max(1));
+                ui.label(RichText::new(format!("(Page {p})")).size(10.5).color(t.text_dim));
+            }
+            4 => {
+                let p = st.hf_scope_start.clamp(1, page_count.max(1));
+                ui.label(RichText::new(format!("(Page {p} to {page_count})")).size(10.5).color(t.text_dim));
+            }
             _ => {}
         }
         if ui.button(RichText::new("Sections…").size(10.5).color(t.text_dim)).clicked() {
             crate::menus::activate(app, "layout.section", &Value::Null);
+        }
+    });
+
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Quick Scope:").size(10.5).color(t.text_dim));
+        if ui.selectable_label(st.hf_scope == 3, "This Page Only").clicked() {
+            st.hf_scope = 3;
+        }
+        if ui.selectable_label(st.hf_scope == 4, "This Page Forward").clicked() {
+            st.hf_scope = 4;
+        }
+        if ui.selectable_label(st.hf_scope == 0, "All Pages").clicked() {
+            st.hf_scope = 0;
         }
     });
 
@@ -730,6 +754,28 @@ pub fn execute_apply_header_footer(app: &mut DesignApp, st: &PubgenState) -> Res
             let start = st.hf_scope_start.max(1) as u64;
             let end = (st.hf_scope_end as u64).max(start);
             json!({ "range": [start, end] })
+        }
+        3 => {
+            // Apply for this page only
+            let p = st.hf_scope_start.max(1) as u64;
+            json!({ "range": [p, p] })
+        }
+        4 => {
+            // Apply from this page forward
+            let start = st.hf_scope_start.max(1) as u64;
+            let total = app.session.active().map(|s| s.doc.page_count()).unwrap_or(start as usize);
+            let mut last = (total as u64).max(start);
+            if (is_brs || is_dda)
+                && let Some(active) = app.session.active()
+            {
+                let (_, _, back) = super::covers::find_existing_covers(&active.doc);
+                if let Some(b) = back
+                    && b > 0
+                {
+                    last = (b as u64).min(last);
+                }
+            }
+            if start <= last { json!({ "range": [start, last] }) } else { json!({ "range": [start, start] }) }
         }
         _ => {
             // For BRS and DDA, running headers should not land on cover (page 1) or back cover (last page)
@@ -1102,6 +1148,32 @@ pub(crate) mod tests {
             assert!((4..11).all(on_page), "section pages carry the parent");
             assert!((0..4).all(|i| !on_page(i)), "pages before the section do not");
         }
+
+        // Scope 3: This Page Only (page 6 only).
+        let st = PubgenState { hf_scope: 3, hf_scope_start: 6, ..Default::default() };
+        execute_apply_header_footer(&mut app, &st).unwrap_or_else(|e| panic!("this page only apply: {e}"));
+        {
+            let doc = &app.session.active().unwrap().doc;
+            let hf = doc.header_footer.as_ref().expect("header_footer present");
+            assert_eq!(hf.scope, designcraft_doc::HfScope::Range { first: 6, last: 6 });
+            let parent = hf.parent;
+            let on_page = |i: usize| doc.page(i).is_some_and(|p| p.parent == parent);
+            assert!(on_page(5), "page 6 carries the parent");
+            assert!((0..5).all(|i| !on_page(i)) && (6..11).all(|i| !on_page(i)), "other pages do not carry parent");
+        }
+
+        // Scope 4: This Page Forward (page 7 through end of doc).
+        let st = PubgenState { hf_scope: 4, hf_scope_start: 7, ..Default::default() };
+        execute_apply_header_footer(&mut app, &st).unwrap_or_else(|e| panic!("this page forward apply: {e}"));
+        {
+            let doc = &app.session.active().unwrap().doc;
+            let hf = doc.header_footer.as_ref().expect("header_footer present");
+            assert_eq!(hf.scope, designcraft_doc::HfScope::Range { first: 7, last: 11 });
+            let parent = hf.parent;
+            let on_page = |i: usize| doc.page(i).is_some_and(|p| p.parent == parent);
+            assert!((6..11).all(on_page), "pages 7-11 carry the parent");
+            assert!((0..6).all(|i| !on_page(i)), "pages before page 7 do not");
+        }
     }
 
     #[test]
@@ -1311,5 +1383,13 @@ pub(crate) mod tests {
         for p in 3..6 {
             assert_eq!(doc.page(p).unwrap().parent, hf.parent, "Page {p} must have header/footer parent");
         }
+    }
+
+    #[test]
+    fn test_all_templates_includes_hf_brs_and_hf_dda_regardless_of_profile() {
+        let app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let templates = designcraft_engine::cmd::header_footer::all_templates(&app.session);
+        assert!(templates.iter().any(|t| t.get("name").and_then(Value::as_str) == Some("hf-brs")), "hf-brs template must be available");
+        assert!(templates.iter().any(|t| t.get("name").and_then(Value::as_str) == Some("hf-dda")), "hf-dda template must be available");
     }
 }

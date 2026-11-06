@@ -17,10 +17,8 @@ pub struct PubgenStudioApp {
 
 impl PubgenStudioApp {
     pub fn new(app: DesignApp, initial_mode: StudioMode, project_path: Option<PathBuf>, container: Option<PubgenContainer>) -> Self {
-        let pending_open = project_path
-            .as_ref()
-            .filter(|path| path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("pubgen")))
-            .cloned();
+        let pending_open =
+            project_path.as_ref().filter(|path| path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("pubgen"))).cloned();
         Self {
             mode: initial_mode,
             app,
@@ -80,10 +78,16 @@ impl eframe::App for PubgenStudioApp {
                             let _ = self.orchestrator_tabs.open(&ctx, &path);
                         }
                     }
+                    HostTabAction::OpenPath(path) => {
+                        let _ = self.orchestrator_tabs.open(&ctx, &path);
+                    }
                     HostTabAction::Import => {
                         if let Some(path) = rfd::FileDialog::new().add_filter("Excel Workbook", &["xlsx", "xlsm"]).pick_file() {
                             let _ = self.orchestrator_tabs.import(&ctx, &path);
                         }
+                    }
+                    HostTabAction::ImportPath(path) => {
+                        let _ = self.orchestrator_tabs.import(&ctx, &path);
                     }
                     HostTabAction::Save => {
                         let _ = self.app.run("pubgen.saveProject", serde_json::Value::Null);

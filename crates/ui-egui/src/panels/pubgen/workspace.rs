@@ -47,15 +47,8 @@ pub enum CardKind {
 }
 
 impl CardKind {
-    pub const ALL: [CardKind; 7] = [
-        CardKind::Cover,
-        CardKind::Narrative,
-        CardKind::Chart,
-        CardKind::MapChart,
-        CardKind::Table,
-        CardKind::Image,
-        CardKind::Toc,
-    ];
+    pub const ALL: [CardKind; 7] =
+        [CardKind::Cover, CardKind::Narrative, CardKind::Chart, CardKind::MapChart, CardKind::Table, CardKind::Image, CardKind::Toc];
 
     pub fn label(self, lang: &str) -> &'static str {
         match self {
@@ -119,6 +112,22 @@ pub struct PublicationCard {
     pub cover_pic_photo: String,
     pub cover_pic_phone: String,
     pub cover_pic_email: String,
+    #[serde(default)]
+    pub cover_title2: String,
+    #[serde(default)]
+    pub cover_year: String,
+    #[serde(default)]
+    pub cover_volume: String,
+    #[serde(default)]
+    pub cover_catalogue: String,
+    #[serde(default)]
+    pub cover_code_num: String,
+    #[serde(default)]
+    pub cover_office_address: String,
+    #[serde(default)]
+    pub cover_style_idx: usize,
+    #[serde(default)]
+    pub settings: std::collections::BTreeMap<String, String>,
 
     // Table specific
     pub table_first_row_header: bool,
@@ -159,6 +168,22 @@ pub struct PublicationCard {
     pub start_page_number: u32,
     pub section_prefix: String,
     pub numbering_style: String,
+
+    // Header & Footer specific
+    pub hf_enabled: bool,
+    pub hf_scope_forward: bool,
+    pub hf_style: String,
+    pub hf_sided: usize,
+    pub hf_header_single: String,
+    pub hf_header_left: String,
+    pub hf_header_right: String,
+    pub hf_footer_single: String,
+    pub hf_footer_left: String,
+    pub hf_footer_right: String,
+    pub hf_header_rule: bool,
+    pub hf_footer_rule: bool,
+    pub hf_header_offset: f64,
+    pub hf_footer_offset: f64,
 }
 
 impl Default for PublicationCard {
@@ -191,6 +216,14 @@ impl Default for PublicationCard {
             cover_pic_photo: String::new(),
             cover_pic_phone: String::new(),
             cover_pic_email: String::new(),
+            cover_title2: String::new(),
+            cover_year: String::new(),
+            cover_volume: String::new(),
+            cover_catalogue: String::new(),
+            cover_code_num: String::new(),
+            cover_office_address: String::new(),
+            cover_style_idx: 0,
+            settings: std::collections::BTreeMap::new(),
             table_first_row_header: true,
             table_col_numbers: true,
             table_footer: true,
@@ -219,6 +252,20 @@ impl Default for PublicationCard {
             start_page_number: 1,
             section_prefix: String::new(),
             numbering_style: "1, 2, 3...".into(),
+            hf_enabled: false,
+            hf_scope_forward: false,
+            hf_style: String::new(),
+            hf_sided: 0,
+            hf_header_single: String::new(),
+            hf_header_left: String::new(),
+            hf_header_right: String::new(),
+            hf_footer_single: String::new(),
+            hf_footer_left: String::new(),
+            hf_footer_right: String::new(),
+            hf_header_rule: false,
+            hf_footer_rule: false,
+            hf_header_offset: 18.0,
+            hf_footer_offset: 18.0,
         }
     }
 }
@@ -305,6 +352,7 @@ pub struct OrchestratorWorkspaceState {
     pub execution_log: Vec<String>,
     // Card modal editor
     pub editing_card_idx: Option<usize>,
+    pub last_editing_card_idx: Option<usize>,
     pub card_delete_confirm: bool,
     pub prompt_copied_feedback: bool,
     // Status message
@@ -420,14 +468,7 @@ impl Default for OrchestratorWorkspaceState {
                 10,
                 false,
             ),
-            PublicationCard::new_with(
-                CardKind::Narrative,
-                "Ulasan Narasi U5 (U5.md)",
-                "Ulasan analisis inflasi perdesaan",
-                "md/U5.md",
-                11,
-                false,
-            ),
+            PublicationCard::new_with(CardKind::Narrative, "Ulasan Narasi U5 (U5.md)", "Ulasan analisis inflasi perdesaan", "md/U5.md", 11, false),
             PublicationCard::new_with(
                 CardKind::Table,
                 "Tabel 4 Nilai Tukar Usaha Petani per Subsektor dan Persentase Perubahannya (2018=100)",
@@ -436,22 +477,8 @@ impl Default for OrchestratorWorkspaceState {
                 12,
                 false,
             ),
-            PublicationCard::new_with(
-                CardKind::Narrative,
-                "Ulasan Narasi U6 (U6.md)",
-                "Ulasan penutup dan rekomendasi",
-                "md/U6.md",
-                13,
-                false,
-            ),
-            PublicationCard::new_with(
-                CardKind::Image,
-                "Infografis / Gambar G1 (G1.png)",
-                "Area Margin · Sumber: G1.png",
-                "G1.png",
-                14,
-                false,
-            ),
+            PublicationCard::new_with(CardKind::Narrative, "Ulasan Narasi U6 (U6.md)", "Ulasan penutup dan rekomendasi", "md/U6.md", 13, false),
+            PublicationCard::new_with(CardKind::Image, "Infografis / Gambar G1 (G1.png)", "Area Margin · Sumber: G1.png", "G1.png", 14, false),
         ];
 
         let slots = vec![
@@ -479,10 +506,7 @@ impl Default for OrchestratorWorkspaceState {
         Self {
             view: OrchestratorView::Home,
             is_dirty: false,
-            recent_documents: vec![
-                "pubgen/samples/brs/BRS_NTO_202610.pubgen".into(),
-                "pubgen/samples/brs/ntp202610.xlsx".into(),
-            ],
+            recent_documents: vec!["pubgen/samples/brs/BRS_NTO_202610.pubgen".into(), "pubgen/samples/brs/ntp202610.xlsx".into()],
             center_tab: OrchestratorTab::StrukturHalaman,
             selected_profile: "bps_brs".into(),
             right_dock_tab: OrchestratorRightTab::SumberKonten,
@@ -513,6 +537,7 @@ impl Default for OrchestratorWorkspaceState {
             last_output_pdf: Some("outputs/BRS_NTP_Jabar_2026.pdf".into()),
             execution_log,
             editing_card_idx: None,
+            last_editing_card_idx: None,
             card_delete_confirm: false,
             prompt_copied_feedback: false,
             status_message: None,
@@ -555,6 +580,72 @@ impl OrchestratorWorkspaceState {
                 } else if !card.subtitle.is_empty() {
                     settings.insert("title_en".into(), serde_json::Value::String(card.subtitle.clone()));
                 }
+                if card.kind == CardKind::Cover {
+                    for (k, v) in &card.settings {
+                        settings.insert(k.clone(), serde_json::Value::String(v.clone()));
+                    }
+                    if !card.title.is_empty() {
+                        let t = card.title.strip_prefix("Sampul Rilis: ").unwrap_or(&card.title);
+                        settings.insert("title".into(), serde_json::Value::String(t.to_string()));
+                    }
+                    if !card.title_en.is_empty() {
+                        settings.insert("title_en".into(), serde_json::Value::String(card.title_en.clone()));
+                    }
+                    if !card.cover_title2.is_empty() {
+                        settings.insert("title2".into(), serde_json::Value::String(card.cover_title2.clone()));
+                    }
+                    if !card.cover_year.is_empty() {
+                        settings.insert("year".into(), serde_json::Value::String(card.cover_year.clone()));
+                    }
+                    if !card.cover_volume.is_empty() {
+                        settings.insert("volume".into(), serde_json::Value::String(card.cover_volume.clone()));
+                    }
+                    if !card.cover_catalogue.is_empty() {
+                        settings.insert("catalogue".into(), serde_json::Value::String(card.cover_catalogue.clone()));
+                    }
+                    if !card.cover_code_num.is_empty() {
+                        settings.insert("code".into(), serde_json::Value::String(card.cover_code_num.clone()));
+                    }
+                    if !card.cover_release_no.is_empty() {
+                        settings.insert("release_no".into(), serde_json::Value::String(card.cover_release_no.clone()));
+                    }
+                    if !card.cover_release_date.is_empty() {
+                        settings.insert("release_date".into(), serde_json::Value::String(card.cover_release_date.clone()));
+                    }
+                    if !card.cover_release_month.is_empty() {
+                        settings.insert("release_month".into(), serde_json::Value::String(card.cover_release_month.clone()));
+                    }
+                    if !card.cover_pub_office.is_empty() {
+                        settings.insert("pub_office".into(), serde_json::Value::String(card.cover_pub_office.clone()));
+                        settings.insert("agency".into(), serde_json::Value::String(card.cover_pub_office.clone()));
+                    }
+                    if !card.cover_office_address.is_empty() {
+                        settings.insert("office_address".into(), serde_json::Value::String(card.cover_office_address.clone()));
+                    }
+                    if !card.cover_pic_name.is_empty() {
+                        settings.insert("pic_name".into(), serde_json::Value::String(card.cover_pic_name.clone()));
+                    }
+                    if !card.cover_pic_photo.is_empty() {
+                        settings.insert("pic_photo".into(), serde_json::Value::String(card.cover_pic_photo.clone()));
+                    }
+                    if !card.cover_pic_phone.is_empty() {
+                        settings.insert("pic_phone".into(), serde_json::Value::String(card.cover_pic_phone.clone()));
+                    }
+                    if !card.cover_pic_email.is_empty() {
+                        settings.insert("pic_email".into(), serde_json::Value::String(card.cover_pic_email.clone()));
+                    }
+                    if !card.cover_template.is_empty() {
+                        settings.insert("template".into(), serde_json::Value::String(card.cover_template.clone()));
+                    }
+                    if !card.cover_theme_preset.is_empty() {
+                        settings.insert("theme".into(), serde_json::Value::String(card.cover_theme_preset.clone()));
+                    }
+                    if !card.cover_ai_palette.is_empty() {
+                        settings.insert("palette".into(), serde_json::Value::String(card.cover_ai_palette.clone()));
+                    }
+                    settings.insert("add_map".into(), serde_json::Value::Bool(card.cover_add_map));
+                    settings.insert("inside_back".into(), serde_json::Value::Bool(card.cover_inside_back));
+                }
                 if card.kind == CardKind::MapChart {
                     settings.insert("map_is_custom".into(), serde_json::Value::Bool(card.map_is_custom));
                     if !card.map_stock_name.is_empty() {
@@ -572,12 +663,26 @@ impl OrchestratorWorkspaceState {
                     settings.insert("map_show_labels".into(), serde_json::Value::Bool(card.map_show_labels));
                     settings.insert("map_show_legend".into(), serde_json::Value::Bool(card.map_show_legend));
                 }
+                if card.hf_enabled {
+                    settings.insert("hf_enabled".into(), serde_json::Value::Bool(true));
+                    settings.insert("hf_scope_forward".into(), serde_json::Value::Bool(card.hf_scope_forward));
+                    if !card.hf_style.is_empty() {
+                        settings.insert("hf_style".into(), serde_json::Value::String(card.hf_style.clone()));
+                    }
+                    settings.insert("hf_sided".into(), serde_json::json!(card.hf_sided));
+                    settings.insert("hf_header_single".into(), serde_json::Value::String(card.hf_header_single.clone()));
+                    settings.insert("hf_header_left".into(), serde_json::Value::String(card.hf_header_left.clone()));
+                    settings.insert("hf_header_right".into(), serde_json::Value::String(card.hf_header_right.clone()));
+                    settings.insert("hf_footer_single".into(), serde_json::Value::String(card.hf_footer_single.clone()));
+                    settings.insert("hf_footer_left".into(), serde_json::Value::String(card.hf_footer_left.clone()));
+                    settings.insert("hf_footer_right".into(), serde_json::Value::String(card.hf_footer_right.clone()));
+                    settings.insert("hf_header_rule".into(), serde_json::Value::Bool(card.hf_header_rule));
+                    settings.insert("hf_footer_rule".into(), serde_json::Value::Bool(card.hf_footer_rule));
+                    settings.insert("hf_header_offset".into(), serde_json::json!(card.hf_header_offset));
+                    settings.insert("hf_footer_offset".into(), serde_json::json!(card.hf_footer_offset));
+                }
                 pubgen_core::PublicationCard {
-                    id: if card.chapter_id.is_empty() {
-                        format!("card_{}", idx + 1)
-                    } else {
-                        card.chapter_id.clone()
-                    },
+                    id: if card.chapter_id.is_empty() { format!("card_{}", idx + 1) } else { card.chapter_id.clone() },
                     kind: match card.kind {
                         CardKind::Cover => pubgen_core::CardKind::Cover,
                         CardKind::Toc => pubgen_core::CardKind::Toc,
@@ -587,16 +692,8 @@ impl OrchestratorWorkspaceState {
                         CardKind::Narrative => pubgen_core::CardKind::Narrative,
                         CardKind::Image => pubgen_core::CardKind::Image,
                     },
-                    scope: if card.scope_new_page {
-                        pubgen_core::CardScope::NewPage
-                    } else {
-                        pubgen_core::CardScope::NewObject
-                    },
-                    source: if card.source.is_empty() || card.source == "Tanpa sumber" {
-                        None
-                    } else {
-                        Some(card.source.clone())
-                    },
+                    scope: if card.scope_new_page { pubgen_core::CardScope::NewPage } else { pubgen_core::CardScope::NewObject },
+                    source: if card.source.is_empty() || card.source == "Tanpa sumber" { None } else { Some(card.source.clone()) },
                     title: card.title.clone(),
                     settings,
                 }
@@ -605,22 +702,14 @@ impl OrchestratorWorkspaceState {
 
         pubgen_core::PublicationMetadata {
             profile_id: self.selected_profile.clone(),
-            layout: if self.page_layout_facing {
-                pubgen_core::PageLayout::Double
-            } else {
-                pubgen_core::PageLayout::Single
-            },
+            layout: if self.page_layout_facing { pubgen_core::PageLayout::Double } else { pubgen_core::PageLayout::Single },
             language: match self.doc_language.as_str() {
                 "English" => pubgen_core::Language::En,
                 "Indonesian-English" => pubgen_core::Language::IdEn,
                 _ => pubgen_core::Language::Id,
             },
             title: self.meta_title.clone(),
-            title_en: if self.meta_subtitle.is_empty() {
-                None
-            } else {
-                Some(self.meta_subtitle.clone())
-            },
+            title_en: if self.meta_subtitle.is_empty() { None } else { Some(self.meta_subtitle.clone()) },
             cards,
             extra,
         }
@@ -640,11 +729,7 @@ pub fn set_state(ctx: &egui::Context, state: OrchestratorWorkspaceState) {
     ctx.data_mut(|d| d.insert_temp(workspace_state_id(), state));
 }
 
-pub fn apply_ingest_report_to_state(
-    state: &mut OrchestratorWorkspaceState,
-    source_name: &str,
-    report: &pubgen_core::excel::IngestReport,
-) {
+pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, source_name: &str, report: &pubgen_core::excel::IngestReport) {
     state.recent_documents = vec![source_name.to_owned()];
     state.meta_title = report.metadata.title.clone();
     state.meta_subtitle = report.metadata.title_en.clone().unwrap_or_default();
@@ -657,7 +742,9 @@ pub fn apply_ingest_report_to_state(
     }
     .into();
 
-    if let Some(no) = report.metadata.extra.get("release_no").or_else(|| report.metadata.extra.get("no")).or_else(|| report.metadata.extra.get("catalogue")) {
+    if let Some(no) =
+        report.metadata.extra.get("release_no").or_else(|| report.metadata.extra.get("no")).or_else(|| report.metadata.extra.get("catalogue"))
+    {
         state.meta_release_no = no.clone();
     }
     if let Some(date) = report.metadata.extra.get("release_date").or_else(|| report.metadata.extra.get("date")) {
@@ -666,7 +753,9 @@ pub fn apply_ingest_report_to_state(
     if let Some(month) = report.metadata.extra.get("release_month").or_else(|| report.metadata.extra.get("month")) {
         state.meta_release_month = month.clone();
     }
-    if let Some(agency) = report.metadata.extra.get("agency").or_else(|| report.metadata.extra.get("pub_office")).or_else(|| report.metadata.extra.get("officename")) {
+    if let Some(agency) =
+        report.metadata.extra.get("agency").or_else(|| report.metadata.extra.get("pub_office")).or_else(|| report.metadata.extra.get("officename"))
+    {
         state.meta_agency = agency.clone();
     }
     if state.meta_subtitle.is_empty() && (!state.meta_release_date.is_empty() || !state.meta_agency.is_empty()) {
@@ -674,11 +763,7 @@ pub fn apply_ingest_report_to_state(
     }
 
     let norm = |prefix: &str, name: &str| {
-        if name.starts_with(prefix) || name.contains('/') {
-            name.to_owned()
-        } else {
-            format!("{prefix}/{name}")
-        }
+        if name.starts_with(prefix) || name.contains('/') { name.to_owned() } else { format!("{prefix}/{name}") }
     };
 
     state.content_files = report
@@ -707,11 +792,7 @@ pub fn apply_ingest_report_to_state(
             .iter()
             .enumerate()
             .map(|(index, card)| {
-                let subtitle = card
-                    .settings
-                    .get("title_en")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let subtitle = card.settings.get("title_en").and_then(|v| v.as_str()).unwrap_or("");
                 let mut pc = PublicationCard::new_with(
                     match card.kind {
                         pubgen_core::CardKind::Cover => CardKind::Cover,
@@ -730,6 +811,106 @@ pub fn apply_ingest_report_to_state(
                     matches!(card.scope, pubgen_core::CardScope::NewPage),
                 );
                 pc.chapter_id = card.id.clone();
+                for (k, v) in &card.settings {
+                    if let Some(s) = v.as_str() {
+                        pc.settings.insert(k.clone(), s.to_string());
+                    } else if let Some(b) = v.as_bool() {
+                        pc.settings.insert(k.clone(), b.to_string());
+                    } else if let Some(n) = v.as_i64() {
+                        pc.settings.insert(k.clone(), n.to_string());
+                    } else if let Some(f) = v.as_f64() {
+                        pc.settings.insert(k.clone(), f.to_string());
+                    }
+                }
+                if pc.kind == CardKind::Cover {
+                    for (k, v) in &report.metadata.extra {
+                        pc.settings.entry(k.clone()).or_insert_with(|| v.clone());
+                    }
+                    if let Some(t) = pc.settings.get("title").or_else(|| pc.settings.get("title1")) {
+                        if !t.is_empty() {
+                            pc.title = format!("Sampul Rilis: {t}");
+                        }
+                    }
+                    if let Some(ten) = pc.settings.get("title_en").or_else(|| pc.settings.get("title2")) {
+                        pc.title_en = ten.clone();
+                    }
+                    if let Some(t2) = pc.settings.get("title2") {
+                        pc.cover_title2 = t2.clone();
+                    }
+                    if let Some(yr) = pc.settings.get("year") {
+                        pc.cover_year = yr.clone();
+                    }
+                    if let Some(vol) = pc.settings.get("volume") {
+                        pc.cover_volume = vol.clone();
+                    }
+                    if let Some(cat) = pc.settings.get("catalogue") {
+                        pc.cover_catalogue = cat.clone();
+                    }
+                    if let Some(cd) = pc.settings.get("code") {
+                        pc.cover_code_num = cd.clone();
+                    }
+                    if let Some(rn) = pc.settings.get("release_no") {
+                        pc.cover_release_no = rn.clone();
+                    } else if !state.meta_release_no.is_empty() {
+                        pc.cover_release_no = state.meta_release_no.clone();
+                    }
+                    if let Some(rd) = pc.settings.get("release_date") {
+                        pc.cover_release_date = rd.clone();
+                    } else if !state.meta_release_date.is_empty() {
+                        pc.cover_release_date = state.meta_release_date.clone();
+                    }
+                    if let Some(rm) = pc.settings.get("release_month") {
+                        pc.cover_release_month = rm.clone();
+                    } else if !state.meta_release_month.is_empty() {
+                        pc.cover_release_month = state.meta_release_month.clone();
+                    }
+                    if let Some(po) = pc.settings.get("pub_office").or_else(|| pc.settings.get("agency")) {
+                        pc.cover_pub_office = po.clone();
+                    } else if !state.meta_agency.is_empty() {
+                        pc.cover_pub_office = state.meta_agency.clone();
+                    }
+                    if let Some(addr) = pc.settings.get("office_address") {
+                        pc.cover_office_address = addr.clone();
+                    }
+                    if let Some(pn) = pc.settings.get("pic_name") {
+                        pc.cover_pic_name = pn.clone();
+                    }
+                    if let Some(pp) = pc.settings.get("pic_photo") {
+                        pc.cover_pic_photo = pp.clone();
+                    }
+                    if let Some(ph) = pc.settings.get("pic_phone") {
+                        pc.cover_pic_phone = ph.clone();
+                    }
+                    if let Some(pe) = pc.settings.get("pic_email") {
+                        pc.cover_pic_email = pe.clone();
+                    }
+                    if let Some(tmpl) = pc.settings.get("template").or_else(|| pc.settings.get("style")) {
+                        pc.cover_template = tmpl.clone();
+                        if let Some(idx) = super::excel::cover_style_index(tmpl) {
+                            pc.cover_style_idx = idx;
+                        }
+                    }
+                    if let Some(th) = pc.settings.get("theme") {
+                        pc.cover_theme_preset = th.clone();
+                    }
+                    if let Some(pal) = pc.settings.get("palette") {
+                        pc.cover_ai_palette = pal.clone();
+                    }
+                    if let Some(src) = &card.source {
+                        pc.source = src.clone();
+                    } else {
+                        pc.source = "csv/COV.csv".into();
+                    }
+                    if pc.subtitle.is_empty() {
+                        pc.subtitle = if !pc.title_en.is_empty() {
+                            pc.title_en.clone()
+                        } else if !pc.cover_release_date.is_empty() || !pc.cover_pub_office.is_empty() {
+                            format!("{} · {}", pc.cover_release_date, pc.cover_pub_office)
+                        } else {
+                            state.meta_subtitle.clone()
+                        };
+                    }
+                }
                 if pc.kind == CardKind::MapChart {
                     if let Some(stk) = card.settings.get("map_stock_name").and_then(|v| v.as_str()) {
                         pc.map_stock_name = stk.to_string();
@@ -761,6 +942,48 @@ pub fn apply_ingest_report_to_state(
                         pc.map_show_legend = leg;
                     }
                 }
+                if let Some(hfe) = card.settings.get("hf_enabled").and_then(|v| v.as_bool()) {
+                    pc.hf_enabled = hfe;
+                }
+                if let Some(fwd) = card.settings.get("hf_scope_forward").and_then(|v| v.as_bool()) {
+                    pc.hf_scope_forward = fwd;
+                }
+                if let Some(style) = card.settings.get("hf_style").and_then(|v| v.as_str()) {
+                    pc.hf_style = style.to_string();
+                }
+                if let Some(sided) = card.settings.get("hf_sided").and_then(|v| v.as_u64()) {
+                    pc.hf_sided = sided as usize;
+                }
+                if let Some(s) = card.settings.get("hf_header_single").and_then(|v| v.as_str()) {
+                    pc.hf_header_single = s.to_string();
+                }
+                if let Some(s) = card.settings.get("hf_header_left").and_then(|v| v.as_str()) {
+                    pc.hf_header_left = s.to_string();
+                }
+                if let Some(s) = card.settings.get("hf_header_right").and_then(|v| v.as_str()) {
+                    pc.hf_header_right = s.to_string();
+                }
+                if let Some(s) = card.settings.get("hf_footer_single").and_then(|v| v.as_str()) {
+                    pc.hf_footer_single = s.to_string();
+                }
+                if let Some(s) = card.settings.get("hf_footer_left").and_then(|v| v.as_str()) {
+                    pc.hf_footer_left = s.to_string();
+                }
+                if let Some(s) = card.settings.get("hf_footer_right").and_then(|v| v.as_str()) {
+                    pc.hf_footer_right = s.to_string();
+                }
+                if let Some(b) = card.settings.get("hf_header_rule").and_then(|v| v.as_bool()) {
+                    pc.hf_header_rule = b;
+                }
+                if let Some(b) = card.settings.get("hf_footer_rule").and_then(|v| v.as_bool()) {
+                    pc.hf_footer_rule = b;
+                }
+                if let Some(n) = card.settings.get("hf_header_offset").and_then(|v| v.as_f64()) {
+                    pc.hf_header_offset = n;
+                }
+                if let Some(n) = card.settings.get("hf_footer_offset").and_then(|v| v.as_f64()) {
+                    pc.hf_footer_offset = n;
+                }
                 pc
             })
             .collect();
@@ -788,25 +1011,27 @@ pub struct HostTabs {
     pub active: usize,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum HostTabAction {
     Activate(usize),
     Close(usize),
     #[default]
     New,
     Open,
+    OpenPath(std::path::PathBuf),
     Import,
+    ImportPath(std::path::PathBuf),
     Save,
     ExportXlsx,
 }
 
 #[allow(deprecated)]
-fn host_tabs_id() -> egui::Id {
+pub(crate) fn host_tabs_id() -> egui::Id {
     egui::Id::new(HOST_TABS_ID)
 }
 
 #[allow(deprecated)]
-fn host_tab_action_id() -> egui::Id {
+pub(crate) fn host_tab_action_id() -> egui::Id {
     egui::Id::new(HOST_TAB_ACTION_ID)
 }
 
@@ -820,42 +1045,167 @@ pub fn take_host_tab_action(ctx: &egui::Context) -> Option<HostTabAction> {
     ctx.data_mut(|d| d.remove_temp(host_tab_action_id()))
 }
 
-/// Draws the workspace tab strip at the top of the Orchestrator panel.
-fn render_host_tabs(ui: &mut Ui, t: &Tokens) -> Option<HostTabAction> {
+/// Trigger an action for the host tab controller (e.g. from File menu commands).
+pub fn trigger_host_tab_action(ctx: &egui::Context, action: HostTabAction) {
+    ctx.data_mut(|d| d.insert_temp(host_tab_action_id(), action));
+    ctx.request_repaint();
+}
+
+/// Tab max width and close button padding around tab title, exactly matching Designcraft document tabs.
+const ORCH_TAB_MAX_W: f32 = 260.0;
+const ORCH_TAB_PAD: f32 = 44.0;
+
+/// Draws the workspace tab strip at the top of the Orchestrator panel, following Designcraft document tabs design.
+fn render_host_tabs(ui: &mut Ui, t: &Tokens, lang: &str) -> Option<HostTabAction> {
     let tabs: HostTabs = ui.ctx().data(|d| d.get_temp(host_tabs_id())).unwrap_or_default();
+    if tabs.titles.is_empty() {
+        return None;
+    }
+
+    let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::hover());
+    let max_w = ORCH_TAB_MAX_W.min(bar.width());
+    let close_label = crate::i18n::tr(lang, "Close");
+    ui.painter().rect_filled(bar, 0.0, t.tab_strip);
+    ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0, t.border));
+
+    let mut x = bar.min.x;
     let mut action = None;
-    egui::Frame::NONE.fill(t.tab_strip).inner_margin(Margin::symmetric(8, 4)).show(ui, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            for (index, (title, dirty)) in tabs.titles.iter().enumerate() {
-                ui.horizontal(|ui| {
-                    if ui.selectable_label(index == tabs.active, format!("{}{}", if *dirty { "*" } else { "" }, title)).clicked() {
-                        action = Some(HostTabAction::Activate(index));
-                    }
-                    if ui.small_button("×").on_hover_text("Close workspace").clicked() {
-                        action = Some(HostTabAction::Close(index));
-                    }
-                });
-            }
-            if ui.button("+ New").on_hover_text("New publication workspace").clicked() {
-                action = Some(HostTabAction::New);
-            }
-            if ui.button("+ Open .pubgen").on_hover_text("Open a publication package in a new tab").clicked() {
-                action = Some(HostTabAction::Open);
-            }
-            if ui.button("+ Import XLSX").on_hover_text("Import an Excel manifest into a new tab").clicked() {
-                action = Some(HostTabAction::Import);
-            }
-            ui.separator();
-            if ui.button("Save").on_hover_text("Save the active publication package").clicked() {
-                action = Some(HostTabAction::Save);
-            }
-            if ui.button("Export XLSX").on_hover_text("Export the active workspace to Excel").clicked() {
-                action = Some(HostTabAction::ExportXlsx);
-            }
-        });
-    });
-    ui.add_space(2.0);
+
+    for (index, (title, dirty)) in tabs.titles.iter().enumerate() {
+        let is_active = index == tabs.active;
+        let color = if is_active { t.text_strong } else { t.text_dim };
+        let name = format!("{}{}", if *dirty { "*" } else { "" }, crate::rtl::isolate(title));
+        let name_max = (max_w - ORCH_TAB_PAD).max(20.0);
+        let galley = crate::rtl::truncated(ui.ctx(), &name, semibold(11.5), color, name_max);
+        let elided = galley.elided;
+        let w = (galley.size().x + ORCH_TAB_PAD).max(if is_active { 210.0 } else { 150.0 }).min(max_w);
+        let r = Rect::from_min_size(pos2(x, bar.min.y), vec2(w, 28.0));
+
+        let resp = ui.interact(r, ui.scope_id().with(("orchtab", index)), Sense::click());
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, title));
+        let resp = if elided {
+            resp.on_hover_ui(|ui| {
+                let _ = crate::rtl::label(ui, title);
+            })
+        } else {
+            resp
+        };
+
+        ui.painter().rect_filled(r, 0.0, if is_active { t.panel } else { t.tab_strip });
+
+        let cr = Rect::from_center_size(pos2(r.min.x + 18.0, r.center().y), vec2(14.0, 14.0));
+        let cresp = ui.interact(cr, ui.scope_id().with(("orchclose", index)), Sense::click());
+        cresp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, format!("{close_label} {title}")));
+        ui.painter().text(
+            cr.center(),
+            Align2::CENTER_CENTER,
+            "×",
+            FontId::proportional(14.0),
+            if cresp.hovered() { t.text_strong } else { t.text_dim },
+        );
+
+        let text = ui.painter().with_clip_rect(r);
+        text.galley(pos2(r.min.x + 32.0, r.center().y - galley.size().y / 2.0), galley, Color32::WHITE);
+        ui.painter().line_segment([r.right_top(), r.right_bottom()], Stroke::new(1.0, t.border));
+
+        if cresp.clicked() {
+            action = Some(HostTabAction::Close(index));
+        } else if resp.clicked() {
+            action = Some(HostTabAction::Activate(index));
+        }
+        x += w;
+    }
+
     action
+}
+
+pub(crate) fn sync_card_to_pubgen_state(card: &PublicationCard, state: &OrchestratorWorkspaceState, pubgen_st: &mut super::state::PubgenState) {
+    let headline = card
+        .settings
+        .get("title")
+        .or_else(|| card.settings.get("title1"))
+        .cloned()
+        .unwrap_or_else(|| card.title.strip_prefix("Sampul Rilis: ").unwrap_or(&card.title).to_string());
+    if !headline.trim().is_empty() {
+        pubgen_st.cover_title = headline;
+    } else if !state.meta_title.trim().is_empty() {
+        pubgen_st.cover_title = state.meta_title.clone();
+    }
+
+    if !card.title_en.trim().is_empty() {
+        pubgen_st.cover_title_en = card.title_en.clone();
+    } else if let Some(ten) = card.settings.get("title_en") {
+        pubgen_st.cover_title_en = ten.clone();
+    }
+
+    if !card.cover_title2.trim().is_empty() {
+        pubgen_st.cover_title2 = card.cover_title2.clone();
+    } else if let Some(t2) = card.settings.get("title2") {
+        pubgen_st.cover_title2 = t2.clone();
+    }
+
+    if !card.cover_year.trim().is_empty() {
+        pubgen_st.cover_year = card.cover_year.clone();
+    } else if let Some(yr) = card.settings.get("year") {
+        pubgen_st.cover_year = yr.clone();
+    }
+
+    if !card.cover_volume.trim().is_empty() {
+        pubgen_st.cover_volume = card.cover_volume.clone();
+    } else if let Some(vol) = card.settings.get("volume") {
+        pubgen_st.cover_volume = vol.clone();
+    }
+
+    if !card.cover_catalogue.trim().is_empty() {
+        pubgen_st.cover_catalogue = card.cover_catalogue.clone();
+    } else if let Some(cat) = card.settings.get("catalogue") {
+        pubgen_st.cover_catalogue = cat.clone();
+    }
+
+    if !card.cover_code_num.trim().is_empty() {
+        pubgen_st.cover_code_num = card.cover_code_num.clone();
+    } else if let Some(cd) = card.settings.get("code") {
+        pubgen_st.cover_code_num = cd.clone();
+    }
+
+    if !card.cover_pub_office.trim().is_empty() {
+        pubgen_st.cover_agency_text = card.cover_pub_office.clone();
+    } else if let Some(po) = card.settings.get("pub_office").or_else(|| card.settings.get("agency")) {
+        pubgen_st.cover_agency_text = po.clone();
+    } else if !state.meta_agency.trim().is_empty() {
+        pubgen_st.cover_agency_text = state.meta_agency.clone();
+    }
+
+    if !card.cover_office_address.trim().is_empty() {
+        pubgen_st.cover_office_address = card.cover_office_address.clone();
+    } else if let Some(addr) = card.settings.get("office_address") {
+        pubgen_st.cover_office_address = addr.clone();
+    }
+
+    pubgen_st.cover_style = card.cover_style_idx;
+    pubgen_st.cover_add_map = card.cover_add_map;
+    pubgen_st.cover_include_inside_back = card.cover_inside_back;
+
+    if let Some(h) = card.settings.get("image_hero").or_else(|| card.settings.get("imagehero")).or_else(|| card.settings.get("image")) {
+        if !h.trim().is_empty() {
+            pubgen_st.cover_image_skyline = h.clone();
+        }
+    }
+    if let Some(l) = card.settings.get("image_landscape").or_else(|| card.settings.get("imagelandscape")).or_else(|| card.settings.get("landscape")) {
+        if !l.trim().is_empty() {
+            pubgen_st.cover_image_landscape = l.clone();
+        }
+    }
+    if let Some(lg) = card.settings.get("logo").or_else(|| card.settings.get("officelogo")) {
+        if !lg.trim().is_empty() {
+            pubgen_st.cover_image_logo = lg.clone();
+        }
+    }
+    if let Some(ev) = card.settings.get("event_theme").or_else(|| card.settings.get("themeevent")).or_else(|| card.settings.get("backcover")) {
+        if !ev.trim().is_empty() {
+            pubgen_st.cover_image_back = ev.clone();
+        }
+    }
 }
 
 pub fn sync_external_workspace(
@@ -877,6 +1227,11 @@ pub fn sync_external_workspace(
         warnings: Vec::new(),
     };
     apply_ingest_report_to_state(&mut state, source_name, &report);
+    super::with_state(ctx, |pubgen_st| {
+        if let Some(cov_card) = state.cards.iter().find(|c| c.kind == CardKind::Cover) {
+            sync_card_to_pubgen_state(cov_card, &state, pubgen_st);
+        }
+    });
     set_state(ctx, state);
 }
 
@@ -887,15 +1242,7 @@ enum ProfileCardKind {
     Generic,
 }
 
-fn render_profile_card(
-    ui: &mut Ui,
-    t: &Tokens,
-    kind: ProfileCardKind,
-    title: &str,
-    subtitle: &str,
-    spec: &str,
-    accent: Color32,
-) -> bool {
+fn render_profile_card(ui: &mut Ui, t: &Tokens, kind: ProfileCardKind, title: &str, subtitle: &str, spec: &str, accent: Color32) -> bool {
     let card_w = 230.0f32;
     let card_h = 165.0f32;
     let (rect, resp) = ui.allocate_exact_size(vec2(card_w, card_h), Sense::click());
@@ -922,8 +1269,12 @@ fn render_profile_card(
             ui.painter().rect(p_left, 1.0, Color32::WHITE, Stroke::new(0.8, Color32::from_rgb(180, 180, 180)), egui::StrokeKind::Inside);
             ui.painter().rect(p_right, 1.0, Color32::WHITE, Stroke::new(0.8, Color32::from_rgb(180, 180, 180)), egui::StrokeKind::Inside);
             // Blue guide lines
-            ui.painter().line_segment([pos2(p_left.min.x + 4.0, p_left.max.y - 6.0), pos2(p_left.max.x - 4.0, p_left.max.y - 6.0)], Stroke::new(1.0, accent));
-            ui.painter().line_segment([pos2(p_right.min.x + 4.0, p_right.min.y + 6.0), pos2(p_right.max.x - 4.0, p_right.min.y + 6.0)], Stroke::new(1.0, accent));
+            ui.painter()
+                .line_segment([pos2(p_left.min.x + 4.0, p_left.max.y - 6.0), pos2(p_left.max.x - 4.0, p_left.max.y - 6.0)], Stroke::new(1.0, accent));
+            ui.painter().line_segment(
+                [pos2(p_right.min.x + 4.0, p_right.min.y + 6.0), pos2(p_right.max.x - 4.0, p_right.min.y + 6.0)],
+                Stroke::new(1.0, accent),
+            );
         }
         ProfileCardKind::Brs => {
             // Single page with blue header and orange accent
@@ -933,9 +1284,18 @@ fn render_profile_card(
             ui.painter().rect(p, 1.0, Color32::WHITE, Stroke::new(0.8, Color32::from_rgb(180, 180, 180)), egui::StrokeKind::Inside);
             let banner = Rect::from_min_size(p.min, vec2(pw, 10.0));
             ui.painter().rect_filled(banner, 1.0, Color32::from_rgb(0, 114, 188));
-            ui.painter().line_segment([pos2(p.min.x, p.min.y + 10.0), pos2(p.max.x, p.min.y + 10.0)], Stroke::new(1.0, Color32::from_rgb(245, 135, 31)));
-            ui.painter().rect_filled(Rect::from_min_size(pos2(p.min.x + 3.0, p.min.y + 14.0), vec2(pw - 6.0, 3.0)), 0.0, Color32::from_rgb(190, 190, 190));
-            ui.painter().rect_filled(Rect::from_min_size(pos2(p.min.x + 3.0, p.min.y + 20.0), vec2(pw - 6.0, 14.0)), 0.0, Color32::from_rgb(230, 235, 245));
+            ui.painter()
+                .line_segment([pos2(p.min.x, p.min.y + 10.0), pos2(p.max.x, p.min.y + 10.0)], Stroke::new(1.0, Color32::from_rgb(245, 135, 31)));
+            ui.painter().rect_filled(
+                Rect::from_min_size(pos2(p.min.x + 3.0, p.min.y + 14.0), vec2(pw - 6.0, 3.0)),
+                0.0,
+                Color32::from_rgb(190, 190, 190),
+            );
+            ui.painter().rect_filled(
+                Rect::from_min_size(pos2(p.min.x + 3.0, p.min.y + 20.0), vec2(pw - 6.0, 14.0)),
+                0.0,
+                Color32::from_rgb(230, 235, 245),
+            );
         }
         ProfileCardKind::Generic => {
             // Single page with ruled lines
@@ -958,12 +1318,7 @@ fn render_profile_card(
     resp.clicked()
 }
 
-fn render_recent_documents(
-    ui: &mut Ui,
-    state: &mut OrchestratorWorkspaceState,
-    t: &Tokens,
-    lang: &str,
-) {
+fn render_recent_documents(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, lang: &str) {
     if state.recent_documents.is_empty() {
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().min(720.0), 54.0), Sense::hover());
         ui.painter().rect(rect, 8.0, t.panel, Stroke::new(1.0, t.divider), egui::StrokeKind::Inside);
@@ -979,7 +1334,13 @@ fn render_recent_documents(
             let filename = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.clone());
             let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width().min(720.0), 44.0), Sense::click());
             let hov = resp.hovered();
-            ui.painter().rect(rect, 6.0, if hov { t.hover } else { t.panel }, Stroke::new(1.0, if hov { t.accent_strong } else { t.divider }), egui::StrokeKind::Inside);
+            ui.painter().rect(
+                rect,
+                6.0,
+                if hov { t.hover } else { t.panel },
+                Stroke::new(1.0, if hov { t.accent_strong } else { t.divider }),
+                egui::StrokeKind::Inside,
+            );
             ui.painter().text(pos2(rect.min.x + 14.0, rect.min.y + 14.0), Align2::LEFT_CENTER, &filename, semibold(12.5), t.text_strong);
             ui.painter().text(pos2(rect.min.x + 14.0, rect.min.y + 30.0), Align2::LEFT_CENTER, path, FontId::proportional(10.5), t.text_dim);
             if resp.clicked() {
@@ -990,224 +1351,191 @@ fn render_recent_documents(
         if let Some(doc) = clicked_doc {
             let p = std::path::Path::new(&doc);
             let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
-            if (ext == "xlsx" || ext == "xlsm") && p.is_file() {
-                if let Ok(report) = pubgen_core::excel::ingest_workbook(p) {
-                    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(&doc);
-                    apply_ingest_report_to_state(state, name, &report);
-                }
+            if ext == "pubgen" && p.is_file() {
+                trigger_host_tab_action(ui.ctx(), HostTabAction::OpenPath(p.to_path_buf()));
+            } else if (ext == "xlsx" || ext == "xlsm") && p.is_file() {
+                trigger_host_tab_action(ui.ctx(), HostTabAction::ImportPath(p.to_path_buf()));
+            } else {
+                state.execution_log.push(format!("[{}] Membuka berkas {}", format_now(), doc));
+                state.view = OrchestratorView::Studio;
             }
-            state.execution_log.push(format!("[{}] Membuka berkas {}", format_now(), doc));
-            state.view = OrchestratorView::Studio;
         }
     }
 }
 
-pub fn render_orchestrator_home(
-    app: &mut DesignApp,
-    ui: &mut Ui,
-    state: &mut OrchestratorWorkspaceState,
-    t: &Tokens,
-    lang: &str,
-) {
+pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, lang: &str) {
     let r = ui.available_rect_before_wrap();
     ui.painter().rect_filled(r, 0.0, t.panel_darker);
 
-    ScrollArea::vertical()
-        .id_salt("pubgen_home_scroll")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
+    ScrollArea::vertical().id_salt("pubgen_home_scroll").auto_shrink([false, false]).show(ui, |ui| {
+        ui.add_space(32.0);
+        let max_w = 980.0f32.min(ui.available_width() - 64.0);
+        ui.horizontal(|ui| {
             ui.add_space(32.0);
-            let max_w = 980.0f32.min(ui.available_width() - 64.0);
-            ui.horizontal(|ui| {
-                ui.add_space(32.0);
-                ui.allocate_ui_with_layout(vec2(max_w, 0.0), Layout::top_down(Align::Min), |ui| {
-                    // HERO
-                    ui.horizontal(|ui| {
-                        let (icon_r, _) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::hover());
-                        ui.painter().rect_filled(icon_r, 10.0, Color32::from_rgb(37, 99, 235));
-                        ui.painter().text(icon_r.center(), Align2::CENTER_CENTER, "📊", FontId::proportional(22.0), Color32::WHITE);
-                        ui.add_space(14.0);
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(crate::i18n::tr(lang, "Welcome to Publication Orchestrator")).font(semibold(24.0)).color(t.text_strong));
-                            let subtitle = if lang.starts_with("id") {
-                                "Tata letak publikasi statistik cetak dan digital — cepat, terbuka, dan otomatis."
-                            } else {
-                                "Page layout for print and screen — fast, open and scriptable."
-                            };
-                            ui.label(RichText::new(subtitle).size(13.5).color(t.text_dim));
-                        });
+            ui.allocate_ui_with_layout(vec2(max_w, 0.0), Layout::top_down(Align::Min), |ui| {
+                // HERO
+                ui.horizontal(|ui| {
+                    let (icon_r, _) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::hover());
+                    ui.painter().rect_filled(icon_r, 10.0, Color32::from_rgb(37, 99, 235));
+                    ui.painter().text(icon_r.center(), Align2::CENTER_CENTER, "📊", FontId::proportional(22.0), Color32::WHITE);
+                    ui.add_space(14.0);
+                    ui.vertical(|ui| {
+                        ui.label(
+                            RichText::new(crate::i18n::tr(lang, "Welcome to Publication Orchestrator")).font(semibold(24.0)).color(t.text_strong),
+                        );
+                        let subtitle = if lang.starts_with("id") {
+                            "Tata letak publikasi statistik cetak dan digital — cepat, terbuka, dan otomatis."
+                        } else {
+                            "Page layout for print and screen — fast, open and scriptable."
+                        };
+                        ui.label(RichText::new(subtitle).size(13.5).color(t.text_dim));
                     });
+                });
 
-                    ui.add_space(24.0);
+                ui.add_space(24.0);
 
-                    // ACTIONS ROW
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 10.0;
-                        let open_label = if lang.starts_with("id") { "📂 Buka Berkas (.pubgen)" } else { "📂 Open file (.pubgen)" };
-                        if ui.add(
+                // ACTIONS ROW
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    let open_label = if lang.starts_with("id") { "📂 Buka Berkas (.pubgen)" } else { "📂 Open file (.pubgen)" };
+                    if ui
+                        .add(
                             egui::Button::new(RichText::new(open_label).size(13.0).color(Color32::WHITE))
                                 .fill(t.accent_strong)
                                 .corner_radius(16.0)
-                                .min_size(vec2(0.0, 32.0))
-                        ).clicked() {
-                            let ctx = ui.ctx().clone();
-                            let _ = app.ask_open("pubgenPackage", crate::app::file_dialogs::Bound::App, move |_app, path: String| {
-                                let p = std::path::Path::new(&path);
-                                let opened = pubgen_core::container::open_pubgen(p).map_err(|error| format!("Gagal membuka paket .pubgen: {error}"))?;
-                                sync_external_workspace(&ctx, &path, &opened.metadata, &opened.content.csv, &opened.content.md, &opened.content.assets);
-                                let mut st = get_state(&ctx);
-                                st.view = OrchestratorView::Studio;
-                                st.execution_log.push(format!("[{}] Membuka {}", format_now(), path));
-                                set_state(&ctx, st);
-                                ctx.request_repaint();
-                                Ok(serde_json::Value::Null)
-                            });
-                        }
+                                .min_size(vec2(0.0, 32.0)),
+                        )
+                        .clicked()
+                    {
+                        trigger_host_tab_action(ui.ctx(), HostTabAction::Open);
+                    }
 
-                        let import_label = if lang.starts_with("id") { "📊 Impor Manifest (XLSX)" } else { "📊 Import Manifest (XLSX)" };
-                        if ui.add(
-                            egui::Button::new(RichText::new(import_label).size(13.0))
-                                .corner_radius(16.0)
-                                .min_size(vec2(0.0, 32.0))
-                        ).clicked() {
-                            let ctx = ui.ctx().clone();
-                            let _ = app.ask_open("dataMerge", crate::app::file_dialogs::Bound::App, move |_app, path: String| {
-                                let p = std::path::Path::new(&path);
-                                let mut st = get_state(&ctx);
-                                if let Ok(report) = pubgen_core::excel::ingest_workbook(p) {
-                                    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(path.as_str());
-                                    apply_ingest_report_to_state(&mut st, name, &report);
-                                }
-                                if !st.recent_documents.contains(&path) {
-                                    st.recent_documents.insert(0, path.clone());
-                                }
-                                st.execution_log.push(format!("[{}] Impor manifest {}", format_now(), path));
-                                st.view = OrchestratorView::Studio;
-                                set_state(&ctx, st);
-                                ctx.request_repaint();
-                                Ok(serde_json::Value::Null)
-                            });
-                        }
+                    let import_label = if lang.starts_with("id") { "📊 Impor Manifest (XLSX)" } else { "📊 Import Manifest (XLSX)" };
+                    if ui.add(egui::Button::new(RichText::new(import_label).size(13.0)).corner_radius(16.0).min_size(vec2(0.0, 32.0))).clicked() {
+                        trigger_host_tab_action(ui.ctx(), HostTabAction::Import);
+                    }
 
-                        let brs_label = if lang.starts_with("id") { "📰 Sampel BRS" } else { "📰 Sample BRS" };
-                        if ui.add(
-                            egui::Button::new(RichText::new(brs_label).size(13.0))
-                                .corner_radius(16.0)
-                                .min_size(vec2(0.0, 32.0))
-                        ).clicked() {
-                            let sample = std::path::Path::new("plan/pubgen/samples/brs/ntp202610.xlsx");
-                            if sample.is_file() {
-                                if let Ok(report) = pubgen_core::excel::ingest_workbook(sample) {
-                                    apply_ingest_report_to_state(state, "ntp202610.xlsx", &report);
-                                }
-                            }
+                    let brs_label = if lang.starts_with("id") { "📰 Sampel BRS" } else { "📰 Sample BRS" };
+                    if ui.add(egui::Button::new(RichText::new(brs_label).size(13.0)).corner_radius(16.0).min_size(vec2(0.0, 32.0))).clicked() {
+                        let sample = std::path::Path::new("plan/pubgen/samples/brs/ntp202610.xlsx");
+                        if sample.is_file() {
+                            trigger_host_tab_action(ui.ctx(), HostTabAction::ImportPath(sample.to_path_buf()));
+                        } else {
                             state.selected_profile = "bps_brs".into();
                             state.page_layout_facing = true;
                             state.view = OrchestratorView::Studio;
                         }
+                    }
 
-                        let dda_label = if lang.starts_with("id") { "📑 Sampel DDA" } else { "📑 Sample DDA" };
-                        if ui.add(
-                            egui::Button::new(RichText::new(dda_label).size(13.0))
-                                .corner_radius(16.0)
-                                .min_size(vec2(0.0, 32.0))
-                        ).clicked() {
+                    let dda_label = if lang.starts_with("id") { "📑 Sampel DDA" } else { "📑 Sample DDA" };
+                    if ui.add(egui::Button::new(RichText::new(dda_label).size(13.0)).corner_radius(16.0).min_size(vec2(0.0, 32.0))).clicked() {
+                        let sample = std::path::Path::new("plan/pubgen/samples/SINGLE_LANG/BAB_02_2025.xlsx");
+                        if sample.is_file() {
+                            trigger_host_tab_action(ui.ctx(), HostTabAction::ImportPath(sample.to_path_buf()));
+                        } else {
                             state.selected_profile = "bps_dda".into();
                             state.page_layout_facing = true;
                             state.view = OrchestratorView::Studio;
                         }
+                    }
 
-                        if !state.cards.is_empty() {
-                            let studio_label = if lang.starts_with("id") { "➡ Buka Studio Aktif" } else { "➡ Open Active Studio" };
-                            if ui.add(
+                    if !state.cards.is_empty() {
+                        let studio_label = if lang.starts_with("id") { "➡ Buka Studio Aktif" } else { "➡ Open Active Studio" };
+                        if ui
+                            .add(
                                 egui::Button::new(RichText::new(studio_label).size(13.0).color(Color32::from_rgb(16, 185, 129)))
                                     .corner_radius(16.0)
-                                    .min_size(vec2(0.0, 32.0))
-                            ).clicked() {
-                                state.view = OrchestratorView::Studio;
-                            }
-                        }
-                    });
-
-                    ui.add_space(28.0);
-
-                    // SECTION: PUBLICATION PROFILES
-                    let sec_prof = if lang.starts_with("id") { "Profil Publikasi" } else { "Publication Profiles" };
-                    ui.label(RichText::new(sec_prof).font(semibold(15.0)).color(t.text_strong));
-                    ui.add_space(10.0);
-
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 16.0;
-
-                        // 1. DDA BPS
-                        if render_profile_card(
-                            ui, t,
-                            ProfileCardKind::Dda,
-                            "DDA BPS",
-                            "Daerah Dalam Angka",
-                            "A4 (210 × 297 mm) • Facing Pages",
-                            Color32::from_rgb(59, 130, 246),
-                        ) {
-                            state.selected_profile = "bps_dda".into();
-                            state.page_layout_facing = true;
-                            state.paper_size = "A4 (210 x 297 mm)".into();
+                                    .min_size(vec2(0.0, 32.0)),
+                            )
+                            .clicked()
+                        {
                             state.view = OrchestratorView::Studio;
                         }
-
-                        // 2. BRS BPS
-                        if render_profile_card(
-                            ui, t,
-                            ProfileCardKind::Brs,
-                            "BRS BPS",
-                            "Berita Resmi Statistik",
-                            "A4 (210 × 297 mm) • Single Page",
-                            Color32::from_rgb(245, 158, 11),
-                        ) {
-                            state.selected_profile = "bps_brs".into();
-                            state.page_layout_facing = false;
-                            state.paper_size = "A4 (210 x 297 mm)".into();
-                            state.view = OrchestratorView::Studio;
-                        }
-
-                        // 3. General
-                        let gen_sub = if lang.starts_with("id") { "Laporan Standar Umum" } else { "Generic Publication Report" };
-                        if render_profile_card(
-                            ui, t,
-                            ProfileCardKind::Generic,
-                            "General",
-                            gen_sub,
-                            "A4 (210 × 297 mm) • Single Page",
-                            Color32::from_rgb(156, 163, 175),
-                        ) {
-                            state.selected_profile = "generic_report".into();
-                            state.page_layout_facing = false;
-                            state.paper_size = "A4 (210 x 297 mm)".into();
-                            state.view = OrchestratorView::Studio;
-                        }
-                    });
-
-                    ui.add_space(28.0);
-
-                    // SECTION: RECENT OPENED DOCUMENTS
-                    let sec_rec = if lang.starts_with("id") { "Dokumen Terakhir Dibuka (*.pubgen)" } else { "Recent Opened Documents (*.pubgen)" };
-                    ui.label(RichText::new(sec_rec).font(semibold(15.0)).color(t.text_strong));
-                    ui.add_space(10.0);
-
-                    render_recent_documents(ui, state, t, lang);
-                    ui.add_space(32.0);
+                    }
                 });
+
+                ui.add_space(28.0);
+
+                // SECTION: PUBLICATION PROFILES
+                let sec_prof = if lang.starts_with("id") { "Profil Publikasi" } else { "Publication Profiles" };
+                ui.label(RichText::new(sec_prof).font(semibold(15.0)).color(t.text_strong));
+                ui.add_space(10.0);
+
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 16.0;
+
+                    // 1. DDA BPS
+                    if render_profile_card(
+                        ui,
+                        t,
+                        ProfileCardKind::Dda,
+                        "DDA BPS",
+                        "Daerah Dalam Angka",
+                        "A4 (210 × 297 mm) • Facing Pages",
+                        Color32::from_rgb(59, 130, 246),
+                    ) {
+                        state.selected_profile = "bps_dda".into();
+                        state.page_layout_facing = true;
+                        state.paper_size = "A4 (210 x 297 mm)".into();
+                        state.view = OrchestratorView::Studio;
+                    }
+
+                    // 2. BRS BPS
+                    if render_profile_card(
+                        ui,
+                        t,
+                        ProfileCardKind::Brs,
+                        "BRS BPS",
+                        "Berita Resmi Statistik",
+                        "A4 (210 × 297 mm) • Single Page",
+                        Color32::from_rgb(245, 158, 11),
+                    ) {
+                        state.selected_profile = "bps_brs".into();
+                        state.page_layout_facing = false;
+                        state.paper_size = "A4 (210 x 297 mm)".into();
+                        state.view = OrchestratorView::Studio;
+                    }
+
+                    // 3. General
+                    let gen_sub = if lang.starts_with("id") { "Laporan Standar Umum" } else { "Generic Publication Report" };
+                    if render_profile_card(
+                        ui,
+                        t,
+                        ProfileCardKind::Generic,
+                        "General",
+                        gen_sub,
+                        "A4 (210 × 297 mm) • Single Page",
+                        Color32::from_rgb(156, 163, 175),
+                    ) {
+                        state.selected_profile = "generic_report".into();
+                        state.page_layout_facing = false;
+                        state.paper_size = "A4 (210 x 297 mm)".into();
+                        state.view = OrchestratorView::Studio;
+                    }
+                });
+
+                ui.add_space(28.0);
+
+                // SECTION: RECENT OPENED DOCUMENTS
+                let sec_rec = if lang.starts_with("id") { "Dokumen Terakhir Dibuka (*.pubgen)" } else { "Recent Opened Documents (*.pubgen)" };
+                ui.label(RichText::new(sec_rec).font(semibold(15.0)).color(t.text_strong));
+                ui.add_space(10.0);
+
+                render_recent_documents(ui, state, t, lang);
+                ui.add_space(32.0);
             });
         });
+    });
 }
 
 /// Main entry point for rendering the Orchestrator workspace inside CentralPanel.
 pub fn show(app: &mut DesignApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    if let Some(action) = render_host_tabs(ui, &t) {
+    let lang = app.ui.language.clone();
+    if let Some(action) = render_host_tabs(ui, &t, &lang) {
         ui.ctx().data_mut(|d| d.insert_temp(host_tab_action_id(), action));
     }
     let mut state = get_state(ui.ctx());
-    let lang = app.ui.language.clone();
 
     if state.view == OrchestratorView::Home {
         render_orchestrator_home(app, ui, &mut state, &t, &lang);
@@ -1272,17 +1600,27 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
 }
 
 /// Collapsed iconic right dock (InDesign parity: icon strip with expand toggle)
-fn render_collapsed_dock(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, width: f32, total_height: f32, lang: &str) {
+fn render_collapsed_dock(
+    _app: &mut DesignApp,
+    ui: &mut Ui,
+    state: &mut OrchestratorWorkspaceState,
+    t: &Tokens,
+    width: f32,
+    total_height: f32,
+    lang: &str,
+) {
     ui.set_width(width);
     ui.set_height(total_height);
 
     let tab_bar_height = 27.0f32;
 
     // Header strip with visible expand button
-    let expand_btn = ui.add_sized(
-        [width, tab_bar_height],
-        egui::Button::new(RichText::new("«").font(semibold(13.0)).color(t.text_strong)).fill(t.tab_strip).frame(false),
-    ).on_hover_text(format!("{} (Expand Panels)", crate::i18n::tr(lang, "Expand Panels")));
+    let expand_btn = ui
+        .add_sized(
+            [width, tab_bar_height],
+            egui::Button::new(RichText::new("«").font(semibold(13.0)).color(t.text_strong)).fill(t.tab_strip).frame(false),
+        )
+        .on_hover_text(format!("{} (Expand Panels)", crate::i18n::tr(lang, "Expand Panels")));
     if expand_btn.clicked() {
         state.right_dock_expanded = true;
     }
@@ -1333,7 +1671,15 @@ fn render_collapsed_dock(_app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestr
 }
 
 /// Expanded right dock with tabs (InDesign parity: tab strip + collapse button)
-fn render_expanded_dock(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, width: f32, total_height: f32, lang: &str) {
+fn render_expanded_dock(
+    app: &mut DesignApp,
+    ui: &mut Ui,
+    state: &mut OrchestratorWorkspaceState,
+    t: &Tokens,
+    width: f32,
+    total_height: f32,
+    lang: &str,
+) {
     ui.set_width(width);
     ui.set_height(total_height);
 
@@ -1348,8 +1694,9 @@ fn render_expanded_dock(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrat
 
     // Collapse to icons button on the left of the tab strip
     let collapse_rect = Rect::from_min_size(pos2(strip.min.x + 2.0, strip.min.y + 2.0), vec2(collapse_btn_w - 4.0, tab_bar_height - 4.0));
-    let collapse_resp =
-        ui.interact(collapse_rect, ui.scope_id().with("dock_collapse_btn"), Sense::click()).on_hover_text(format!("{} (Collapse to Icons)", crate::i18n::tr(lang, "Collapse to Icons")));
+    let collapse_resp = ui
+        .interact(collapse_rect, ui.scope_id().with("dock_collapse_btn"), Sense::click())
+        .on_hover_text(format!("{} (Collapse to Icons)", crate::i18n::tr(lang, "Collapse to Icons")));
     if collapse_resp.hovered() {
         ui.painter().rect_filled(collapse_rect, 3.0, t.hover);
     }
@@ -1362,9 +1709,8 @@ fn render_expanded_dock(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrat
     // Tab 1: Sumber & Konten
     let tab1_rect = Rect::from_min_size(pos2(strip.min.x + collapse_btn_w, strip.min.y), vec2(tab_w, tab_bar_height));
     let is_tab1 = state.right_dock_tab == OrchestratorRightTab::SumberKonten;
-    let tab1_resp = ui
-        .interact(tab1_rect, ui.scope_id().with("dock_tab_1"), Sense::click())
-        .on_hover_text(crate::i18n::tr(lang, "Sources & Content"));
+    let tab1_resp =
+        ui.interact(tab1_rect, ui.scope_id().with("dock_tab_1"), Sense::click()).on_hover_text(crate::i18n::tr(lang, "Sources & Content"));
     if is_tab1 {
         ui.painter().rect_filled(tab1_rect, 0.0, t.panel);
         ui.painter().line_segment([tab1_rect.left_top(), tab1_rect.right_top()], Stroke::new(2.0, t.accent));
@@ -1391,9 +1737,8 @@ fn render_expanded_dock(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrat
     let tab2_w = (width - (collapse_btn_w + tab_w)).max(0.0);
     let tab2_rect = Rect::from_min_size(pos2(strip.min.x + collapse_btn_w + tab_w, strip.min.y), vec2(tab2_w, tab_bar_height));
     let is_tab2 = state.right_dock_tab == OrchestratorRightTab::ProfilEksekusi;
-    let tab2_resp = ui
-        .interact(tab2_rect, ui.scope_id().with("dock_tab_2"), Sense::click())
-        .on_hover_text(crate::i18n::tr(lang, "Profile & Execution"));
+    let tab2_resp =
+        ui.interact(tab2_rect, ui.scope_id().with("dock_tab_2"), Sense::click()).on_hover_text(crate::i18n::tr(lang, "Profile & Execution"));
     if is_tab2 {
         ui.painter().rect_filled(tab2_rect, 0.0, t.panel);
         ui.painter().line_segment([tab2_rect.left_top(), tab2_rect.right_top()], Stroke::new(2.0, t.accent));
@@ -1484,8 +1829,10 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         if ui
             .add_sized(
                 [btn_w, 22.0],
-                egui::Button::new(RichText::new(format!("+ {}", crate::i18n::tr(lang, "Import Source"))).font(FontId::proportional(10.5)).color(t.text))
-                    .corner_radius(CornerRadius::same(3)),
+                egui::Button::new(
+                    RichText::new(format!("+ {}", crate::i18n::tr(lang, "Import Source"))).font(FontId::proportional(10.5)).color(t.text),
+                )
+                .corner_radius(CornerRadius::same(3)),
             )
             .on_hover_text(crate::i18n::tr(lang, "Import Source"))
             .clicked()
@@ -1499,6 +1846,11 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                         let mut st = get_state(&ctx);
                         let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(&path);
                         apply_ingest_report_to_state(&mut st, name, &report);
+                        super::with_state(&ctx, |pubgen_st| {
+                            if let Some(cov_card) = st.cards.iter().find(|c| c.kind == CardKind::Cover) {
+                                sync_card_to_pubgen_state(cov_card, &st, pubgen_st);
+                            }
+                        });
                         set_state(&ctx, st);
                         ctx.request_repaint();
                     }
@@ -1529,8 +1881,10 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         if ui
             .add_sized(
                 [btn_w, 22.0],
-                egui::Button::new(RichText::new(format!("📊 {}", crate::i18n::tr(lang, "Import Excel"))).font(FontId::proportional(10.5)).color(t.text))
-                    .corner_radius(CornerRadius::same(3)),
+                egui::Button::new(
+                    RichText::new(format!("📊 {}", crate::i18n::tr(lang, "Import Excel"))).font(FontId::proportional(10.5)).color(t.text),
+                )
+                .corner_radius(CornerRadius::same(3)),
             )
             .on_hover_text(crate::i18n::tr(lang, "Import Excel"))
             .clicked()
@@ -1542,6 +1896,11 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                     let mut st = get_state(&ctx);
                     let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(&path);
                     apply_ingest_report_to_state(&mut st, name, &report);
+                    super::with_state(&ctx, |pubgen_st| {
+                        if let Some(cov_card) = st.cards.iter().find(|c| c.kind == CardKind::Cover) {
+                            sync_card_to_pubgen_state(cov_card, &st, pubgen_st);
+                        }
+                    });
                     set_state(&ctx, st);
                     ctx.request_repaint();
                 }
@@ -1552,7 +1911,10 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         if ui
             .add_sized(
                 [btn_w, 22.0],
-                egui::Button::new(RichText::new(format!("🎨 {}", crate::i18n::tr(lang, "Import Metadata"))).font(FontId::proportional(10.5)).color(t.text)).corner_radius(CornerRadius::same(3)),
+                egui::Button::new(
+                    RichText::new(format!("🎨 {}", crate::i18n::tr(lang, "Import Metadata"))).font(FontId::proportional(10.5)).color(t.text),
+                )
+                .corner_radius(CornerRadius::same(3)),
             )
             .on_hover_text(crate::i18n::tr(lang, "Import Metadata"))
             .clicked()
@@ -1588,8 +1950,7 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                     let combo_w = (ui.available_width() - 4.0).max(120.0);
                     craft_ui::ComboBox::from_id_salt("meta_page_layout_combo")
                         .selected_text(
-                            RichText::new(if state.page_layout_facing { facing_label } else { single_label })
-                                .font(FontId::proportional(10.5)),
+                            RichText::new(if state.page_layout_facing { facing_label } else { single_label }).font(FontId::proportional(10.5)),
                         )
                         .width(combo_w)
                         .show_ui(ui, |ui| {
@@ -1659,7 +2020,9 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         // Section 2: Collapsible Pengaturan Dokumen (Metadata Form - Image 4)
         let meta_hdr = ui.selectable_label(
             false,
-            RichText::new(format!("{} {}", if state.metadata_open { "▼" } else { "▶" }, crate::i18n::tr(lang, "Document Settings"))).font(semibold(12.0)).color(t.text_strong),
+            RichText::new(format!("{} {}", if state.metadata_open { "▼" } else { "▶" }, crate::i18n::tr(lang, "Document Settings")))
+                .font(semibold(12.0))
+                .color(t.text_strong),
         );
         if meta_hdr.clicked() {
             state.metadata_open = !state.metadata_open;
@@ -1716,9 +2079,14 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                 // Group 1: CSV
                 let csv_hdr = ui.selectable_label(
                     false,
-                    RichText::new(format!("{} {} ({})", if state.csv_group_open { "▼" } else { "▶" }, crate::i18n::tr(lang, "Data Tables (CSV)"), csv_files.len()))
-                        .font(semibold(11.0))
-                        .color(t.text),
+                    RichText::new(format!(
+                        "{} {} ({})",
+                        if state.csv_group_open { "▼" } else { "▶" },
+                        crate::i18n::tr(lang, "Data Tables (CSV)"),
+                        csv_files.len()
+                    ))
+                    .font(semibold(11.0))
+                    .color(t.text),
                 );
                 if csv_hdr.clicked() {
                     state.csv_group_open = !state.csv_group_open;
@@ -1740,9 +2108,14 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                 // Group 2: Markdown
                 let md_hdr = ui.selectable_label(
                     false,
-                    RichText::new(format!("{} {} ({})", if state.md_group_open { "▼" } else { "▶" }, crate::i18n::tr(lang, "Narrative (Markdown)"), md_files.len()))
-                        .font(semibold(11.0))
-                        .color(t.text),
+                    RichText::new(format!(
+                        "{} {} ({})",
+                        if state.md_group_open { "▼" } else { "▶" },
+                        crate::i18n::tr(lang, "Narrative (Markdown)"),
+                        md_files.len()
+                    ))
+                    .font(semibold(11.0))
+                    .color(t.text),
                 );
                 if md_hdr.clicked() {
                     state.md_group_open = !state.md_group_open;
@@ -1807,8 +2180,10 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
 
         if ui
             .add(
-                egui::Button::new(RichText::new(format!("🔍 {}", crate::i18n::tr(lang, "Run QA Audit"))).font(FontId::proportional(10.5)).color(t.text))
-                    .corner_radius(CornerRadius::same(3)),
+                egui::Button::new(
+                    RichText::new(format!("🔍 {}", crate::i18n::tr(lang, "Run QA Audit"))).font(FontId::proportional(10.5)).color(t.text),
+                )
+                .corner_radius(CornerRadius::same(3)),
             )
             .on_hover_text(crate::i18n::tr(lang, "Run QA Audit"))
             .clicked()
@@ -1823,7 +2198,9 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
             if ui
                 .add(
                     egui::Button::new(
-                        RichText::new(format!("👁 {}", crate::i18n::tr(lang, "View Latest PDF"))).font(FontId::proportional(10.5)).color(Color32::from_rgb(56, 189, 248)),
+                        RichText::new(format!("👁 {}", crate::i18n::tr(lang, "View Latest PDF")))
+                            .font(FontId::proportional(10.5))
+                            .color(Color32::from_rgb(56, 189, 248)),
                     )
                     .corner_radius(CornerRadius::same(3)),
                 )
@@ -1838,9 +2215,17 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if state.last_qa_clean {
-                ui.label(RichText::new(format!("● {}", crate::i18n::tr(lang, "Clean (QA Fit 100%)"))).font(semibold(10.5)).color(Color32::from_rgb(74, 222, 128)));
+                ui.label(
+                    RichText::new(format!("● {}", crate::i18n::tr(lang, "Clean (QA Fit 100%)")))
+                        .font(semibold(10.5))
+                        .color(Color32::from_rgb(74, 222, 128)),
+                );
             } else {
-                ui.label(RichText::new(format!("● {}", crate::i18n::tr(lang, "Issues Detected"))).font(semibold(10.5)).color(Color32::from_rgb(248, 113, 113)));
+                ui.label(
+                    RichText::new(format!("● {}", crate::i18n::tr(lang, "Issues Detected")))
+                        .font(semibold(10.5))
+                        .color(Color32::from_rgb(248, 113, 113)),
+                );
             }
         });
     });
@@ -1990,9 +2375,20 @@ fn paint_card_thumbnail(painter: &egui::Painter, rect: Rect, kind: CardKind, t: 
             painter.rect(rect, CornerRadius::same(2), t.panel_darker, Stroke::new(1.0, Color32::from_rgb(99, 102, 241)), StrokeKind::Inside);
             for line in 0..4 {
                 let y = rect.min.y + 10.0 + (line as f32 * 8.0);
-                painter.rect_filled(Rect::from_min_size(egui::pos2(rect.min.x + 6.0, y), vec2(14.0, 2.0)), CornerRadius::same(1), Color32::from_rgb(165, 180, 252));
-                painter.line_segment([egui::pos2(rect.min.x + 22.0, y + 1.0), egui::pos2(rect.min.x + 28.0, y + 1.0)], Stroke::new(1.0, Color32::from_rgb(129, 140, 248)));
-                painter.rect_filled(Rect::from_min_size(egui::pos2(rect.min.x + 30.0, y), vec2(4.0, 2.0)), CornerRadius::same(1), Color32::from_rgb(199, 210, 254));
+                painter.rect_filled(
+                    Rect::from_min_size(egui::pos2(rect.min.x + 6.0, y), vec2(14.0, 2.0)),
+                    CornerRadius::same(1),
+                    Color32::from_rgb(165, 180, 252),
+                );
+                painter.line_segment(
+                    [egui::pos2(rect.min.x + 22.0, y + 1.0), egui::pos2(rect.min.x + 28.0, y + 1.0)],
+                    Stroke::new(1.0, Color32::from_rgb(129, 140, 248)),
+                );
+                painter.rect_filled(
+                    Rect::from_min_size(egui::pos2(rect.min.x + 30.0, y), vec2(4.0, 2.0)),
+                    CornerRadius::same(1),
+                    Color32::from_rgb(199, 210, 254),
+                );
             }
         }
     }
@@ -2157,7 +2553,11 @@ fn render_facing_card(ui: &mut Ui, idx: usize, card: &PublicationCard, card_w: f
         child_ui.horizontal(|ui| {
             ui.label(RichText::new(format!("{} {}", crate::i18n::tr(lang, "Pg."), card.page)).font(semibold(10.0)).color(t.text_dim));
             ui.add_space(8.0);
-            let edit_resp = ui.link(RichText::new(format!("✎ {}", crate::i18n::tr(lang, "Click to edit"))).font(FontId::proportional(10.0)).color(Color32::from_rgb(56, 189, 248)));
+            let edit_resp = ui.link(
+                RichText::new(format!("✎ {}", crate::i18n::tr(lang, "Click to edit")))
+                    .font(FontId::proportional(10.0))
+                    .color(Color32::from_rgb(56, 189, 248)),
+            );
             if edit_resp.clicked() {
                 clicked_edit = true;
             }
@@ -2425,9 +2825,11 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
     if ui
         .add_sized(
             [ui.available_width(), btn_h],
-            egui::Button::new(RichText::new(format!("⚡ {}", crate::i18n::tr(lang, "Generate Publication"))).font(semibold(12.0)).color(Color32::WHITE))
-                .fill(Color32::from_rgb(14, 116, 144))
-                .corner_radius(CornerRadius::same(4)),
+            egui::Button::new(
+                RichText::new(format!("⚡ {}", crate::i18n::tr(lang, "Generate Publication"))).font(semibold(12.0)).color(Color32::WHITE),
+            )
+            .fill(Color32::from_rgb(14, 116, 144))
+            .corner_radius(CornerRadius::same(4)),
         )
         .on_hover_text(crate::i18n::tr(lang, "Generate Publication"))
         .clicked()
@@ -2445,9 +2847,11 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
     if ui
         .add_sized(
             [ui.available_width(), btn_h],
-            egui::Button::new(RichText::new(format!("🚀 {}", crate::i18n::tr(lang, "Generate & Publish PDF"))).font(semibold(12.0)).color(Color32::WHITE))
-                .fill(Color32::from_rgb(22, 101, 52))
-                .corner_radius(CornerRadius::same(4)),
+            egui::Button::new(
+                RichText::new(format!("🚀 {}", crate::i18n::tr(lang, "Generate & Publish PDF"))).font(semibold(12.0)).color(Color32::WHITE),
+            )
+            .fill(Color32::from_rgb(22, 101, 52))
+            .corner_radius(CornerRadius::same(4)),
         )
         .on_hover_text(crate::i18n::tr(lang, "Generate & Publish PDF"))
         .clicked()
@@ -2550,10 +2954,42 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
     let mut apply_all_tables = false;
 
     let page_num = state.cards[idx].page;
-    let modal_w = 560.0f32;
+    let is_newly_opened = state.last_editing_card_idx != Some(idx);
+    state.last_editing_card_idx = Some(idx);
+
+    if is_newly_opened {
+        let card = &state.cards[idx];
+        if card.kind != CardKind::Cover {
+            super::with_state(ctx, |pubgen_st| {
+                if card.hf_enabled && !card.hf_style.is_empty() {
+                    pubgen_st.hf_style = card.hf_style.clone();
+                    pubgen_st.hf_sided = card.hf_sided;
+                    pubgen_st.hf_header_single = card.hf_header_single.clone();
+                    pubgen_st.hf_header_left = card.hf_header_left.clone();
+                    pubgen_st.hf_header_right = card.hf_header_right.clone();
+                    pubgen_st.hf_footer_single = card.hf_footer_single.clone();
+                    pubgen_st.hf_footer_left = card.hf_footer_left.clone();
+                    pubgen_st.hf_footer_right = card.hf_footer_right.clone();
+                    pubgen_st.hf_header_rule = card.hf_header_rule;
+                    pubgen_st.hf_footer_rule = card.hf_footer_rule;
+                    pubgen_st.hf_header_offset = card.hf_header_offset;
+                    pubgen_st.hf_footer_offset = card.hf_footer_offset;
+                }
+                pubgen_st.hf_scope = if card.hf_scope_forward { 4 } else { 3 };
+                pubgen_st.hf_scope_start = card.page.max(1);
+                pubgen_st.hf_scope_end = card.page.max(1);
+            });
+        } else {
+            super::with_state(ctx, |pubgen_st| {
+                sync_card_to_pubgen_state(card, state, pubgen_st);
+            });
+        }
+    }
+
+    let modal_w = 600.0f32;
     let available_h = (ctx.content_rect().height() - 80.0).max(200.0);
-    let max_modal_h = 620.0f32.min(available_h);
-    let scroll_h = max_modal_h - 100.0;
+    let max_modal_h = 680.0f32.min(available_h);
+    let scroll_h = max_modal_h - 90.0;
     let content_w = modal_w - 24.0;
 
     egui::Window::new(format!("{} — {} {}", crate::i18n::tr(lang, "Edit Publication Card"), crate::i18n::tr(lang, "Pg."), page_num))
@@ -2686,18 +3122,140 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                 match card.kind {
                     CardKind::Cover => {
                         egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                            let ctx = ui.ctx().clone();
-                            super::with_state(&ctx, |pubgen_st| {
-                                if pubgen_st.cover_title.trim().is_empty() && !card.title.trim().is_empty() {
-                                    pubgen_st.cover_title = card.title.clone();
-                                }
-                                if pubgen_st.cover_title_en.trim().is_empty() && !card.title_en.trim().is_empty() {
-                                    pubgen_st.cover_title_en = card.title_en.clone();
-                                }
-                                super::widgets::card_cover_body_ui(app, ui, pubgen_st, t);
-                                card.title = pubgen_st.cover_title.clone();
-                                card.title_en = pubgen_st.cover_title_en.clone();
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(crate::i18n::tr(lang, "Source:")).font(semibold(11.0)).color(t.text_strong));
+                                craft_ui::ComboBox::from_id_salt("cover_source_select_box")
+                                    .selected_text(if card.source.is_empty() { "Tanpa sumber" } else { &card.source })
+                                    .width(220.0)
+                                    .show_ui(ui, |ui| {
+                                        if ui.selectable_label(card.source == "Tanpa sumber", "Tanpa sumber").clicked() {
+                                            card.source = "Tanpa sumber".into();
+                                        }
+                                        for f in &state.content_files {
+                                            if ui.selectable_label(card.source == f.path, &f.path).clicked() {
+                                                card.source = f.path.clone();
+                                            }
+                                        }
+                                    });
                             });
+                            ui.add_space(4.0);
+
+                            ui.horizontal(|ui| {
+                                ui.selectable_value(&mut card.cover_tab, 0, RichText::new("🎨 Desain Sampul").font(semibold(11.0)));
+                                ui.selectable_value(&mut card.cover_tab, 1, RichText::new("📋 Metadata Rilis & PIC").font(semibold(11.0)));
+                                ui.selectable_value(&mut card.cover_tab, 2, RichText::new("🔑 Kunci & Nilai Lembar COV").font(semibold(11.0)));
+                            });
+                            ui.separator();
+
+                            if card.cover_tab == 0 {
+                                let ctx = ui.ctx().clone();
+                                super::with_state(&ctx, |pubgen_st| {
+                                    super::widgets::card_cover_body_ui(app, ui, pubgen_st, t);
+                                    let new_title = pubgen_st.cover_title.trim();
+                                    if !new_title.is_empty() {
+                                        card.title = format!("Sampul Rilis: {new_title}");
+                                        card.settings.insert("title".into(), new_title.to_string());
+                                    }
+                                    card.title_en = pubgen_st.cover_title_en.clone();
+                                    card.settings.insert("title_en".into(), pubgen_st.cover_title_en.clone());
+                                    card.cover_title2 = pubgen_st.cover_title2.clone();
+                                    card.settings.insert("title2".into(), pubgen_st.cover_title2.clone());
+                                    card.cover_year = pubgen_st.cover_year.clone();
+                                    card.settings.insert("year".into(), pubgen_st.cover_year.clone());
+                                    card.cover_volume = pubgen_st.cover_volume.clone();
+                                    card.settings.insert("volume".into(), pubgen_st.cover_volume.clone());
+                                    card.cover_catalogue = pubgen_st.cover_catalogue.clone();
+                                    card.settings.insert("catalogue".into(), pubgen_st.cover_catalogue.clone());
+                                    card.cover_code_num = pubgen_st.cover_code_num.clone();
+                                    card.settings.insert("code".into(), pubgen_st.cover_code_num.clone());
+                                    card.cover_pub_office = pubgen_st.cover_agency_text.clone();
+                                    card.settings.insert("pub_office".into(), pubgen_st.cover_agency_text.clone());
+                                    card.settings.insert("agency".into(), pubgen_st.cover_agency_text.clone());
+                                    card.cover_office_address = pubgen_st.cover_office_address.clone();
+                                    card.settings.insert("office_address".into(), pubgen_st.cover_office_address.clone());
+                                    card.cover_style_idx = pubgen_st.cover_style;
+                                    card.cover_add_map = pubgen_st.cover_add_map;
+                                    card.cover_inside_back = pubgen_st.cover_include_inside_back;
+                                });
+                            } else if card.cover_tab == 1 {
+                                egui::Grid::new("cover_release_pic_grid").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
+                                    ui.label(RichText::new("Nomor Rilis:").font(semibold(11.0)).color(t.text));
+                                    if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_release_no)).changed() {
+                                        card.settings.insert("release_no".into(), card.cover_release_no.clone());
+                                        state.meta_release_no = card.cover_release_no.clone();
+                                    }
+                                    ui.end_row();
+
+                                    ui.label(RichText::new("Tanggal Rilis:").font(semibold(11.0)).color(t.text));
+                                    if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_release_date)).changed() {
+                                        card.settings.insert("release_date".into(), card.cover_release_date.clone());
+                                        state.meta_release_date = card.cover_release_date.clone();
+                                    }
+                                    ui.end_row();
+
+                                    ui.label(RichText::new("Bulan Rilis:").font(semibold(11.0)).color(t.text));
+                                    if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_release_month)).changed() {
+                                        card.settings.insert("release_month".into(), card.cover_release_month.clone());
+                                        state.meta_release_month = card.cover_release_month.clone();
+                                    }
+                                    ui.end_row();
+
+                                    ui.label(RichText::new("Instansi Publikasi:").font(semibold(11.0)).color(t.text));
+                                    if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_pub_office)).changed() {
+                                        card.settings.insert("pub_office".into(), card.cover_pub_office.clone());
+                                        card.settings.insert("agency".into(), card.cover_pub_office.clone());
+                                        state.meta_agency = card.cover_pub_office.clone();
+                                    }
+                                    ui.end_row();
+
+                                    ui.label(RichText::new("Nama PIC / Kontak:").font(semibold(11.0)).color(t.text));
+                                    if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_pic_name)).changed() {
+                                        card.settings.insert("pic_name".into(), card.cover_pic_name.clone());
+                                    }
+                                    ui.end_row();
+
+                                    ui.label(RichText::new("Foto PIC:").font(semibold(11.0)).color(t.text));
+                                    if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_pic_photo)).changed() {
+                                        card.settings.insert("pic_photo".into(), card.cover_pic_photo.clone());
+                                    }
+                                    ui.end_row();
+
+                                    ui.label(RichText::new("Telepon PIC:").font(semibold(11.0)).color(t.text));
+                                    if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_pic_phone)).changed() {
+                                        card.settings.insert("pic_phone".into(), card.cover_pic_phone.clone());
+                                    }
+                                    ui.end_row();
+
+                                    ui.label(RichText::new("Email PIC:").font(semibold(11.0)).color(t.text));
+                                    if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_pic_email)).changed() {
+                                        card.settings.insert("pic_email".into(), card.cover_pic_email.clone());
+                                    }
+                                    ui.end_row();
+                                });
+                            } else {
+                                ui.label(RichText::new("Seluruh Kunci & Nilai Lembar COV:").font(semibold(11.0)).color(t.text_strong));
+                                ui.add_space(4.0);
+                                egui::ScrollArea::vertical().id_salt("cov_kv_scroll").max_height(280.0).show(ui, |ui| {
+                                    egui::Grid::new("cov_kv_grid").striped(true).num_columns(2).spacing(vec2(12.0, 4.0)).show(ui, |ui| {
+                                        ui.label(RichText::new("Kunci (Key)").font(semibold(10.5)).color(t.text_dim));
+                                        ui.label(RichText::new("Nilai (Value)").font(semibold(10.5)).color(t.text_dim));
+                                        ui.end_row();
+
+                                        let mut keys_to_update: Vec<(String, String)> = Vec::new();
+                                        for (k, v) in &card.settings {
+                                            ui.label(RichText::new(k).font(FontId::monospace(10.5)).color(t.accent));
+                                            let mut val_buf = v.clone();
+                                            if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut val_buf)).changed() {
+                                                keys_to_update.push((k.clone(), val_buf));
+                                            }
+                                            ui.end_row();
+                                        }
+                                        for (k, v) in keys_to_update {
+                                            card.settings.insert(k, v);
+                                        }
+                                    });
+                                });
+                            }
                         });
                     }
                     CardKind::Table => {
@@ -3020,6 +3578,66 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                         }
                     });
                 }
+
+                // Section 5: Pengaturan Header & Footer (Header-Footer Setup for this publication page)
+                if card.kind != CardKind::Cover {
+                    let card_page = card.page.max(1);
+                    egui::Frame::NONE
+                        .fill(t.panel)
+                        .stroke(Stroke::new(1.0, t.field_border))
+                        .corner_radius(CornerRadius::same(4))
+                        .inner_margin(Margin::same(8))
+                        .show(ui, |ui| {
+                            ui.label(RichText::new("📑 Pengaturan Header & Footer:").font(semibold(11.0)).color(t.text_strong));
+                            ui.add_space(3.0);
+
+                            let ctx = ui.ctx().clone();
+                            super::with_state(&ctx, |pubgen_st| {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(crate::i18n::tr(lang, "Apply Option:")).font(semibold(10.5)).color(t.text_strong));
+                                    let is_forward = card.hf_scope_forward;
+                                    if ui.selectable_label(!is_forward, format!("📄 {}", crate::i18n::tr(lang, "Apply for this page only"))).clicked() {
+                                        card.hf_scope_forward = false;
+                                        pubgen_st.hf_scope = 3;
+                                        pubgen_st.hf_scope_start = card_page;
+                                        pubgen_st.hf_scope_end = card_page;
+                                    }
+                                    if ui.selectable_label(is_forward, format!("📑 {}", crate::i18n::tr(lang, "Apply from this page forward"))).clicked() {
+                                        card.hf_scope_forward = true;
+                                        pubgen_st.hf_scope = 4;
+                                        pubgen_st.hf_scope_start = card_page;
+                                    }
+                                });
+
+                                // Keep pubgen_st scope synchronized with card's page
+                                if pubgen_st.hf_scope == 3 {
+                                    pubgen_st.hf_scope_start = card_page;
+                                    pubgen_st.hf_scope_end = card_page;
+                                } else if pubgen_st.hf_scope == 4 {
+                                    pubgen_st.hf_scope_start = card_page;
+                                }
+
+                                ui.add_space(4.0);
+                                super::header_footer::card_header_footer_body_ui(app, ui, pubgen_st, t);
+
+                                // Sync values back to card
+                                card.hf_enabled = true;
+                                card.hf_scope_forward = pubgen_st.hf_scope == 4;
+                                card.hf_style = pubgen_st.hf_style.clone();
+                                card.hf_sided = pubgen_st.hf_sided;
+                                card.hf_header_single = pubgen_st.hf_header_single.clone();
+                                card.hf_header_left = pubgen_st.hf_header_left.clone();
+                                card.hf_header_right = pubgen_st.hf_header_right.clone();
+                                card.hf_footer_single = pubgen_st.hf_footer_single.clone();
+                                card.hf_footer_left = pubgen_st.hf_footer_left.clone();
+                                card.hf_footer_right = pubgen_st.hf_footer_right.clone();
+                                card.hf_header_rule = pubgen_st.hf_header_rule;
+                                card.hf_footer_rule = pubgen_st.hf_footer_rule;
+                                card.hf_header_offset = pubgen_st.hf_header_offset;
+                                card.hf_footer_offset = pubgen_st.hf_footer_offset;
+                            });
+                        });
+                }
             });
 
             ui.separator();
@@ -3078,6 +3696,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
         }
         state.card_delete_confirm = false;
         state.editing_card_idx = None;
+        state.last_editing_card_idx = None;
     } else if insert_before {
         let new_card = PublicationCard::new_with(state.new_card_kind, "Item Baru", "Draf konten", "Manual", idx + 1, true);
         state.cards.insert(idx, new_card);
@@ -3085,6 +3704,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
             c.page = i + 1;
         }
         state.editing_card_idx = Some(idx);
+        state.last_editing_card_idx = None;
     } else if insert_after {
         let new_card = PublicationCard::new_with(state.new_card_kind, "Item Baru", "Draf konten", "Manual", idx + 2, true);
         state.cards.insert(idx + 1, new_card);
@@ -3092,9 +3712,16 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
             c.page = i + 1;
         }
         state.editing_card_idx = Some(idx + 1);
+        state.last_editing_card_idx = None;
     } else if close {
+        if state.cards.get(idx).map(|c| c.kind != CardKind::Cover).unwrap_or(false) && app.session.active().is_some() {
+            super::with_state(ctx, |st| {
+                let _ = super::header_footer::execute_apply_header_footer(app, st);
+            });
+        }
         state.card_delete_confirm = false;
         state.editing_card_idx = None;
+        state.last_editing_card_idx = None;
     }
 }
 
@@ -3136,12 +3763,9 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
     let mut chosen_action = None;
 
     let guard_title = format!("⚠️ {}", crate::i18n::tr(lang, "Compilation Safety Guard"));
-    egui::Window::new(guard_title)
-        .collapsible(false)
-        .resizable(false)
-        .fixed_size([460.0, 240.0])
-        .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, |ui| {
+    egui::Window::new(guard_title).collapsible(false).resizable(false).fixed_size([460.0, 240.0]).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).show(
+        ctx,
+        |ui| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
 
             ui.label(
@@ -3195,7 +3819,8 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
                     }
                 });
             });
-        });
+        },
+    );
 
     if close {
         state.show_guard_dialog = false;
@@ -3323,14 +3948,7 @@ mod tests {
 
     #[test]
     fn test_card_kind_map_chart_and_rule_based_defaults() {
-        let card = PublicationCard::new_with(
-            CardKind::MapChart,
-            "Peta Tematik Sebaran NTP",
-            "Peta Kloroplet",
-            "maps/jabar.geojson",
-            15,
-            true,
-        );
+        let card = PublicationCard::new_with(CardKind::MapChart, "Peta Tematik Sebaran NTP", "Peta Kloroplet", "maps/jabar.geojson", 15, true);
         assert_eq!(card.kind, CardKind::MapChart);
         assert_eq!(card.kind.icon(), "🗺️");
         assert_eq!(card.map_chart_type, "Choropleth");
@@ -3338,6 +3956,86 @@ mod tests {
         assert!(card.map_show_legend);
         assert_eq!(card.tag1, "Peta Tematik");
         assert_eq!(card.tag2, "Halaman Baru");
+    }
+
+    #[test]
+    fn test_publication_card_header_footer_scope_and_roundtrip() {
+        let mut state = OrchestratorWorkspaceState::default();
+        // Cover card (idx 0)
+        assert_eq!(state.cards[0].kind, CardKind::Cover);
+
+        // Modify non-cover card (idx 1, Narrative on page 2)
+        state.cards[1].hf_enabled = true;
+        state.cards[1].hf_scope_forward = false; // "This page only"
+        state.cards[1].hf_style = "Corporate Report".into();
+        state.cards[1].hf_header_single = "Chapter 1".into();
+
+        // Modify non-cover card (idx 2, Table on page 3)
+        state.cards[2].hf_enabled = true;
+        state.cards[2].hf_scope_forward = true; // "This page forward"
+        state.cards[2].hf_style = "hf-dda".into();
+
+        // Export to metadata
+        let metadata = state.to_metadata();
+        let card1_meta = &metadata.cards[1];
+        assert_eq!(card1_meta.settings.get("hf_enabled").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(card1_meta.settings.get("hf_scope_forward").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(card1_meta.settings.get("hf_style").and_then(|v| v.as_str()), Some("Corporate Report"));
+        assert_eq!(card1_meta.settings.get("hf_header_single").and_then(|v| v.as_str()), Some("Chapter 1"));
+
+        let card2_meta = &metadata.cards[2];
+        assert_eq!(card2_meta.settings.get("hf_enabled").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(card2_meta.settings.get("hf_scope_forward").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(card2_meta.settings.get("hf_style").and_then(|v| v.as_str()), Some("hf-dda"));
+    }
+
+    #[test]
+    fn test_card_edit_modal_header_footer_form_scope_sync() {
+        let ctx = egui::Context::default();
+        let mut state = OrchestratorWorkspaceState::default();
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let t = Tokens::get(&ctx);
+
+        // 1. Cover card: does not set hf_scope on pubgen_st
+        state.editing_card_idx = Some(0);
+        let mut output = ctx.run_ui(Default::default(), |ctx| {
+            render_card_edit_modal(&mut app, ctx, &mut state, &t, "en");
+        });
+        output.textures_delta.clear();
+        assert!(!state.cards[0].hf_enabled, "cover card should not have hf enabled");
+
+        // Close cover modal
+        state.editing_card_idx = None;
+
+        // 2. Non-cover card (e.g. card idx 1, Narrative):
+        state.editing_card_idx = Some(1);
+        let mut output2 = ctx.run_ui(Default::default(), |ctx| {
+            render_card_edit_modal(&mut app, ctx, &mut state, &t, "en");
+        });
+        output2.textures_delta.clear();
+
+        // Card 1 on page 2 defaults to "This page only" (scope 3)
+        assert!(state.cards[1].hf_enabled, "non-cover card should enable hf on render");
+        assert!(!state.cards[1].hf_scope_forward, "default apply scope is this page only");
+        crate::dock::pubgen::with_state(&ctx, |pubgen_st| {
+            assert_eq!(pubgen_st.hf_scope, 3, "scope should be 3 (This Page Only)");
+            assert_eq!(pubgen_st.hf_scope_start, 2, "start page should match card.page (2)");
+        });
+
+        // 3. Close modal, set card to "This page forward" and re-open
+        state.editing_card_idx = None;
+        state.last_editing_card_idx = None;
+        state.cards[1].hf_scope_forward = true;
+        state.editing_card_idx = Some(1);
+        let mut output3 = ctx.run_ui(Default::default(), |ctx| {
+            render_card_edit_modal(&mut app, ctx, &mut state, &t, "en");
+        });
+        output3.textures_delta.clear();
+
+        crate::dock::pubgen::with_state(&ctx, |pubgen_st| {
+            assert_eq!(pubgen_st.hf_scope, 4, "scope should be 4 (This Page Forward)");
+            assert_eq!(pubgen_st.hf_scope_start, 2, "start page should match card.page (2)");
+        });
     }
 
     #[test]
@@ -3372,6 +4070,24 @@ mod tests {
             assert!(!state.content_files.is_empty());
             assert!(state.content_files.iter().any(|f| f.path.starts_with("csv/")));
             assert!(state.content_files.iter().any(|f| f.path.starts_with("md/")));
+
+            // Verify sheet COV is converted to CSV and updates card Cover
+            assert!(state.content_files.iter().any(|f| f.path == "csv/COV.csv"), "COV converted to csv/COV.csv");
+            assert!(state.cached_content.contains_key("csv/COV.csv"));
+            let cov_card = state.cards.first().expect("Cover card");
+            assert_eq!(cov_card.kind, CardKind::Cover);
+            assert_eq!(cov_card.source, "csv/COV.csv");
+            assert_eq!(cov_card.cover_release_no, "61/10/32/Th. XXVIII");
+            assert_eq!(cov_card.cover_release_date, "1 Oktober 2026");
+            assert_eq!(cov_card.cover_release_month, "September 2026");
+            assert_eq!(cov_card.cover_pub_office, "BADAN PUSAT STATISTIK PROVINSI JAWA BARAT");
+            assert!(cov_card.settings.contains_key("release_no"));
+
+            // Verify syncing card cover values to PubgenState
+            let mut pubgen_st = crate::dock::pubgen::PubgenState::default();
+            sync_card_to_pubgen_state(cov_card, &state, &mut pubgen_st);
+            assert_eq!(pubgen_st.cover_title, "Perkembangan Nilai Tukar Petani");
+            assert_eq!(pubgen_st.cover_agency_text, "BADAN PUSAT STATISTIK PROVINSI JAWA BARAT");
         }
     }
 
@@ -3453,14 +4169,8 @@ mod tests {
         stock_card.map_data_csv = "maps/contoh.csv".into();
         state.cards.push(stock_card);
 
-        let mut custom_card = PublicationCard::new_with(
-            CardKind::MapChart,
-            "Peta Tematik Khusus",
-            "Custom GeoJSON Map",
-            "maps/custom_border.geojson",
-            6,
-            false,
-        );
+        let mut custom_card =
+            PublicationCard::new_with(CardKind::MapChart, "Peta Tematik Khusus", "Custom GeoJSON Map", "maps/custom_border.geojson", 6, false);
         custom_card.map_is_custom = true;
         custom_card.map_custom_geojson = "maps/custom_border.geojson".into();
         custom_card.map_data_csv = "maps/data_custom.csv".into();
@@ -3501,5 +4211,24 @@ mod tests {
         assert!(res_custom.map_is_custom);
         assert_eq!(res_custom.map_custom_geojson, "maps/custom_border.geojson");
         assert_eq!(res_custom.map_data_csv, "maps/data_custom.csv");
+    }
+
+    #[test]
+    fn test_host_tabs_strip_layout_and_actions() {
+        let ctx = egui::Context::default();
+        let titles = vec![("Publication 1".to_string(), false), ("Publication 2".to_string(), true)];
+        set_host_tabs(&ctx, titles, 1);
+
+        let t = Tokens::get(&ctx);
+        let mut out = ctx.run_ui(Default::default(), |ui| {
+            let action = render_host_tabs(ui, &t, "en");
+            assert_eq!(action, None); // No clicks simulated
+        });
+        out.textures_delta.clear();
+
+        // Trigger action via trigger_host_tab_action helper
+        trigger_host_tab_action(&ctx, HostTabAction::Activate(0));
+        assert_eq!(take_host_tab_action(&ctx), Some(HostTabAction::Activate(0)));
+        assert_eq!(take_host_tab_action(&ctx), None);
     }
 }

@@ -527,7 +527,7 @@ pub struct PubgenState {
     pub hf_custom_name: String,
     #[serde(default)]
     pub hf_sided: usize,
-    /// 0 = all pages, 1 = one section, 2 = a page range.
+    /// 0 = all pages, 1 = one section, 2 = a page range, 3 = this page only, 4 = this page forward.
     #[serde(default)]
     pub hf_scope: usize,
     /// 0-based index into the document's sections (engine expects the index, UI shows 1-based).

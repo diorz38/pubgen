@@ -28,8 +28,8 @@ impl DesignApp {
                 return;
             }
             #[cfg(feature = "pubgen")]
-            let orchestrator_has_workspace = crate::menus::pubgen_bar::is_orchestrator_mode(ctx)
-                && crate::dock::pubgen::workspace::get_state(ctx).has_active_workspace();
+            let orchestrator_has_workspace =
+                crate::menus::pubgen_bar::is_orchestrator_mode(ctx) && crate::dock::pubgen::workspace::get_state(ctx).has_active_workspace();
             #[cfg(not(feature = "pubgen"))]
             let orchestrator_has_workspace = false;
 
@@ -39,8 +39,10 @@ impl DesignApp {
             if self.quitting.is_none() && !has_unsaved_work {
                 return;
             }
-            let approved =
-                self.quitting.as_ref().is_some_and(|q| q.pending.is_none()) && self.ui.dialog.is_none() && self.next_unapproved_document().is_none() && !orchestrator_has_workspace;
+            let approved = self.quitting.as_ref().is_some_and(|q| q.pending.is_none())
+                && self.ui.dialog.is_none()
+                && self.next_unapproved_document().is_none()
+                && !orchestrator_has_workspace;
             if approved {
                 // Commit only when the backend receives the final close, after checking for
                 // edits that arrived since the last answer. Closing also discards recovery data.
@@ -176,9 +178,7 @@ impl DesignApp {
     /// Show the next unapproved document, or request a final close that revalidates all approvals.
     fn ask_next_unsaved(&mut self, ctx: &egui::Context) {
         #[cfg(feature = "pubgen")]
-        if crate::menus::pubgen_bar::is_orchestrator_mode(ctx)
-            && crate::dock::pubgen::workspace::get_state(ctx).has_active_workspace()
-        {
+        if crate::menus::pubgen_bar::is_orchestrator_mode(ctx) && crate::dock::pubgen::workspace::get_state(ctx).has_active_workspace() {
             if self.ui.dialog.is_none() {
                 self.ui.dialog = Some(crate::dialogs::Dialog::new("closeWorkspace", json!({"quitting": true, "discard": false})));
             }

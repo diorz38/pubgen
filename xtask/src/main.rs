@@ -230,10 +230,7 @@ fn cmd_pubgen() -> Result<(), String> {
         "-D",
         "warnings",
     ]);
-    run(
-        c,
-        "cargo clippy -p designcraft-ui-egui --features pubgen -p pubgen-core -p pubgen-cli -p pubgen-studio --all-targets -- -D warnings",
-    )
+    run(c, "cargo clippy -p designcraft-ui-egui --features pubgen -p pubgen-core -p pubgen-cli -p pubgen-studio --all-targets -- -D warnings")
 }
 
 fn cmd_ci() -> Result<(), String> {

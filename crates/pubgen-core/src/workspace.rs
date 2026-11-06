@@ -42,11 +42,18 @@ pub struct PublicationMetadata {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PageLayout { Single, Double }
+pub enum PageLayout {
+    Single,
+    Double,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Language { Id, En, IdEn }
+pub enum Language {
+    Id,
+    En,
+    IdEn,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublicationCard {
@@ -63,26 +70,48 @@ pub struct PublicationCard {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CardKind { Cover, Toc, Table, Chart, MapChart, Narrative, Image, Divider }
+pub enum CardKind {
+    Cover,
+    Toc,
+    Table,
+    Chart,
+    MapChart,
+    Narrative,
+    Image,
+    Divider,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CardScope { NewPage, NewObject }
+pub enum CardScope {
+    NewPage,
+    NewObject,
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Glossary { #[serde(default)] pub entries: Vec<GlossaryEntry> }
+pub struct Glossary {
+    #[serde(default)]
+    pub entries: Vec<GlossaryEntry>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GlossaryEntry { pub source: String, pub target: String }
+pub struct GlossaryEntry {
+    pub source: String,
+    pub target: String,
+}
 
 impl ProjectManifest {
     pub fn validate(&self) -> Result<(), String> {
         if self.format_version == 0 || self.format_version > PUBGEN_FORMAT_VERSION {
             return Err(format!("unsupported pubgen format version: {}", self.format_version));
         }
-        if self.name.trim().is_empty() { return Err("project name must not be empty".into()); }
+        if self.name.trim().is_empty() {
+            return Err("project name must not be empty".into());
+        }
         for slot in &self.slots {
-            if slot.id.trim().is_empty() { return Err("slot id must not be empty".into()); }
+            if slot.id.trim().is_empty() {
+                return Err("slot id must not be empty".into());
+            }
         }
         Ok(())
     }
@@ -90,10 +119,14 @@ impl ProjectManifest {
 
 impl PublicationMetadata {
     pub fn validate(&self) -> Result<(), String> {
-        if self.profile_id.trim().is_empty() { return Err("profile_id must not be empty".into()); }
+        if self.profile_id.trim().is_empty() {
+            return Err("profile_id must not be empty".into());
+        }
         let mut ids = std::collections::HashSet::new();
         for card in &self.cards {
-            if card.id.trim().is_empty() || !ids.insert(&card.id) { return Err("card ids must be unique and non-empty".into()); }
+            if card.id.trim().is_empty() || !ids.insert(&card.id) {
+                return Err("card ids must be unique and non-empty".into());
+            }
             if let Some(source) = &card.source
                 && (source.starts_with('/') || source.contains("..") || source.contains('\\'))
             {
@@ -116,8 +149,23 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_cards() {
-        let card = PublicationCard { id: "c1".into(), kind: CardKind::Table, scope: CardScope::NewPage, source: None, title: String::new(), settings: BTreeMap::new() };
-        let metadata = PublicationMetadata { profile_id: "bps_brs".into(), layout: PageLayout::Single, language: Language::Id, title: String::new(), title_en: None, cards: vec![card.clone(), card], extra: BTreeMap::new() };
+        let card = PublicationCard {
+            id: "c1".into(),
+            kind: CardKind::Table,
+            scope: CardScope::NewPage,
+            source: None,
+            title: String::new(),
+            settings: BTreeMap::new(),
+        };
+        let metadata = PublicationMetadata {
+            profile_id: "bps_brs".into(),
+            layout: PageLayout::Single,
+            language: Language::Id,
+            title: String::new(),
+            title_en: None,
+            cards: vec![card.clone(), card],
+            extra: BTreeMap::new(),
+        };
         assert!(metadata.validate().is_err());
     }
 }

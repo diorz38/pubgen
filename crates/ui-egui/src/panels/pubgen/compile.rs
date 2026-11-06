@@ -1833,6 +1833,30 @@ pub(crate) fn compile_project(app: &mut DesignApp, p: &Value) -> Result<Value, S
     Ok(serde_json::json!({"started": true, "path": path}))
 }
 
+/// Create a blank new publication project workspace tab.
+pub(crate) fn new_project(app: &mut DesignApp, _p: &Value) -> Result<Value, String> {
+    if let Some(ctx) = app.egui_ctx.clone() {
+        crate::dock::pubgen::workspace::trigger_host_tab_action(&ctx, crate::dock::pubgen::workspace::HostTabAction::New);
+    }
+    Ok(serde_json::json!({"action": "newProject"}))
+}
+
+/// Import an Excel publication manifest into a new workspace tab.
+pub(crate) fn import_xlsx(app: &mut DesignApp, _p: &Value) -> Result<Value, String> {
+    if let Some(ctx) = app.egui_ctx.clone() {
+        crate::dock::pubgen::workspace::trigger_host_tab_action(&ctx, crate::dock::pubgen::workspace::HostTabAction::Import);
+    }
+    Ok(serde_json::json!({"action": "importXlsx"}))
+}
+
+/// Export the active publication workspace to an Excel manifest.
+pub(crate) fn export_xlsx(app: &mut DesignApp, _p: &Value) -> Result<Value, String> {
+    if let Some(ctx) = app.egui_ctx.clone() {
+        crate::dock::pubgen::workspace::trigger_host_tab_action(&ctx, crate::dock::pubgen::workspace::HostTabAction::ExportXlsx);
+    }
+    Ok(serde_json::json!({"action": "exportXlsx"}))
+}
+
 /// The `pubgen.openProject` UI command: read an existing `pubgen_project.json` and load it into the
 /// Publication Compiler without building. `path` defaults to the manifest last opened; without one
 /// it asks for the file (the panel's Open... does the same).
@@ -1850,8 +1874,7 @@ pub(crate) fn open_project(app: &mut DesignApp, p: &Value) -> Result<Value, Stri
     let p_path = Path::new(&path);
     let ext = p_path.extension().and_then(std::ffi::OsStr::to_str).map(|e| e.to_ascii_lowercase());
     if ext.as_deref() == Some("pubgen") {
-        let opened = pubgen_core::container::open_pubgen(p_path)
-            .map_err(|e| format!("Gagal membuka paket .pubgen: {e}"))?;
+        let opened = pubgen_core::container::open_pubgen(p_path).map_err(|e| format!("Gagal membuka paket .pubgen: {e}"))?;
         remember_manifest(app, &path)?;
         if let Some(ctx) = app.egui_ctx.clone() {
             crate::dock::pubgen::workspace::sync_external_workspace(
@@ -1972,17 +1995,17 @@ pub(crate) fn save_pubgen_package_to(app: &mut DesignApp, save_path: &Path) -> R
 
     let manifest = pubgen_core::workspace::ProjectManifest {
         format_version: pubgen_core::workspace::PUBGEN_FORMAT_VERSION,
-        name: if !orch.meta_title.trim().is_empty() {
-            orch.meta_title.clone()
-        } else {
-            "publication".into()
-        },
+        name: if !orch.meta_title.trim().is_empty() { orch.meta_title.clone() } else { "publication".into() },
         template: false,
-        slots: orch.slots.iter().map(|s| pubgen_core::workspace::Slot {
-            id: s.name.clone(),
-            word_budget: s.budget.map(|b| b as u32),
-            replacement: if s.text.is_empty() { None } else { Some(s.text.clone()) },
-        }).collect(),
+        slots: orch
+            .slots
+            .iter()
+            .map(|s| pubgen_core::workspace::Slot {
+                id: s.name.clone(),
+                word_budget: s.budget.map(|b| b as u32),
+                replacement: if s.text.is_empty() { None } else { Some(s.text.clone()) },
+            })
+            .collect(),
     };
 
     let metadata = orch.to_metadata();
@@ -2096,11 +2119,7 @@ fn save_project_with(app: &mut DesignApp, p: &Value, force_ask: bool) -> Result<
 
 /// Default file name for a Save/Save As dialog: the publication title, else `publication.pubgen`.
 fn package_file_name(app: &DesignApp) -> String {
-    let title = app
-        .egui_ctx
-        .as_ref()
-        .map(|ctx| crate::dock::pubgen::workspace::get_state(ctx).meta_title)
-        .unwrap_or_default();
+    let title = app.egui_ctx.as_ref().map(|ctx| crate::dock::pubgen::workspace::get_state(ctx).meta_title).unwrap_or_default();
     if title.trim().is_empty() {
         return "publication.pubgen".into();
     }
@@ -2179,11 +2198,7 @@ fn save_project_to(app: &mut DesignApp, path: &str) -> Result<Value, String> {
                             .enumerate()
                             .map(|(i, c)| ChapterSpec {
                                 chapter: (i + 1) as u32,
-                                path: if c.source.is_empty() || c.source == "Tanpa sumber" {
-                                    doc_rel.clone()
-                                } else {
-                                    c.source.clone()
-                                },
+                                path: if c.source.is_empty() || c.source == "Tanpa sumber" { doc_rel.clone() } else { c.source.clone() },
                                 title: c.title.clone(),
                             })
                             .collect();
@@ -3658,6 +3673,36 @@ Grafik,01.02,Kepadatan,
         let (_, label, _, params) = entry.expect("pubgen.openProject must be a UI command");
         assert_eq!(*label, "Open Publication (.pubgen)...");
         assert!(params.contains("path"), "params doc names `path`: {params}");
+    }
+
+    #[test]
+    fn the_new_project_command_is_registered() {
+        let entry = crate::menus::UI_COMMANDS.iter().find(|c| c.0 == "pubgen.newProject");
+        let (_, label, shortcut, _) = entry.expect("pubgen.newProject must be a UI command");
+        assert_eq!(*label, "New Publication");
+        assert_eq!(*shortcut, Some("Ctrl+N"));
+    }
+
+    #[test]
+    fn the_import_and_export_xlsx_commands_are_registered() {
+        let import_entry = crate::menus::UI_COMMANDS.iter().find(|c| c.0 == "pubgen.importXlsx");
+        let (_, label, _, _) = import_entry.expect("pubgen.importXlsx must be a UI command");
+        assert_eq!(*label, "Import Excel Workbook (.xlsx)...");
+
+        let export_entry = crate::menus::UI_COMMANDS.iter().find(|c| c.0 == "pubgen.exportXlsx");
+        let (_, label, _, _) = export_entry.expect("pubgen.exportXlsx must be a UI command");
+        assert_eq!(*label, "Export Excel Workbook (.xlsx)...");
+    }
+
+    #[test]
+    fn new_project_command_triggers_host_tab_action() {
+        let ctx = egui::Context::default();
+        let mut app = app();
+        app.egui_ctx = Some(ctx.clone());
+        let res = new_project(&mut app, &serde_json::Value::Null).unwrap();
+        assert_eq!(res["action"], "newProject");
+        let action = crate::dock::pubgen::workspace::take_host_tab_action(&ctx);
+        assert_eq!(action, Some(crate::dock::pubgen::workspace::HostTabAction::New));
     }
 
     #[test]

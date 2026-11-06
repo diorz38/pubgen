@@ -85,6 +85,8 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.exportText", "Export Text…", None, "{path?} — the story being edited, as Text Only (.txt) or Rich Text Format (.rtf)"),
     ("app.exportPdf", "Export PDF…", None, "{path?, …file.exportPdf options} — asks for a path when none is given"),
     #[cfg(feature = "pubgen")]
+    ("pubgen.newProject", "New Publication", Some("Ctrl+N"), "{} — create a new blank publication workspace tab"),
+    #[cfg(feature = "pubgen")]
     (
         "pubgen.openProject",
         "Open Publication (.pubgen)...",
@@ -112,6 +114,10 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
         None,
         "{path?} — save the publication workspace to a .pubgen package, always asking for the target; with path it is written there",
     ),
+    #[cfg(feature = "pubgen")]
+    ("pubgen.importXlsx", "Import Excel Workbook (.xlsx)...", None, "{} — import an Excel publication manifest into a new workspace tab"),
+    #[cfg(feature = "pubgen")]
+    ("pubgen.exportXlsx", "Export Excel Workbook (.xlsx)...", None, "{} — export the active publication workspace to an Excel manifest"),
     #[cfg(feature = "pubgen")]
     (
         "pubgen.compileProject",
