@@ -140,6 +140,7 @@ pub struct PublicationCard {
 
     // Chart specific
     pub chart_type: String,
+    pub chart_image: String,
 
     // MapChart specific (NEW)
     pub map_chart_type: String,
@@ -232,6 +233,7 @@ impl Default for PublicationCard {
             table_theme: "BPS Blue".into(),
             table_layout_preset: "Standard".into(),
             chart_type: "Line".into(),
+            chart_image: String::new(),
             map_chart_type: "Choropleth".into(),
             map_classification: "Quantile (4 kelas)".into(),
             map_color_palette: "BPS Biru-Teal".into(),
@@ -379,12 +381,12 @@ impl Default for OrchestratorWorkspaceState {
             ContentItem { path: "csv/U4_5.csv".into(), size_bytes: 14 },
             ContentItem { path: "csv/U5.csv".into(), size_bytes: 12 },
             ContentItem { path: "csv/U6.csv".into(), size_bytes: 12 },
-            ContentItem { path: "md/U1.md".into(), size_bytes: 1222 },
-            ContentItem { path: "md/U2.md".into(), size_bytes: 3828 },
-            ContentItem { path: "md/U4.md".into(), size_bytes: 2875 },
-            ContentItem { path: "md/U4_5.md".into(), size_bytes: 2286 },
-            ContentItem { path: "md/U5.md".into(), size_bytes: 1820 },
-            ContentItem { path: "md/U6.md".into(), size_bytes: 1141 },
+            ContentItem { path: "rtf/U1.rtf".into(), size_bytes: 1222 },
+            ContentItem { path: "rtf/U2.rtf".into(), size_bytes: 3828 },
+            ContentItem { path: "rtf/U4.rtf".into(), size_bytes: 2875 },
+            ContentItem { path: "rtf/U4_5.rtf".into(), size_bytes: 2286 },
+            ContentItem { path: "rtf/U5.rtf".into(), size_bytes: 1820 },
+            ContentItem { path: "rtf/U6.rtf".into(), size_bytes: 1141 },
         ];
 
         let cards = vec![
@@ -408,7 +410,7 @@ impl Default for OrchestratorWorkspaceState {
                 CardKind::Narrative,
                 "Ulasan Indikator Utama (U1)",
                 "Narasi ulasan utama sektor pertanian Jawa Barat",
-                "md/U1.md",
+                "rtf/U1.rtf",
                 3,
                 true,
             ),
@@ -422,9 +424,9 @@ impl Default for OrchestratorWorkspaceState {
             ),
             PublicationCard::new_with(
                 CardKind::Narrative,
-                "Ulasan Narasi U2 (U2.md)",
+                "Ulasan Narasi U2 (U2.rtf)",
                 "Ulasan lanjutan indeks tanaman perkebunan",
-                "md/U2.md",
+                "rtf/U2.rtf",
                 5,
                 false,
             ),
@@ -438,9 +440,9 @@ impl Default for OrchestratorWorkspaceState {
             ),
             PublicationCard::new_with(
                 CardKind::Narrative,
-                "Ulasan Narasi U4 (U4.md)",
+                "Ulasan Narasi U4 (U4.rtf)",
                 "Ulasan indeks konsumsi rumah tangga perdesaan",
-                "md/U4.md",
+                "rtf/U4.rtf",
                 7,
                 false,
             ),
@@ -454,9 +456,9 @@ impl Default for OrchestratorWorkspaceState {
             ),
             PublicationCard::new_with(
                 CardKind::Narrative,
-                "Ulasan Narasi U4_5 (U4_5.md)",
+                "Ulasan Narasi U4_5 (U4_5.rtf)",
                 "Ulasan penutup dan indeks biaya produksi",
-                "md/U4_5.md",
+                "rtf/U4_5.rtf",
                 9,
                 false,
             ),
@@ -468,7 +470,7 @@ impl Default for OrchestratorWorkspaceState {
                 10,
                 false,
             ),
-            PublicationCard::new_with(CardKind::Narrative, "Ulasan Narasi U5 (U5.md)", "Ulasan analisis inflasi perdesaan", "md/U5.md", 11, false),
+            PublicationCard::new_with(CardKind::Narrative, "Ulasan Narasi U5 (U5.rtf)", "Ulasan analisis inflasi perdesaan", "rtf/U5.rtf", 11, false),
             PublicationCard::new_with(
                 CardKind::Table,
                 "Tabel 4 Nilai Tukar Usaha Petani per Subsektor dan Persentase Perubahannya (2018=100)",
@@ -477,7 +479,7 @@ impl Default for OrchestratorWorkspaceState {
                 12,
                 false,
             ),
-            PublicationCard::new_with(CardKind::Narrative, "Ulasan Narasi U6 (U6.md)", "Ulasan penutup dan rekomendasi", "md/U6.md", 13, false),
+            PublicationCard::new_with(CardKind::Narrative, "Ulasan Narasi U6 (U6.rtf)", "Ulasan penutup dan rekomendasi", "rtf/U6.rtf", 13, false),
             PublicationCard::new_with(CardKind::Image, "Infografis / Gambar G1 (G1.png)", "Area Margin · Sumber: G1.png", "G1.png", 14, false),
         ];
 
@@ -498,7 +500,7 @@ impl Default for OrchestratorWorkspaceState {
         let execution_log = vec![
             "[10:00:01] Profil publikasi aktif: BPS Berita Resmi Statistik (BRS)".into(),
             "[10:00:02] Geometri: A4 Facing=Ya (Double Page), Margin T:18 B:18 L:20 R:20 mm".into(),
-            "[10:00:03] Berhasil memuat 20 berkas sumber (14 CSV, 6 Markdown).".into(),
+            "[10:00:03] Berhasil memuat 20 berkas sumber (14 CSV, 6 Teks).".into(),
             "[10:00:04] Struktur halaman tersusun: 14 item kartu publikasi.".into(),
             "[10:00:05] Audit QA Mutu: 0 kesalahan, 0 peringatan (Lolos Preflight 100%).".into(),
         ];
@@ -762,15 +764,34 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
         state.meta_subtitle = format!("{} · {}", state.meta_release_date, state.meta_agency);
     }
 
+    // A name that already carries a folder is ready to use; a bare one gets its bucket prefix so it
+    // matches the card sources a package wrote before the folders existed. Narrative artifacts keep
+    // the historical `md/` bucket name: older packages store them under it and point their card
+    // sources at it, so a new prefix would orphan those sources.
     let norm = |prefix: &str, name: &str| {
         if name.starts_with(prefix) || name.contains('/') { name.to_owned() } else { format!("{prefix}/{name}") }
     };
+
+    // Narratives are RTF; a package written before that change still carries Markdown, whose
+    // legacy-converter debris is repaired here so those packages generate clean text.
+    let text_entries: Vec<(String, Vec<u8>)> = report
+        .text
+        .iter()
+        .map(|(name, bytes)| {
+            if !name.ends_with(".md") {
+                return (name.clone(), bytes.clone());
+            }
+            let raw = String::from_utf8_lossy(bytes);
+            let clean = pubgen_core::excel::sanitize_markdown(&raw);
+            (name.clone(), if clean == raw { bytes.clone() } else { clean.into_bytes() })
+        })
+        .collect();
 
     state.content_files = report
         .csv
         .iter()
         .map(|(name, bytes)| ContentItem { path: norm("csv", name), size_bytes: bytes.len() })
-        .chain(report.md.iter().map(|(name, bytes)| ContentItem { path: norm("md", name), size_bytes: bytes.len() }))
+        .chain(text_entries.iter().map(|(name, bytes)| ContentItem { path: norm("md", name), size_bytes: bytes.len() }))
         .chain(report.assets.iter().map(|(name, bytes)| ContentItem { path: norm("assets", name), size_bytes: bytes.len() }))
         .collect();
 
@@ -778,7 +799,7 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
     for (name, bytes) in &report.csv {
         state.cached_content.insert(norm("csv", name), bytes.clone());
     }
-    for (name, bytes) in &report.md {
+    for (name, bytes) in &text_entries {
         state.cached_content.insert(norm("md", name), bytes.clone());
     }
     for (name, bytes) in &report.assets {
@@ -911,6 +932,19 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
                         };
                     }
                 }
+                // Older packages titled image/chart cards with the key that pointed at the file
+                // ("file"), which then showed up as the placed image's title.
+                if matches!(pc.kind, CardKind::Image | CardKind::Chart | CardKind::MapChart) {
+                    let low = pc.title.trim().to_lowercase();
+                    if low.is_empty() || matches!(low.as_str(), "file" | "image" | "berkas" | "gambar") {
+                        pc.title = format!("Gambar / Infografis {}", pc.chapter_id);
+                    }
+                }
+                if pc.kind == CardKind::Chart {
+                    if let Some(img) = card.settings.get("image").and_then(|v| v.as_str()) {
+                        pc.chart_image = img.to_string();
+                    }
+                }
                 if pc.kind == CardKind::MapChart {
                     if let Some(stk) = card.settings.get("map_stock_name").and_then(|v| v.as_str()) {
                         pc.map_stock_name = stk.to_string();
@@ -992,10 +1026,10 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
     let now = format_now();
     state.execution_log.push(format!("[{now}] Berhasil memuat berkas Excel: {source_name}"));
     state.execution_log.push(format!(
-        "[{now}] Diekstrak {} berkas konten ({} CSV, {} Markdown, {} Aset).",
+        "[{now}] Diekstrak {} berkas konten ({} CSV, {} Teks, {} Aset).",
         state.content_files.len(),
         report.csv.len(),
-        report.md.len(),
+        report.text.len(),
         report.assets.len(),
     ));
     state.status_message = Some((format!("Workbook {source_name} berhasil dimuat"), true));
@@ -1213,7 +1247,7 @@ pub fn sync_external_workspace(
     source_name: &str,
     metadata: &pubgen_core::PublicationMetadata,
     csv: &[(String, Vec<u8>)],
-    md: &[(String, Vec<u8>)],
+    text: &[(String, Vec<u8>)],
     assets: &[(String, Vec<u8>)],
 ) {
     let mut state = get_state(ctx);
@@ -1222,7 +1256,7 @@ pub fn sync_external_workspace(
         profile_id: metadata.profile_id.clone(),
         metadata: metadata.clone(),
         csv: csv.to_vec(),
-        md: md.to_vec(),
+        text: text.to_vec(),
         assets: assets.to_vec(),
         warnings: Vec::new(),
     };
@@ -1438,7 +1472,6 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                             state.view = OrchestratorView::Studio;
                         }
                     }
-
                     if !state.cards.is_empty() {
                         let studio_label = if lang.starts_with("id") { "➡ Buka Studio Aktif" } else { "➡ Open Active Studio" };
                         if ui
@@ -1861,9 +1894,10 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                         let target_path = if ext == "csv" {
                             format!("csv/{name}")
                         } else if ext == "md" {
+                            // A Markdown narrative from a package that predates the RTF format.
                             format!("md/{name}")
                         } else {
-                            format!("md/{}.md", p.file_stem().unwrap_or_default().to_string_lossy())
+                            format!("rtf/{name}")
                         };
                         st.content_files.retain(|f| f.path != target_path);
                         st.content_files.push(ContentItem { path: target_path.clone(), size_bytes: bytes.len() });
@@ -2074,7 +2108,11 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                 ui.spacing_mut().item_spacing = vec2(2.0, 3.0);
 
                 let csv_files: Vec<_> = state.content_files.iter().filter(|f| f.path.starts_with("csv/") || f.path.ends_with(".csv")).collect();
-                let md_files: Vec<_> = state.content_files.iter().filter(|f| f.path.starts_with("md/") || f.path.ends_with(".md")).collect();
+                let text_files: Vec<_> = state
+                    .content_files
+                    .iter()
+                    .filter(|f| f.path.starts_with("rtf/") || f.path.starts_with("md/") || f.path.ends_with(".rtf") || f.path.ends_with(".md"))
+                    .collect();
 
                 // Group 1: CSV
                 let csv_hdr = ui.selectable_label(
@@ -2105,14 +2143,14 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                     });
                 }
 
-                // Group 2: Markdown
+                // Group 2: narrative text (RTF; Markdown in older packages)
                 let md_hdr = ui.selectable_label(
                     false,
                     RichText::new(format!(
                         "{} {} ({})",
                         if state.md_group_open { "▼" } else { "▶" },
-                        crate::i18n::tr(lang, "Narrative (Markdown)"),
-                        md_files.len()
+                        crate::i18n::tr(lang, "Narrative (RTF)"),
+                        text_files.len()
                     ))
                     .font(semibold(11.0))
                     .color(t.text),
@@ -2123,7 +2161,7 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
 
                 if state.md_group_open {
                     ui.indent("md_indent", |ui| {
-                        for item in md_files {
+                        for item in text_files {
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(format!("• {}", item.path)).font(FontId::proportional(10.5)).color(t.text));
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -2397,7 +2435,6 @@ fn paint_card_thumbnail(painter: &egui::Painter, rect: Rect, kind: CardKind, t: 
 fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, lang: &str) {
     let avail_w = ui.available_width();
     let gap = 8.0f32;
-    let card_h = 84.0f32;
     let mut clicked_edit_idx = None;
 
     if state.page_layout_facing {
@@ -2405,15 +2442,17 @@ fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         // Row 1: Page 1 (Cover / Sampul) alone on left with empty right slot (matching trailing last card)
         // Subsequent rows: Pairs of Left Page (Verso, spine right) and Right Page (Recto, spine left)
         let col_w = ((avail_w - gap) / 2.0).max(120.0);
+        let det_w = card_details_width(col_w);
 
         if let Some(cover_card) = state.cards.first() {
+            let row_h = card_row_height(ui.painter(), std::slice::from_ref(cover_card), det_w, lang);
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing = vec2(gap, 0.0);
-                if let Some(idx) = render_facing_card(ui, 0, cover_card, col_w, false, t, lang) {
+                if let Some(idx) = render_facing_card(ui, 0, cover_card, col_w, false, row_h, t, lang) {
                     clicked_edit_idx = Some(idx);
                 }
-                // Empty right slot so cover card length is identical to col_w and height matches card_h
-                ui.allocate_exact_size(vec2(col_w, card_h), Sense::hover());
+                // Empty right slot so cover card width is col_w and height matches the row
+                ui.allocate_exact_size(vec2(col_w, row_h), Sense::hover());
             });
             ui.add_space(gap);
         }
@@ -2422,24 +2461,25 @@ fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         if state.cards.len() > 1 {
             let body_cards = &state.cards[1..];
             for (chunk_idx, pair) in body_cards.chunks(2).enumerate() {
+                let row_h = card_row_height(ui.painter(), pair, det_w, lang);
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing = vec2(gap, 0.0);
                     let actual_idx_left = 1 + chunk_idx * 2;
                     // Left page (Verso: thumbnail on right facing spine, text right-aligned)
                     let is_single_trailing = pair.len() == 1;
-                    if let Some(idx) = render_facing_card(ui, actual_idx_left, &pair[0], col_w, !is_single_trailing, t, lang) {
+                    if let Some(idx) = render_facing_card(ui, actual_idx_left, &pair[0], col_w, !is_single_trailing, row_h, t, lang) {
                         clicked_edit_idx = Some(idx);
                     }
 
                     if pair.len() > 1 {
                         let actual_idx_right = actual_idx_left + 1;
                         // Right page (Recto: thumbnail on left facing spine, text left-aligned)
-                        if let Some(idx) = render_facing_card(ui, actual_idx_right, &pair[1], col_w, false, t, lang) {
+                        if let Some(idx) = render_facing_card(ui, actual_idx_right, &pair[1], col_w, false, row_h, t, lang) {
                             clicked_edit_idx = Some(idx);
                         }
                     } else {
                         // Empty slot on right for trailing single page
-                        ui.allocate_exact_size(vec2(col_w, card_h), Sense::hover());
+                        ui.allocate_exact_size(vec2(col_w, row_h), Sense::hover());
                     }
                 });
                 ui.add_space(gap);
@@ -2449,19 +2489,21 @@ fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         // SINGLE PAGE GRID LAYOUT (2 Columns standard)
         let col_count = if avail_w > 520.0 { 2 } else { 1 };
         let card_w = ((avail_w - (col_count as f32 - 1.0) * gap) / (col_count as f32)).max(120.0);
+        let det_w = card_details_width(card_w);
         let chunk_size = col_count;
         for (row_idx, chunk) in state.cards.chunks(chunk_size).enumerate() {
+            let row_h = card_row_height(ui.painter(), chunk, det_w, lang);
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing = vec2(gap, 0.0);
                 for (col_idx, card) in chunk.iter().enumerate() {
                     let actual_idx = row_idx * chunk_size + col_idx;
-                    if let Some(idx) = render_facing_card(ui, actual_idx, card, card_w, false, t, lang) {
+                    if let Some(idx) = render_facing_card(ui, actual_idx, card, card_w, false, row_h, t, lang) {
                         clicked_edit_idx = Some(idx);
                     }
                 }
                 if chunk.len() < chunk_size {
                     for _ in chunk.len()..chunk_size {
-                        ui.allocate_exact_size(vec2(card_w, card_h), Sense::hover());
+                        ui.allocate_exact_size(vec2(card_w, row_h), Sense::hover());
                     }
                 }
             });
@@ -2481,12 +2523,44 @@ fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
     }
 }
 
-fn render_facing_card(ui: &mut Ui, idx: usize, card: &PublicationCard, card_w: f32, is_verso: bool, t: &Tokens, lang: &str) -> Option<usize> {
-    const CARD_HEIGHT: f32 = 84.0;
+/// Horizontal text width inside a page card, beside the 34px thumbnail
+/// (10px padding each side + 8px gutter; see `render_facing_card`).
+fn card_details_width(card_w: f32) -> f32 {
+    (card_w - 62.0).max(40.0)
+}
+
+/// Height a page card needs so every text line stays visible: pill row +
+/// wrapped title + wrapped source + footer, with the card's inner padding.
+fn measured_card_height(painter: &egui::Painter, card: &PublicationCard, details_w: f32, lang: &str) -> f32 {
+    let title = painter.layout(card.title.clone(), semibold(12.0), Color32::WHITE, details_w);
+    let src = format!("{}: {}", crate::i18n::tr(lang, "Source:"), card.source);
+    let source = painter.layout(src, FontId::proportional(11.0), Color32::WHITE, details_w);
+    const PILL_H: f32 = 16.0;
+    const FOOTER_H: f32 = 16.0;
+    const LINE_GAP: f32 = 2.0;
+    const PAD_Y: f32 = 12.0; // 6px top + 6px bottom inner padding
+    PAD_Y + PILL_H + LINE_GAP + title.size().y.max(16.0) + LINE_GAP + source.size().y.max(15.0) + LINE_GAP + FOOTER_H
+}
+
+/// Uniform row height: the tallest card in the row, never below the legacy 84px.
+fn card_row_height(painter: &egui::Painter, cards: &[PublicationCard], details_w: f32, lang: &str) -> f32 {
+    cards.iter().map(|c| measured_card_height(painter, c, details_w, lang)).fold(84.0, f32::max)
+}
+
+fn render_facing_card(
+    ui: &mut Ui,
+    idx: usize,
+    card: &PublicationCard,
+    card_w: f32,
+    is_verso: bool,
+    card_h: f32,
+    t: &Tokens,
+    lang: &str,
+) -> Option<usize> {
     let mut clicked_edit = false;
 
     ui.push_id(idx, |ui| {
-        let (card_rect, card_resp) = ui.allocate_exact_size(vec2(card_w, CARD_HEIGHT), Sense::click());
+        let (card_rect, card_resp) = ui.allocate_exact_size(vec2(card_w, card_h), Sense::click());
         if card_resp.clicked() {
             clicked_edit = true;
         }
@@ -2503,7 +2577,7 @@ fn render_facing_card(ui: &mut Ui, idx: usize, card: &PublicationCard, card_w: f
         painter.rect_filled(card_rect, 4.0, bg);
         painter.rect_stroke(card_rect, 4.0, Stroke::new(1.0, border_c), egui::StrokeKind::Inside);
 
-        let inner_rect = card_rect.shrink2(vec2(10.0, 8.0));
+        let inner_rect = card_rect.shrink2(vec2(10.0, 6.0));
         let thumb_w = 34.0f32;
         let thumb_h = 48.0f32;
         let thumb_size = vec2(thumb_w, thumb_h);
@@ -2539,7 +2613,7 @@ fn render_facing_card(ui: &mut Ui, idx: usize, card: &PublicationCard, card_w: f
         });
 
         // Line 2: Title
-        let title_label = egui::Label::new(RichText::new(&card.title).font(semibold(11.0)).color(t.text_strong)).truncate().sense(Sense::click());
+        let title_label = egui::Label::new(RichText::new(&card.title).font(semibold(12.0)).color(t.text_strong)).sense(Sense::click());
         let title_resp = child_ui.add(title_label);
         if title_resp.clicked() {
             clicked_edit = true;
@@ -2547,15 +2621,15 @@ fn render_facing_card(ui: &mut Ui, idx: usize, card: &PublicationCard, card_w: f
 
         // Line 3: Source
         let src_label = format!("{}: {}", crate::i18n::tr(lang, "Source:"), card.source);
-        child_ui.add(egui::Label::new(RichText::new(src_label).font(FontId::proportional(10.0)).color(t.text_dim)).truncate());
+        child_ui.add(egui::Label::new(RichText::new(src_label).font(FontId::proportional(11.0)).color(t.text_dim)));
 
         // Line 4: Footer
         child_ui.horizontal(|ui| {
-            ui.label(RichText::new(format!("{} {}", crate::i18n::tr(lang, "Pg."), card.page)).font(semibold(10.0)).color(t.text_dim));
+            ui.label(RichText::new(format!("{} {}", crate::i18n::tr(lang, "Pg."), card.page)).font(semibold(11.0)).color(t.text_dim));
             ui.add_space(8.0);
             let edit_resp = ui.link(
                 RichText::new(format!("✎ {}", crate::i18n::tr(lang, "Click to edit")))
-                    .font(FontId::proportional(10.0))
+                    .font(FontId::proportional(11.0))
                     .color(Color32::from_rgb(56, 189, 248)),
             );
             if edit_resp.clicked() {
@@ -2661,9 +2735,9 @@ fn render_card_action_bar(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t
 }
 
 fn render_tag_pill(ui: &mut Ui, label: &str, t: &Tokens) {
-    let font = FontId::proportional(9.0);
+    let font = FontId::proportional(10.0);
     let galley = ui.painter().layout_no_wrap(label.to_string(), font, t.text);
-    let size = vec2(galley.size().x + 8.0, 14.0);
+    let size = vec2(galley.size().x + 8.0, 16.0);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
 
     ui.painter().rect(rect, CornerRadius::same(2), t.well, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
@@ -3538,7 +3612,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                     CardKind::Narrative => {
                         egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
                             ui.label(RichText::new("Pengaturan Format Teks & Paragraf:").font(semibold(11.0)).color(t.text_strong));
-                            ui.label(RichText::new("Teks narasi di-parse secara otomatis dari dokumen Markdown yang terhubung. Pemisahan antar paragraf, heading, dan quote dipertahankan sesuai stylesheet BPS.").font(FontId::proportional(10.5)).color(t.text_dim));
+                            ui.label(RichText::new("Teks narasi di-parse secara otomatis dari dokumen RTF yang terhubung. Perataan paragraf, indentasi, heading, dan quote dipertahankan sesuai stylesheet BPS.").font(FontId::proportional(10.5)).color(t.text_dim));
                         });
                     }
                 }
@@ -3726,31 +3800,156 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
 }
 
 /// Executes compilation and automatically transitions workspace to DesignCraft Layout mode.
+/// Build a `PubgenState` from the active worksheet (cards + cached csv/text/assets),
+/// stage the cached content into a temp folder, and run the shared page-generation
+/// pipeline (`excel::generate_publication_pages`) on it. This is the same generation
+/// process as XLSX import, with the worksheet as the data source instead of a
+/// workbook file on disk.
+fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceState) -> Result<String, String> {
+    let mut st = super::PubgenState::default();
+    // Apply the selected publication profile the same way XLSX import does
+    // (`excel::execute_excel_to_csvs`), otherwise BRS loses its table style,
+    // theme and header/footer preset (`state::apply_profile`, `state.rs:787`).
+    st.apply_profile(super::profiles::ProfileManager::get_profile(&state.selected_profile), false);
+    st.bilingual_output = false;
+
+    // Stage the cached content into a temp folder so the file-based generators can read it. The
+    // folder is unique per call: two generations can run at once in one process (a second tab, or
+    // parallel tests), and a shared folder let one wipe the other's staged files mid-run.
+    static STAGE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = STAGE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let stage = std::env::temp_dir().join(format!("dc-pubgen-worksheet-{}-{seq}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&stage);
+    std::fs::create_dir_all(&stage).map_err(|e| format!("worksheet staging dir: {e}"))?;
+    let staged = |key: &str| -> Option<String> {
+        let rel = key.trim();
+        (rel != "Tanpa sumber" && !rel.is_empty()).then(|| stage.join(rel.replace('\\', "/")).to_string_lossy().into_owned())
+    };
+    for (rel, bytes) in &state.cached_content {
+        let p = stage.join(rel.replace('\\', "/"));
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        std::fs::write(&p, bytes).map_err(|e| format!("staging {rel}: {e}"))?;
+    }
+
+    // Cover fields: the worksheet metadata feeds the same `ExcelCoverData` the XLSX
+    // import fills, plus a cover card's per-cover overrides.
+    let cover_card = state.cards.iter().find(|c| c.kind == CardKind::Cover);
+    if let Some(card) = cover_card {
+        st.excel_had_cover = true;
+        st.cover_include_inside_back = card.cover_inside_back;
+        let mut cover = super::excel::ExcelCoverData {
+            title1: state.meta_title.clone(),
+            title2: state.meta_subtitle.clone(),
+            pub_office: state.meta_agency.clone(),
+            agency: state.meta_agency.clone(),
+            release_no: state.meta_release_no.clone(),
+            release_date: state.meta_release_date.clone(),
+            release_month: state.meta_release_month.clone(),
+            ..Default::default()
+        };
+        if !card.title.trim().is_empty() {
+            cover.title1 = card.title.clone();
+        }
+        if !card.subtitle.trim().is_empty() {
+            cover.title2 = card.subtitle.clone();
+        }
+        if !card.cover_pic_name.is_empty() || !card.cover_pic_photo.is_empty() {
+            cover.pic_name = card.cover_pic_name.clone();
+            cover.pic_photo = staged(&card.cover_pic_photo).unwrap_or_else(|| card.cover_pic_photo.clone());
+            cover.pic_phone = card.cover_pic_phone.clone();
+            cover.pic_email = card.cover_pic_email.clone();
+        }
+        st.excel_cover = Some(cover.clone());
+        super::excel::apply_excel_cover(&mut st, &cover, Some(&stage));
+    }
+
+    // Catalog rows: [type, number, title, file] like the converted XLSX catalog.
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    for card in state.cards.iter().filter(|c| c.kind != CardKind::Cover && c.kind != CardKind::Toc) {
+        let mut file = staged(&card.source).unwrap_or_default();
+        let typ = match card.kind {
+            CardKind::Narrative => {
+                if file.is_empty() {
+                    "Note"
+                } else {
+                    "Ulasan"
+                }
+            }
+            CardKind::Table => "Tabel",
+            CardKind::Chart | CardKind::MapChart => {
+                // Raster chart: place the bound image; vector spec: the data CSV.
+                if let Some(img) = staged(&card.chart_image) {
+                    file = img;
+                    "Image"
+                } else {
+                    "Gambar"
+                }
+            }
+            _ => "Image",
+        };
+        // Number labels ("1", "02.01") are parsed out of the card title.
+        let number = super::excel::extract_dotted_number(&card.title)
+            .or_else(|| card.title.split_whitespace().find(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_digit())).map(str::to_string))
+            .unwrap_or_default();
+        rows.push(vec![typ.to_string(), number, card.title.clone(), file]);
+    }
+    if rows.is_empty() && !st.excel_had_cover {
+        return Err("the worksheet has no publication cards to generate from".into());
+    }
+    st.card1_headers = vec!["type".into(), "number".into(), "title".into(), "file".into()];
+    st.card1_records = rows;
+    st.card1_type_col = 0;
+    st.card1_num_col = 1;
+    st.card1_title_col = 2;
+    st.card1_file_col = 3;
+    st.card1_range_to = st.card1_records.len();
+    st.card2_sheet_tables = state.cards.iter().filter(|c| c.kind == CardKind::Table).filter_map(|c| staged(&c.source)).collect();
+
+    super::excel::generate_publication_pages(app, &mut st)
+}
+
 fn execute_compile(app: &mut DesignApp, ctx: &egui::Context, state: &mut OrchestratorWorkspaceState, publish: bool) {
     let now = format_now();
     let pages_count = state.cards.len();
-    state.execution_log.push(format!("[{now}] Memulai generate struktur {pages_count} halaman publikasi..."));
+    state.execution_log.push(format!("[{now}] Memulai generate struktur {pages_count} halaman publikasi dari worksheet aktif..."));
 
-    // Attempt compiling via pubgen UI command
-    let _ = app.run(
-        "pubgen.compileProject",
-        serde_json::json!({
-            "sync": true,
-            "pdf": if publish { "outputs/BRS_NTP_Jabar_2026.pdf" } else { "" }
-        }),
-    );
-
-    if publish {
-        state.execution_log.push(format!("[{now}] Ekspor berkas PDF rilis: outputs/BRS_NTP_Jabar_2026.pdf"));
-        state.last_output_pdf = Some("outputs/BRS_NTP_Jabar_2026.pdf".into());
-        state.status_message = Some(("Kompilasi & Publikasi PDF Berhasil".into(), true));
-    } else {
-        state.execution_log.push(format!("[{now}] Kompilasi dokumen selesai tanpa error."));
-        state.status_message = Some(("Dokumen berhasil digenerate".into(), true));
+    let pdf_path = format!("outputs/{}.pdf", sanitize_file_stem(&state.meta_title));
+    match generate_from_workspace(app, state) {
+        Ok(msg) => {
+            state.execution_log.push(format!("[{now}] {msg}"));
+            if publish {
+                match app.run("file.exportPdf", serde_json::json!({ "path": pdf_path })) {
+                    Ok(_) => {
+                        state.execution_log.push(format!("[{now}] Ekspor berkas PDF rilis: {pdf_path}"));
+                        state.last_output_pdf = Some(pdf_path.clone());
+                        state.status_message = Some(("Kompilasi & Publikasi PDF Berhasil".into(), true));
+                    }
+                    Err(e) => {
+                        state.execution_log.push(format!("[{now}] Error: PDF export failed: {e}"));
+                        state.status_message = Some((format!("Ekspor PDF gagal: {e}"), false));
+                    }
+                }
+            } else {
+                state.status_message = Some(("Dokumen berhasil digenerate".into(), true));
+            }
+        }
+        Err(e) => {
+            state.execution_log.push(format!("[{now}] Error: {e}"));
+            state.status_message = Some((format!("Generate gagal: {e}"), false));
+        }
     }
 
     // Auto-unlock & switch to DesignCraft Layout Mode
     crate::menus::pubgen_bar::set_orchestrator_mode(ctx, false);
+}
+
+/// File-stem-safe version of a title for the output PDF name.
+fn sanitize_file_stem(title: &str) -> String {
+    let stem: String = title.trim().chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == ' ' { c } else { ' ' }).collect();
+    let stem = stem.split_whitespace().collect::<Vec<_>>().join("_");
+    if stem.is_empty() { "publikasi".into() } else { stem }
 }
 
 /// Renders the Re-compilation Safety Guard Dialog (3-way modal: Overwrite / Save v2 / Cancel).
@@ -3774,7 +3973,7 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
 
             ui.label(
                 RichText::new(
-                    "Kompilasi ulang akan membuat ulang seluruh halaman dari data sumber Excel / Markdown. \
+                    "Kompilasi ulang akan membuat ulang seluruh halaman dari data worksheet aktif. \
                      Setiap penyesuaian tipografi, posisi bingkai, atau gaya manual yang dilakukan di mode \
                      DesignCraft dapat tertimpa.",
                 )
@@ -3829,39 +4028,59 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
     if let Some(act) = chosen_action {
         let is_publish = state.guard_is_publish;
         let now = format_now();
+        let stem = sanitize_file_stem(&state.meta_title);
         if act == 1 {
-            state.execution_log.push(format!("[{now}] Menyimpan ke versi baru: outputs/BRS_NTP_Jabar_2026_v2.designcraft"));
-            let _ = app.run(
-                "pubgen.compileProject",
-                serde_json::json!({
-                    "sync": true,
-                    "new_version": true,
-                    "pdf": if is_publish { "outputs/BRS_NTP_Jabar_2026_v2.pdf" } else { "" }
-                }),
-            );
-            if is_publish {
-                state.execution_log.push(format!("[{now}] Ekspor berkas PDF rilis: outputs/BRS_NTP_Jabar_2026_v2.pdf"));
-                state.last_output_pdf = Some("outputs/BRS_NTP_Jabar_2026_v2.pdf".into());
-                state.status_message = Some(("Kompilasi ke versi baru (v2) berhasil".into(), true));
-            } else {
-                state.status_message = Some(("Dokumen versi baru (v2) berhasil digenerate".into(), true));
+            // Save the current manual layout as v2, then regenerate fresh pages in a new document.
+            let v2 = format!("outputs/{stem}_v2.designcraft");
+            let v2_pdf = format!("outputs/{stem}_v2.pdf");
+            state.execution_log.push(format!("[{now}] Menyimpan tata letak lama ke: {v2}"));
+            let _ = app.run("file.saveAs", serde_json::json!({ "path": v2 }));
+            let _ = app.run("file.new", serde_json::json!({}));
+            match generate_from_workspace(app, state) {
+                Ok(msg) => {
+                    state.execution_log.push(format!("[{now}] {msg}"));
+                    if is_publish {
+                        match app.run("file.exportPdf", serde_json::json!({ "path": v2_pdf })) {
+                            Ok(_) => {
+                                state.execution_log.push(format!("[{now}] Ekspor berkas PDF rilis: {v2_pdf}"));
+                                state.last_output_pdf = Some(v2_pdf);
+                                state.status_message = Some(("Kompilasi ke versi baru (v2) berhasil".into(), true));
+                            }
+                            Err(e) => state.status_message = Some((format!("Ekspor PDF gagal: {e}"), false)),
+                        }
+                    } else {
+                        state.status_message = Some(("Dokumen versi baru (v2) berhasil digenerate".into(), true));
+                    }
+                }
+                Err(e) => {
+                    state.execution_log.push(format!("[{now}] Error: {e}"));
+                    state.status_message = Some((format!("Generate gagal: {e}"), false));
+                }
             }
         } else if act == 2 {
-            state.execution_log.push(format!("[{now}] Menimpa tata letak aktif dengan hasil kompilasi segar..."));
-            let _ = app.run(
-                "pubgen.compileProject",
-                serde_json::json!({
-                    "sync": true,
-                    "overwrite": true,
-                    "pdf": if is_publish { "outputs/BRS_NTP_Jabar_2026.pdf" } else { "" }
-                }),
-            );
-            if is_publish {
-                state.execution_log.push(format!("[{now}] Ekspor berkas PDF rilis: outputs/BRS_NTP_Jabar_2026.pdf"));
-                state.last_output_pdf = Some("outputs/BRS_NTP_Jabar_2026.pdf".into());
-                state.status_message = Some(("Kompilasi ulang & timpa dokumen berhasil".into(), true));
-            } else {
-                state.status_message = Some(("Dokumen berhasil ditimpa dengan kompilasi segar".into(), true));
+            state.execution_log.push(format!("[{now}] Menimpa tata letak aktif dengan hasil generate segar dari worksheet..."));
+            let _ = app.run("file.new", serde_json::json!({}));
+            match generate_from_workspace(app, state) {
+                Ok(msg) => {
+                    state.execution_log.push(format!("[{now}] {msg}"));
+                    if is_publish {
+                        let pdf = format!("outputs/{stem}.pdf");
+                        match app.run("file.exportPdf", serde_json::json!({ "path": pdf })) {
+                            Ok(_) => {
+                                state.execution_log.push(format!("[{now}] Ekspor berkas PDF rilis: {pdf}"));
+                                state.last_output_pdf = Some(pdf);
+                                state.status_message = Some(("Kompilasi ulang & timpa dokumen berhasil".into(), true));
+                            }
+                            Err(e) => state.status_message = Some((format!("Ekspor PDF gagal: {e}"), false)),
+                        }
+                    } else {
+                        state.status_message = Some(("Dokumen berhasil ditimpa dengan generate segar".into(), true));
+                    }
+                }
+                Err(e) => {
+                    state.execution_log.push(format!("[{now}] Error: {e}"));
+                    state.status_message = Some((format!("Generate gagal: {e}"), false));
+                }
             }
         }
         crate::menus::pubgen_bar::set_orchestrator_mode(ctx, false);
@@ -4069,7 +4288,7 @@ mod tests {
             assert_eq!(state.meta_agency, "BADAN PUSAT STATISTIK PROVINSI JAWA BARAT");
             assert!(!state.content_files.is_empty());
             assert!(state.content_files.iter().any(|f| f.path.starts_with("csv/")));
-            assert!(state.content_files.iter().any(|f| f.path.starts_with("md/")));
+            assert!(state.content_files.iter().any(|f| f.path.starts_with("rtf/")), "narratives are staged as RTF");
 
             // Verify sheet COV is converted to CSV and updates card Cover
             assert!(state.content_files.iter().any(|f| f.path == "csv/COV.csv"), "COV converted to csv/COV.csv");
@@ -4089,6 +4308,33 @@ mod tests {
             assert_eq!(pubgen_st.cover_title, "Perkembangan Nilai Tukar Petani");
             assert_eq!(pubgen_st.cover_agency_text, "BADAN PUSAT STATISTIK PROVINSI JAWA BARAT");
         }
+    }
+
+    #[test]
+    fn test_generate_publication_from_workspace_cards() {
+        // The Generate buttons must build pages from the worksheet cards + cached
+        // content, without any XLSX manifest on disk (regression for the button
+        // rewiring from `pubgen.compileProject` to `generate_from_workspace`).
+        let mut state = OrchestratorWorkspaceState::default();
+        let sample = std::path::Path::new("../../plan/pubgen/samples/brs/ntp202610.xlsx");
+        if !sample.is_file() {
+            return;
+        }
+        let report = pubgen_core::excel::ingest_workbook(sample).expect("ingest sample");
+        apply_ingest_report_to_state(&mut state, "ntp202610.xlsx", &report);
+        assert!(!state.cards.is_empty());
+        assert!(!state.cached_content.is_empty());
+
+        let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", serde_json::json!({})).unwrap();
+
+        let res = generate_from_workspace(&mut app, &state);
+        assert!(res.is_ok(), "generate_from_workspace should succeed: {res:?}");
+        let msg = res.unwrap();
+        assert!(msg.contains("auto-generated pages"), "should confirm generated pages: {msg}");
+
+        let doc = &app.session.active().unwrap().doc;
+        assert!(doc.page_count() >= 5, "BRS sample should produce several pages, got {}", doc.page_count());
     }
 
     #[test]
@@ -4193,7 +4439,7 @@ mod tests {
             profile_id: "bps_dda".into(),
             metadata: meta,
             csv: Vec::new(),
-            md: Vec::new(),
+            text: Vec::new(),
             assets: Vec::new(),
             warnings: Vec::new(),
         };
@@ -4230,5 +4476,191 @@ mod tests {
         trigger_host_tab_action(&ctx, HostTabAction::Activate(0));
         assert_eq!(take_host_tab_action(&ctx), Some(HostTabAction::Activate(0)));
         assert_eq!(take_host_tab_action(&ctx), None);
+    }
+
+    /// Opt-in evidence (`CRAFT_UI_VISUAL_FIXTURES=dir cargo test capture_page_structure`):
+    /// the Page Structure card grid with long real-world titles/sources — every text line
+    /// must stay fully visible (no truncation) at the bumped 1pt-larger font sizes.
+    #[test]
+    fn capture_page_structure_cards_fixture() {
+        let Some(directory) = std::env::var_os("CRAFT_UI_VISUAL_FIXTURES").map(std::path::PathBuf::from) else { return };
+        std::fs::create_dir_all(&directory).unwrap();
+        let app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let mut ready = false;
+        let mut harness = egui_kittest::Harness::builder().with_size(vec2(1100.0, 760.0)).with_accessibility_check(false).wgpu().build_ui_state(
+            move |ui, app: &mut DesignApp| {
+                let t = Tokens::for_brightness(crate::theme::Brightness::MediumDark);
+                if !ready {
+                    crate::theme::install_fonts(ui.ctx(), "en");
+                    crate::theme::apply(ui.ctx(), &t);
+                    // The kittest font set lacks U+270E (✎) used by the edit link; the real app
+                    // font stack covers it. Tofu keeps the fixture about the card text layout.
+                    ui.ctx().set_missing_glyph_policy(egui::MissingGlyphPolicy::Tofu);
+                    ready = true;
+                }
+                let mut state = OrchestratorWorkspaceState::default();
+                state.page_layout_facing = true;
+                state.cards.push(PublicationCard::new_with(CardKind::Cover, "Sampul Statistik Daerah", "Cover Depan", "cover.ai", 1, true));
+                state.cards.push(PublicationCard::new_with(
+                    CardKind::Narrative,
+                    "Analisis Pertumbuhan Ekonomi dan Struktur Perdagangan Daerah 2026",
+                    "Paragraf",
+                    "md/analisis-pertumbuhan-ekonomi.md",
+                    2,
+                    true,
+                ));
+                state.cards.push(PublicationCard::new_with(
+                    CardKind::Chart,
+                    "Grafik Perkembangan Nilai Tukar Petani Menurut Komoditas",
+                    "Grafik Vektor",
+                    "csv/ntp-komoditas.csv",
+                    3,
+                    true,
+                ));
+                state.cards.push(PublicationCard::new_with(
+                    CardKind::MapChart,
+                    "Peta Tematik Sebaran NTP Kabupaten/Kota Se-Jawa Barat",
+                    "Peta Kloroplet",
+                    "maps/jabar.geojson",
+                    4,
+                    true,
+                ));
+                render_card_grid(app, ui, &mut state, &t, "id");
+            },
+            app,
+        );
+        harness.input_mut().max_texture_side = Some(8192);
+        harness.run_steps(4);
+        harness.render().unwrap().save(directory.join("page-structure-cards.png")).unwrap();
+    }
+
+    /// The BRS Publication Profile must produce the same page shape as the reference document: a
+    /// narrative is a page-sized story, never an 18 000-character blob full of converter debris,
+    /// every table carries the BRS6 style, and no table repeats the caption drawn above it.
+    #[test]
+    fn test_brs_pubgen_workspace_generates_clean_pages() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()).unwrap_or_default();
+        let p_path = root.join("plan").join("pubgen").join("samples").join("brs").join("Perkembangan Nilai Tukar Petani.pubgen");
+        if !p_path.is_file() {
+            return;
+        }
+        let opened = pubgen_core::container::open_pubgen(&p_path).expect("open pubgen");
+        let report = pubgen_core::excel::IngestReport {
+            profile_id: opened.metadata.profile_id.clone(),
+            metadata: opened.metadata.clone(),
+            csv: opened.content.csv.clone(),
+            text: opened.content.text.clone(),
+            assets: opened.content.assets.clone(),
+            warnings: Vec::new(),
+        };
+        let mut state = OrchestratorWorkspaceState::default();
+        apply_ingest_report_to_state(&mut state, "Perkembangan Nilai Tukar Petani.pubgen", &report);
+
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", serde_json::json!({"facingPages": true})).expect("new doc");
+        generate_from_workspace(&mut app, &state).expect("generate BRS pages");
+
+        {
+            let active = app.session.active().expect("active document");
+            let pages = active.doc.page_count();
+            assert!((10..=14).contains(&pages), "BRS body pages: {pages} (reference document has 12)");
+            let mut longest = 0;
+            for story in active.doc.stories.values() {
+                assert!(!story.text.contains("schemas.microsoft.com"), "converter debris leaked into a story");
+                assert!(!story.text.contains("504b0304"), "an embedded package dump leaked into a story");
+                longest = longest.max(story.text.chars().count());
+            }
+            assert!(longest < 6000, "a BRS narrative ballooned to {longest} characters");
+            let tables: Vec<_> = active.doc.stories.values().flat_map(|story| story.tables.values()).collect();
+            assert_eq!(tables.len(), 4, "the four BRS tables are inserted");
+            for table in &tables {
+                assert_eq!(table.style, "BRS6", "BRS tables use the BRS6 table style");
+                let caption = table.cells.first().map(|cell| cell.text.text.to_lowercase()).unwrap_or_default();
+                assert!(!caption.starts_with("tabel "), "the caption row is drawn above the table, not inside it");
+            }
+            // Table 1 groups three columns under one header: that group must span them as a
+            // header cell instead of its child labels (`Agustus 2026`, …) ending up as a data row.
+            let grouped =
+                tables.iter().any(|table| table.cells.iter().any(|cell| cell.col_span > 1 && cell.text.text.contains("Indeks Gabungan Subsektor")));
+            assert!(grouped, "the merged header of table 1 spans its child columns");
+
+            // The header/footer parent must be laid out on the document page size. The document
+            // starts on the Letter default while BRS pages are A4, so a parent left on Letter puts
+            // the running footer ~50 pt too high. BPS puts the footer 14 pt above the trim edge.
+            let page = active.doc.page(0).expect("a page");
+            let (pw, ph) = (page.width, page.height);
+            let hf = active.doc.header_footer.as_ref().expect("the BRS header/footer is applied");
+            let parent = active.doc.parents.iter().find(|p| Some(p.id) == hf.parent).expect("the header/footer parent spread");
+            for pg in &parent.pages {
+                assert!(
+                    (pg.width - pw).abs() < 1e-6 && (pg.height - ph).abs() < 1e-6,
+                    "header/footer parent page {}×{} should match the document page {pw}×{ph}",
+                    pg.width,
+                    pg.height
+                );
+            }
+            for id in [hf.footer_items.left, hf.footer_items.right].into_iter().flatten() {
+                let b = active.doc.item(id).expect("the footer frame").bounds();
+                assert!((b.y1 - (ph - 14.0)).abs() < 0.01, "the footer ends {} pt above the trim edge; BPS puts it 14 pt above", ph - b.y1);
+            }
+        }
+
+        // `PUBGEN_TEST_OUTPUT=<dir>` keeps the generated document, so it can be rendered and looked at.
+        if let Some(dir) = std::env::var_os("PUBGEN_TEST_OUTPUT") {
+            let dir = std::path::PathBuf::from(dir);
+            if std::fs::create_dir_all(&dir).is_ok() {
+                let target = dir.join("brs_workspace_output.designcraft");
+                let _ = app.run("file.saveAs", serde_json::json!({"path": target.to_string_lossy()}));
+            }
+        }
+    }
+
+    /// Narratives must reach the pages through RTF, not Markdown: RTF carries the paragraph
+    /// alignment, indents and spacing that a Markdown projection throws away. Ingesting the
+    /// workbook therefore stages `rtf/<stem>.rtf` (an RTF source byte for byte, a `.docx` or `.md`
+    /// source converted to RTF) and generation still produces the same BRS page shape.
+    #[test]
+    fn test_brs_workbook_ingest_writes_rtf_narratives() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()).unwrap_or_default();
+        let dir = root.join("plan").join("pubgen").join("samples").join("brs");
+        let xlsx = dir.join("ntp202610.xlsx");
+        if !xlsx.is_file() {
+            return;
+        }
+        let report = pubgen_core::excel::ingest_workbook(&xlsx).expect("ingest workbook");
+        assert!(!report.text.is_empty(), "the narrative sheets produce text artifacts");
+        for (name, bytes) in &report.text {
+            assert!(name.starts_with("rtf/") && name.ends_with(".rtf"), "narrative artifact {name} is not RTF");
+            assert!(bytes.starts_with(b"{\\rtf"), "narrative artifact {name} is not an RTF file");
+        }
+        // A source that is already RTF is kept verbatim — that is what keeps its layout intact.
+        if let Ok(src) = std::fs::read(dir.join("U1.rtf")) {
+            let staged = report.text.iter().find(|(name, _)| name == "rtf/U1.rtf").map(|(_, bytes)| bytes.clone());
+            assert_eq!(staged.as_deref(), Some(src.as_slice()), "an RTF narrative must not be rewritten");
+        }
+        let mut state = OrchestratorWorkspaceState::default();
+        apply_ingest_report_to_state(&mut state, "ntp202610.xlsx", &report);
+        assert!(state.cached_content.keys().any(|key| key.starts_with("rtf/")), "narratives are staged under rtf/");
+
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", serde_json::json!({"facingPages": true})).expect("new doc");
+        generate_from_workspace(&mut app, &state).expect("generate BRS pages");
+        let active = app.session.active().expect("active document");
+        let pages = active.doc.page_count();
+        assert!((10..=14).contains(&pages), "BRS body pages from the workbook ingest: {pages}");
+        // The article landed on the page with its own alignment: the source mixes centred,
+        // justified and left-aligned paragraphs, and a Markdown round trip would flatten them.
+        let aligned =
+            active.doc.stories.values().any(|story| story.text.contains("Nilai Tukar Petani") && story.paras.iter().any(|p| p.para.align.is_some()));
+        assert!(aligned, "a narrative keeps the paragraph alignment of its RTF source");
+
+        // `PUBGEN_TEST_OUTPUT=<dir>` keeps the document this RTF path generates.
+        if let Some(dir) = std::env::var_os("PUBGEN_TEST_OUTPUT") {
+            let dir = std::path::PathBuf::from(dir);
+            if std::fs::create_dir_all(&dir).is_ok() {
+                let target = dir.join("brs_workspace_rtf_output.designcraft");
+                let _ = app.run("file.saveAs", serde_json::json!({"path": target.to_string_lossy()}));
+            }
+        }
     }
 }

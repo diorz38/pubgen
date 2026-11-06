@@ -1882,7 +1882,7 @@ pub(crate) fn open_project(app: &mut DesignApp, p: &Value) -> Result<Value, Stri
                 &path,
                 &opened.metadata,
                 &opened.content.csv,
-                &opened.content.md,
+                &opened.content.text,
                 &opened.content.assets,
             );
             ctx.request_repaint();
@@ -1930,7 +1930,7 @@ fn ask_for_manifest(app: &mut DesignApp) {
                         &path,
                         &opened.metadata,
                         &opened.content.csv,
-                        &opened.content.md,
+                        &opened.content.text,
                         &opened.content.assets,
                     );
                     ctx.request_repaint();
@@ -2017,8 +2017,11 @@ pub(crate) fn save_pubgen_package_to(app: &mut DesignApp, save_path: &Path) -> R
         let clean = key.replace('\\', "/");
         if let Some(name) = clean.strip_prefix("csv/") {
             content.csv.push((name.to_string(), bytes.clone()));
-        } else if let Some(name) = clean.strip_prefix("md/") {
-            content.md.push((name.to_string(), bytes.clone()));
+        } else if let Some(name) = clean.strip_prefix("text/").or_else(|| clean.strip_prefix("md/")) {
+            content.text.push((name.to_string(), bytes.clone()));
+        } else if clean.ends_with(".rtf") || clean.ends_with(".md") {
+            // Narrative artifacts are already named with their folder (`rtf/U1.rtf`).
+            content.text.push((clean.clone(), bytes.clone()));
         } else if let Some(name) = clean.strip_prefix("assets/") {
             content.assets.push((name.to_string(), bytes.clone()));
         }
@@ -2033,10 +2036,10 @@ pub(crate) fn save_pubgen_package_to(app: &mut DesignApp, save_path: &Path) -> R
                     let fname = p_disk.file_name().and_then(|s| s.to_str()).unwrap_or(&item.path);
                     content.csv.push((fname.to_string(), bytes));
                 }
-            } else if clean.ends_with(".md") && !content.md.iter().any(|(n, _)| clean.ends_with(n)) {
+            } else if (clean.ends_with(".rtf") || clean.ends_with(".md")) && !content.text.iter().any(|(n, _)| clean.ends_with(n)) {
                 if let Ok(bytes) = std::fs::read(p_disk) {
                     let fname = p_disk.file_name().and_then(|s| s.to_str()).unwrap_or(&item.path);
-                    content.md.push((fname.to_string(), bytes));
+                    content.text.push((fname.to_string(), bytes));
                 }
             } else if !content.assets.iter().any(|(n, _)| clean.ends_with(n)) {
                 if let Ok(bytes) = std::fs::read(p_disk) {
@@ -2068,7 +2071,7 @@ pub(crate) fn save_pubgen_package_to(app: &mut DesignApp, save_path: &Path) -> R
         "package": path_str,
         "cards": metadata.cards.len(),
         "csv_count": content.csv.len(),
-        "md_count": content.md.len()
+        "text_count": content.text.len()
     }))
 }
 
@@ -3782,7 +3785,7 @@ Grafik,01.02,Kepadatan,
 
         let res = save_package_as(&mut app, &serde_json::json!({"path": pkg_path.to_string_lossy()})).unwrap();
         assert_eq!(res["csv_count"], 1);
-        assert_eq!(res["md_count"], 1);
+        assert_eq!(res["text_count"], 1);
         assert!(pkg_path.is_file());
 
         // Clear state and open package

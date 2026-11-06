@@ -320,3 +320,8 @@ backend keeps the same files; hashes and upstream licence notices are retained h
 | `assets/pubgen/profiles/bps_brs.json` | DesignCraft contributor (authored) | PubGen profile preset: BPS Berita Resmi Statistik (single-page press release) | CC0-1.0 | Built-in publication profile |
 | `assets/pubgen/profiles/bps_dda.json` | DesignCraft contributor (authored) | PubGen profile preset: BPS Daerah Dalam Angka (standard DDA/KCDA format) | CC0-1.0 | Built-in publication profile |
 | `assets/pubgen/profiles/corporate_annual.json` | DesignCraft contributor (authored) | PubGen profile preset: Corporate Annual Report (clean rules, corporate margins) | CC0-1.0 | Built-in publication profile |
+| `assets/app-icon/pos_logo.png` | PubGen contributors (authored) | original POS app icon | CC0-1.0 | PubGen asset |
+| `assets/app-icon/pos_logo.svg` | PubGen contributors (authored) | original POS app icon | CC0-1.0 | PubGen asset |
+| `assets/pubgen/icons/gb.svg` | PubGen contributors (authored) | original language-flag icon (English) | CC0-1.0 | PubGen translation picker |
+| `assets/pubgen/icons/id.svg` | PubGen contributors (authored) | original language-flag icon (Indonesian) | CC0-1.0 | PubGen translation picker |
+| `assets/pubgen/icons/us.svg` | PubGen contributors (authored) | original language-flag icon (US English) | CC0-1.0 | PubGen translation picker |

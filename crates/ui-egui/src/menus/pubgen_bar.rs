@@ -369,7 +369,11 @@ fn submenu(ui: &mut egui::Ui, lang: &str, rtl: bool, label: &str, min_width: f32
 
 /// The generation pipeline: Excel generate, compile, charts, ToC, cover, headers and the audit.
 fn pipeline(app: &mut DesignApp, ui: &mut egui::Ui) {
-    let (compiling, covering) = crate::dock::pubgen::with_state(ui.ctx(), |st| (st.compile_job.is_some(), st.cover_job.is_some()));
+    let covering = crate::dock::pubgen::with_state(ui.ctx(), |st| st.cover_job.is_some());
+    #[cfg(not(target_arch = "wasm32"))]
+    let compiling = crate::dock::pubgen::with_state(ui.ctx(), |st| st.compile_job.is_some());
+    #[cfg(target_arch = "wasm32")]
+    let compiling = false;
     let items: Vec<crate::menus::Item> = [
         "pubgen.generateFromExcel",
         "pubgen.compileProject",

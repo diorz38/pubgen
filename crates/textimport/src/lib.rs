@@ -11,6 +11,7 @@
 mod docx;
 mod docx_numbering;
 pub mod export;
+mod markdown;
 mod rtf;
 pub mod tagged;
 mod xlsx;
@@ -119,6 +120,9 @@ pub fn import(name: &str, bytes: &[u8]) -> Result<Imported, ImportError> {
     if l.ends_with(".rtf") || bytes.starts_with(b"{\\rtf") {
         return rtf::import(bytes);
     }
+    if l.ends_with(".md") || l.ends_with(".markdown") {
+        return Ok(markdown::import(&tagged::decode(bytes)));
+    }
     if tagged::is_tagged(bytes) {
         return tagged::import(bytes);
     }
@@ -126,6 +130,18 @@ pub fn import(name: &str, bytes: &[u8]) -> Result<Imported, ImportError> {
         return Err(ImportError::Unsupported("legacy Word .doc (save it as .docx)".into()));
     }
     Ok(plain(&tagged::decode(bytes)))
+}
+
+/// Write `bytes` (a `.docx`, `.md`, `.txt` or RTF file) back out as Rich Text Format.
+///
+/// This is the conversion used when a source has to reach a pipeline that reads RTF: the import
+/// understands the paragraph layout (alignment, indents, space before/after, run formatting), and
+/// [`export::rtf`] writes it out, so nothing but style-sheet coverage is lost (a style's own font
+/// and spacing only travel as far as the local formatting the import recorded).
+pub fn to_rtf(name: &str, bytes: &[u8]) -> Result<Vec<u8>, ImportError> {
+    let imported = import(name, bytes)?;
+    let doc = designcraft_doc::Document::new(&designcraft_doc::build::NewDocument::default());
+    Ok(export::rtf(&doc, &imported.story).into_bytes())
 }
 
 /// Plain text: line breaks become paragraphs (CRLF / CR normalised). The private-use characters
@@ -155,6 +171,26 @@ mod tests {
     fn plain_text_drops_story_markers() {
         let i = import("a.txt", "a\u{E009}b\u{E000}c\u{E002}d".as_bytes()).unwrap();
         assert_eq!(i.story.text, "abcd");
+    }
+
+    #[test]
+    fn to_rtf_keeps_paragraph_alignment() {
+        let src = b"{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Arial;}}\\qc\\f0\\fs24 Centred\\par\\ql Left\\par}";
+        let out = to_rtf("a.rtf", src).unwrap();
+        let text = String::from_utf8_lossy(&out);
+        assert!(text.starts_with("{\\rtf"), "{text}");
+        assert!(text.contains("\\qc"), "alignment must survive the conversion: {text}");
+        assert!(text.contains("Centred") && text.contains("Left"));
+    }
+
+    #[test]
+    fn to_rtf_converts_plain_text_paragraphs() {
+        let out = to_rtf("a.md", b"# Title\n\nBody text.").unwrap();
+        let text = String::from_utf8_lossy(&out);
+        assert!(text.contains("Title") && text.contains("Body text."));
+        assert!(text.contains("\\par"));
+        // And it reads back as the same paragraphs.
+        assert_eq!(import("b.rtf", &out).unwrap().story.text, "Title\nBody text.");
     }
 
     #[test]

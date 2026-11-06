@@ -216,7 +216,14 @@ pub fn menu_enabled(app: &DesignApp, id: &str) -> bool {
             || !app.session.prefs.pubgen_project_path.trim().is_empty()
             || app.egui_ctx.as_ref().is_some_and(|ctx| {
                 crate::dock::pubgen::with_state(ctx, |st| {
-                    !st.compile_manifest_path.trim().is_empty() || !st.excel_source_path.trim().is_empty() || st.compile_new_dialog.is_some()
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        !st.compile_manifest_path.trim().is_empty() || !st.excel_source_path.trim().is_empty() || st.compile_new_dialog.is_some()
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        !st.compile_manifest_path.trim().is_empty() || !st.excel_source_path.trim().is_empty()
+                    }
                 })
             });
     }

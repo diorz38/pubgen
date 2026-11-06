@@ -4,7 +4,7 @@
 use crate::workspace::{CardKind, CardScope, Language, PageLayout, PublicationCard, PublicationMetadata};
 use calamine::{Data, Reader, Sheets, open_workbook_auto};
 use chrono::{Datelike, NaiveDate};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
@@ -22,7 +22,9 @@ pub struct IngestReport {
     pub profile_id: String,
     pub metadata: PublicationMetadata,
     pub csv: Vec<(String, Vec<u8>)>,
-    pub md: Vec<(String, Vec<u8>)>,
+    /// Narrative text files, as RTF (`rtf/<stem>.rtf`): the format that keeps paragraph layout.
+    /// Packages from before the RTF change also carry Markdown (`md/<stem>.md`), still read.
+    pub text: Vec<(String, Vec<u8>)>,
     pub assets: Vec<(String, Vec<u8>)>,
     pub warnings: Vec<String>,
 }
@@ -45,7 +47,7 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
         extra: BTreeMap::new(),
     };
     let mut csv = Vec::new();
-    let mut md = Vec::new();
+    let mut texts = Vec::new();
     let mut assets = Vec::new();
     let mut warnings = Vec::new();
 
@@ -65,7 +67,17 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
         let (kind, scope) = classify_sheet(name, profile_id, &kv);
         let file_name = safe_sheet_name(name);
         let csv_path = format!("csv/{file_name}.csv");
-        let csv_bytes = rows_to_csv(&rows)?;
+        // Table sheets use the merged-header CSV convention the page generator
+        // expects; chart/map/narrative sheets keep the raw grid dump (the chart
+        // renderer parses those directly).
+        let merges = sheet_merges(&mut workbook, name);
+        let csv_bytes = if kind == CardKind::Table {
+            merged_table_csv(&rows, &merges, kv.get("theme").or_else(|| kv.get("tema")).map(String::as_str))
+                .map(String::into_bytes)
+                .unwrap_or(rows_to_csv(&rows)?)
+        } else {
+            rows_to_csv(&rows)?
+        };
         csv.push((csv_path.clone(), csv_bytes));
 
         let mut card_source = Some(csv_path);
@@ -77,7 +89,7 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
         }
 
         if kind == CardKind::Narrative {
-            let (t, s) = process_narrative_sheet(base_dir, name, &file_name, &rows, &kv, card_title, &mut md);
+            let (t, s) = process_narrative_sheet(base_dir, name, &file_name, &rows, &kv, card_title, &mut texts);
             card_title = t;
             card_source = s;
         } else if matches!(kind, CardKind::Image | CardKind::Divider) {
@@ -92,6 +104,22 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
             if let Some(tbl) = kv.get("table").or_else(|| kv.get("tabel")) {
                 card_source = Some(format!("csv/{tbl}.csv"));
             }
+            // Raster chart: bind the image asset so page generation can place
+            // it; vector chart specs keep the sheet's data CSV.
+            let img_val = kv.get("file").or_else(|| kv.get("image")).or_else(|| kv.get("gambar")).map(|s| s.trim()).filter(|s| !s.is_empty());
+            if let Some(img_val) = img_val {
+                let lower = img_val.to_lowercase();
+                if lower.ends_with(".png") || lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+                    let just_name = Path::new(img_val).file_name().and_then(|s| s.to_str()).unwrap_or(img_val).to_string();
+                    if let Some(bytes) = resolve_file(base_dir, img_val).and_then(|p| std::fs::read(&p).ok()) {
+                        let asset_path = format!("assets/{just_name}");
+                        if !assets.iter().any(|(p, _): &(String, Vec<u8>)| p == &asset_path) {
+                            assets.push((asset_path.clone(), bytes));
+                        }
+                        card_settings.insert("image".to_string(), serde_json::Value::String(asset_path));
+                    }
+                }
+            }
             if card_title == *name {
                 card_title = format!("Grafik {name}");
             }
@@ -100,7 +128,7 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
         metadata.cards.push(PublicationCard { id: file_name, kind, scope, source: card_source, title: card_title, settings: card_settings });
     }
 
-    Ok(IngestReport { profile_id: profile_id.to_string(), metadata, csv, md, assets, warnings })
+    Ok(IngestReport { profile_id: profile_id.to_string(), metadata, csv, text: texts, assets, warnings })
 }
 
 fn ingest_cover_sheet(
@@ -130,11 +158,10 @@ fn ingest_cover_sheet(
             if !metadata.title.is_empty() {
                 card_settings.insert("title".to_string(), serde_json::Value::String(metadata.title.clone()));
             }
-            if let Some(ref ten) = metadata.title_en {
+            if let Some(ten) = &metadata.title_en {
                 card_settings.insert("title_en".to_string(), serde_json::Value::String(ten.clone()));
             }
-
-            metadata.cards.push(PublicationCard {
+            let card = PublicationCard {
                 id: file_name,
                 kind: CardKind::Cover,
                 scope: CardScope::NewPage,
@@ -145,28 +172,13 @@ fn ingest_cover_sheet(
                     "Sampul Berita Resmi Statistik (COV)".to_string()
                 },
                 settings: card_settings,
-            });
+            };
+            metadata.cards.push(card);
             break;
         }
     }
 
-    for key in [
-        "image_theme1",
-        "image_theme2",
-        "qr",
-        "pic_photo",
-        "image",
-        "imagehero",
-        "image_hero",
-        "imagelandscape",
-        "image_landscape",
-        "logo",
-        "officelogo",
-        "event_theme",
-        "themeevent",
-        "theme1",
-        "theme2",
-    ] {
+    for key in ["image_theme1", "image_theme2", "qr", "pic_photo", "image", "imagehero", "theme1", "theme2"] {
         let Some(file_name) = metadata.extra.get(key) else { continue };
         let Some(resolved) = resolve_file(base_dir, file_name) else { continue };
         let Ok(bytes) = std::fs::read(&resolved) else { continue };
@@ -178,6 +190,30 @@ fn ingest_cover_sheet(
     Ok(())
 }
 
+/// One RTF paragraph per line, for a narrative that has no source file at all: the worksheet text
+/// is the whole story there, so the fallback only has to be valid RTF.
+fn plain_text_rtf(text: &str) -> Vec<u8> {
+    let mut out = String::from("{\\rtf1\\ansi\\deff0 ");
+    for line in text.lines() {
+        for ch in line.chars() {
+            match ch {
+                '\\' | '{' | '}' => {
+                    out.push('\\');
+                    out.push(ch);
+                }
+                '\t' => out.push_str("\\tab "),
+                c if c.is_ascii() => out.push(c),
+                // RTF's Unicode escape takes a signed 16-bit unit; characters past the basic
+                // multilingual plane cannot be written that way, so they become '?'.
+                c => out.push_str(&format!("\\u{}?", u16::try_from(u32::from(c)).unwrap_or(0xFFFD) as i16)),
+            }
+        }
+        out.push_str("\\par\n");
+    }
+    out.push('}');
+    out.into_bytes()
+}
+
 fn process_narrative_sheet(
     base_dir: &Path,
     name: &str,
@@ -185,50 +221,56 @@ fn process_narrative_sheet(
     rows: &[Vec<String>],
     kv: &BTreeMap<String, String>,
     mut card_title: String,
-    md: &mut Vec<(String, Vec<u8>)>,
+    texts: &mut Vec<(String, Vec<u8>)>,
 ) -> (String, Option<String>) {
     let explicit_file = kv.get("file").or_else(|| kv.get("berkas")).cloned();
     let candidate_name = explicit_file
         .unwrap_or_else(|| if name.starts_with('U') || name.starts_with('u') { format!("{name}.rtf") } else { format!("{file_name}.rtf") });
 
     let stem = Path::new(&candidate_name).file_stem().and_then(|s| s.to_str()).unwrap_or(file_name);
-    let md_path = format!("md/{stem}.md");
+    let rtf_path = format!("rtf/{stem}.rtf");
 
-    let mut resolved_md = None;
+    // Narratives travel as RTF: that is the one format that keeps the paragraph layout the page
+    // generator places (alignment, indents, space before/after, run formatting). A Word file is
+    // imported and written back out as RTF; Markdown or plain text from an older workspace is
+    // imported and written as RTF too, instead of being handed on as Markdown.
+    let mut resolved_rtf = None;
     if let Some((path, bytes)) = resolve_narrative_file(base_dir, &candidate_name, name).and_then(|p| std::fs::read(&p).ok().map(|b| (p, b))) {
         let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
         if ext == "rtf" {
-            if let Ok(converted) = rtf_to_md(&bytes) {
-                resolved_md = Some(converted.into_bytes());
-            }
-        } else if ext == "md" || ext == "txt" {
-            resolved_md = Some(bytes);
+            resolved_rtf = Some(bytes);
+        } else if let Ok(converted) = designcraft_textimport::to_rtf(&format!("{stem}.{ext}"), &bytes) {
+            resolved_rtf = Some(converted);
         }
     }
 
-    let md_bytes = resolved_md.unwrap_or_else(|| {
-        let mut content = String::new();
-        for row in rows {
-            let line = row.iter().map(String::as_str).filter(|s| !s.trim().is_empty()).collect::<Vec<_>>().join(" ");
-            if !line.is_empty() {
-                content.push_str(&line);
-                content.push_str("\n\n");
+    let rtf_bytes = match resolved_rtf {
+        Some(bytes) => bytes,
+        None => {
+            // No narrative file: what the worksheet says becomes the paragraphs.
+            let mut content = String::new();
+            for row in rows {
+                let line = row.iter().map(String::as_str).filter(|s| !s.trim().is_empty()).collect::<Vec<_>>().join(" ");
+                if !line.is_empty() {
+                    content.push_str(&line);
+                    content.push('\n');
+                }
             }
+            if content.trim().is_empty() {
+                content = format!("{card_title}\n\nNarasi untuk bagian {name}.");
+            }
+            designcraft_textimport::to_rtf("narasi.txt", content.as_bytes()).unwrap_or_else(|_| plain_text_rtf(&content))
         }
-        if content.trim().is_empty() {
-            content = format!("# {card_title}\n\nNarasi untuk bagian {name}.\n");
-        }
-        content.into_bytes()
-    });
+    };
 
-    if !md.iter().any(|(p, _): &(String, Vec<u8>)| p == &md_path) {
-        md.push((md_path.clone(), md_bytes));
+    if !texts.iter().any(|(p, _): &(String, Vec<u8>)| p == &rtf_path) {
+        texts.push((rtf_path.clone(), rtf_bytes));
     }
 
     if name == "U1" {
         card_title = "Ulasan Indikator Utama (U1)".to_string();
     } else if name.starts_with('U') || name.starts_with('u') {
-        card_title = format!("Ulasan Narasi {name} ({stem}.md)");
+        card_title = format!("Ulasan Narasi {name} ({stem}.rtf)");
     } else if card_title == *name {
         let upper = name.to_ascii_uppercase();
         if upper.starts_with('A') {
@@ -248,7 +290,7 @@ fn process_narrative_sheet(
         }
     }
 
-    (card_title, Some(md_path))
+    (card_title, Some(rtf_path))
 }
 
 fn process_image_or_divider_sheet(
@@ -259,6 +301,10 @@ fn process_image_or_divider_sheet(
     mut card_title: String,
     assets: &mut Vec<(String, Vec<u8>)>,
 ) -> (String, Option<String>) {
+    let lower = card_title.trim().to_ascii_lowercase();
+    if card_title.trim().is_empty() || ["file", "image", "berkas", "gambar"].contains(&lower.as_str()) {
+        card_title = if kind == CardKind::Divider { format!("Pembatas {name}") } else { format!("Gambar / Infografis {name}") };
+    }
     let img_candidate = kv
         .get("file")
         .or_else(|| kv.get("image"))
@@ -531,100 +577,36 @@ fn parse_cover(rows: &[Vec<String>], metadata: &mut PublicationMetadata, warning
             continue;
         }
         let norm: String = raw_key.to_ascii_lowercase().chars().filter(|c| !matches!(c, '_' | ' ' | '-')).collect();
-        metadata.extra.insert(raw_key.to_ascii_lowercase(), value.clone());
         match norm.as_str() {
             "title" | "title1" | "titleid" => {
                 metadata.title = value.clone();
-                metadata.extra.insert("title".into(), value.clone());
-                metadata.extra.insert("title1".into(), value);
+                metadata.extra.insert("title".into(), value);
             }
             "titleen" | "title2" | "title_en" => {
                 metadata.title_en = Some(value.clone());
-                metadata.extra.insert("title_en".into(), value.clone());
-                metadata.extra.insert("title2".into(), value);
+                metadata.extra.insert("title_en".into(), value);
             }
             "no" | "nomor" | "releaseno" | "volumeno" | "katalog" | "catalogue" | "nocatalogue" => {
                 release_no = value.clone();
-                metadata.extra.insert("release_no".into(), value.clone());
-                metadata.extra.insert("no".into(), value);
+                metadata.extra.insert("release_no".into(), value);
             }
             "date" | "tanggal" | "tgl" | "releasedate" | "volumedate" => {
                 let fmt = format_excel_date(&value);
                 release_date = fmt.clone();
-                metadata.extra.insert("release_date".into(), fmt.clone());
-                metadata.extra.insert("date".into(), fmt);
+                metadata.extra.insert("release_date".into(), fmt);
             }
             "month" | "bulan" | "releasemonth" => {
                 let fmt = format_excel_month_year(&value);
                 release_month = fmt.clone();
-                metadata.extra.insert("release_month".into(), fmt.clone());
-                metadata.extra.insert("month".into(), fmt);
+                metadata.extra.insert("release_month".into(), fmt);
             }
             "agency" | "puboffice" | "officename" | "instansi" | "lembaga" => {
                 agency = value.clone();
-                metadata.extra.insert("agency".into(), value.clone());
-                metadata.extra.insert("pub_office".into(), value);
+                metadata.extra.insert("agency".into(), value);
             }
-            "year" | "tahun" => {
-                metadata.extra.insert("year".into(), value);
+            _ => {
+                metadata.extra.insert(raw_key.to_ascii_lowercase(), value);
             }
-            "volume" | "vol" => {
-                metadata.extra.insert("volume".into(), value);
-            }
-            "code" | "issn" | "isbn" => {
-                metadata.extra.insert("code".into(), value);
-            }
-            "picname" | "pic" | "narasumber" | "nama" => {
-                metadata.extra.insert("pic_name".into(), value);
-            }
-            "picphoto" | "photo" | "foto" => {
-                metadata.extra.insert("pic_photo".into(), value);
-            }
-            "picposition" | "position" | "jabatan" => {
-                metadata.extra.insert("pic_position".into(), value);
-            }
-            "picoffice" | "office" | "kantor" => {
-                metadata.extra.insert("pic_office".into(), value);
-            }
-            "picphone" | "phone" | "telepon" | "telp" => {
-                metadata.extra.insert("pic_phone".into(), value);
-            }
-            "picemail" | "email" | "surel" => {
-                metadata.extra.insert("pic_email".into(), value);
-            }
-            "style" | "coverstyle" | "template" => {
-                metadata.extra.insert("style".into(), value.clone());
-                metadata.extra.insert("template".into(), value);
-            }
-            "theme" | "tabletheme" | "colortheme" | "warna" => {
-                metadata.extra.insert("theme".into(), value);
-            }
-            "palette" | "aipalette" | "colorpalette" | "palet" => {
-                metadata.extra.insert("palette".into(), value);
-            }
-            "image1" | "imagehero" | "image" => {
-                metadata.extra.insert("image_hero".into(), value.clone());
-                metadata.extra.insert("imagehero".into(), value);
-            }
-            "imagelandscape" | "imagelanscape" | "landscape" => {
-                metadata.extra.insert("image_landscape".into(), value);
-            }
-            "logo" | "officelogo" => {
-                metadata.extra.insert("logo".into(), value);
-            }
-            "officeaddress" | "address" | "alamat" | "alamatkantor" => {
-                metadata.extra.insert("office_address".into(), value);
-            }
-            "eventtheme" | "themeevent" | "backimage" | "backcover" => {
-                metadata.extra.insert("event_theme".into(), value);
-            }
-            "point" | "poin" | "highlight" => {
-                metadata.extra.insert("point".into(), value);
-            }
-            "qr" | "qrcode" => {
-                metadata.extra.insert("qr".into(), value);
-            }
-            _ => {}
         }
     }
 
@@ -767,321 +749,114 @@ fn resolve_narrative_file(base: &Path, file_name: &str, sheet_name: &str) -> Opt
     None
 }
 
-/// Convert RTF bytes into Markdown.
-pub fn rtf_to_md(bytes: &[u8]) -> Result<String, IngestError> {
-    let data = String::from_utf8_lossy(bytes);
-    let style_map = rtf_parse_stylesheet(&data);
-
-    let mut out = String::new();
-    let mut para = String::new();
-    let mut run = String::new();
-    let mut run_bold = false;
-    let mut run_italic = false;
-    let mut bold = 0usize;
-    let mut italic = 0usize;
-    let mut skip_depth = 0usize;
-    let mut para_prefix = String::new();
-
-    let chars: Vec<char> = data.chars().collect();
-    let mut i = 0usize;
-
-    let skipped = [
-        "fonttbl",
-        "colortbl",
-        "stylesheet",
-        "info",
-        "pict",
-        "objdata",
-        "header",
-        "footer",
-        "listtable",
-        "listoverridetable",
-        "generator",
-        "pntext",
-        "pn",
-    ];
-
-    fn push_run(para: &mut String, run: &mut String, bold: bool, italic: bool) {
-        if run.is_empty() {
-            return;
-        }
-        let text = std::mem::take(run);
-        let wrap = bold || italic;
-        let core_start = if wrap { text.len().saturating_sub(text.trim_start().len()) } else { 0 };
-        let core_end = if wrap { text.trim_end().len() } else { text.len() };
-        if let Some(slice) = text.get(..core_start) {
-            para.push_str(slice);
-        }
-        let core_slice = if core_start < core_end { text.get(core_start..core_end) } else { None };
-        if let Some(core) = core_slice {
-            let wrapped = match (bold, italic) {
-                (true, true) => format!("***{core}***"),
-                (true, false) => format!("**{core}**"),
-                (false, true) => format!("_{core}_"),
-                (false, false) => core.to_owned(),
-            };
-            para.push_str(&wrapped);
-        }
-        if let Some(slice) = text.get(core_end..) {
-            para.push_str(slice);
-        }
-    }
-
-    fn transition(para: &mut String, run: &mut String, run_bold: &mut bool, run_italic: &mut bool, bold: bool, italic: bool) {
-        if bold != *run_bold || italic != *run_italic {
-            push_run(para, run, *run_bold, *run_italic);
-            *run_bold = bold;
-            *run_italic = italic;
-        }
-    }
-
-    fn flush(para: &mut String, run: &mut String, run_bold: &mut bool, run_italic: &mut bool, out: &mut String, prefix: &mut String) {
-        push_run(para, run, *run_bold, *run_italic);
-        let line = para.trim().to_owned();
-        if !line.is_empty() {
-            if !prefix.is_empty() {
-                out.push_str(prefix);
-            }
-            out.push_str(&line);
-            out.push_str("\n\n");
-        }
-        para.clear();
-        prefix.clear();
-    }
-
-    while i < chars.len() {
-        if skip_depth > 0 {
-            if let Some(&c) = chars.get(i) {
-                match c {
-                    '{' => skip_depth = skip_depth.saturating_add(1),
-                    '}' => skip_depth = skip_depth.saturating_sub(1),
-                    _ => {}
-                }
-            }
-            i = i.saturating_add(1);
-            continue;
-        }
-        let Some(&c) = chars.get(i) else { break };
-        match c {
-            '{' | '}' => i = i.saturating_add(1),
-            '\\' => {
-                i = i.saturating_add(1);
-                let Some(&next_c) = chars.get(i) else { break };
-                match next_c {
-                    '\\' | '{' | '}' => {
-                        transition(&mut para, &mut run, &mut run_bold, &mut run_italic, bold > 0, italic > 0);
-                        para.push(next_c);
-                        i = i.saturating_add(1);
-                    }
-                    '~' => {
-                        para.push(' ');
-                        i = i.saturating_add(1);
-                    }
-                    '\'' => {
-                        i = i.saturating_add(1);
-                        if let (Some(&c1), Some(&c2)) = (chars.get(i), chars.get(i + 1)) {
-                            let hex_str: String = [c1, c2].iter().collect();
-                            if let Ok(byte) = u8::from_str_radix(&hex_str, 16) {
-                                let decoded = [byte];
-                                let decoded_str = String::from_utf8_lossy(&decoded);
-                                transition(&mut para, &mut run, &mut run_bold, &mut run_italic, bold > 0, italic > 0);
-                                run.push_str(&decoded_str);
-                            }
-                            i = i.saturating_add(2);
-                        }
-                    }
-                    'a'..='z' | 'A'..='Z' => {
-                        let start = i;
-                        while i < chars.len() && chars.get(i).is_some_and(|ch| ch.is_ascii_alphabetic()) {
-                            i = i.saturating_add(1);
-                        }
-                        let word: String = chars[start..i].iter().collect();
-                        let mut param = String::new();
-                        while i < chars.len() && chars.get(i).is_some_and(|ch| ch.is_ascii_digit() || *ch == '-') {
-                            if let Some(&ch) = chars.get(i) {
-                                param.push(ch);
-                            }
-                            i = i.saturating_add(1);
-                        }
-                        if i < chars.len() && chars.get(i) == Some(&' ') {
-                            i = i.saturating_add(1);
-                        }
-                        match word.as_str() {
-                            "par" | "sect" => flush(&mut para, &mut run, &mut run_bold, &mut run_italic, &mut out, &mut para_prefix),
-                            "line" | "lbr" => {
-                                transition(&mut para, &mut run, &mut run_bold, &mut run_italic, bold > 0, italic > 0);
-                                para.push_str("  \n");
-                            }
-                            "tab" => para.push('\t'),
-                            "pard" => para_prefix.clear(),
-                            "s" if !param.is_empty() => {
-                                if let Some(pfx) = param.parse::<u32>().ok().and_then(|idx| style_map.get(&idx)) {
-                                    para_prefix = pfx.clone();
-                                }
-                            }
-                            "outlinelevel" if !param.is_empty() => {
-                                if let Ok(level) = param.parse::<u32>() {
-                                    let count = (level + 1).clamp(1, 6) as usize;
-                                    para_prefix = format!("{} ", "#".repeat(count));
-                                }
-                            }
-                            "b" => {
-                                if param == "0" {
-                                    bold = bold.saturating_sub(1);
-                                    if bold == 0 {
-                                        transition(&mut para, &mut run, &mut run_bold, &mut run_italic, false, italic > 0);
-                                    }
-                                } else {
-                                    if bold == 0 {
-                                        transition(&mut para, &mut run, &mut run_bold, &mut run_italic, true, italic > 0);
-                                    }
-                                    bold = bold.saturating_add(1);
-                                }
-                            }
-                            "i" => {
-                                if param == "0" {
-                                    italic = italic.saturating_sub(1);
-                                    if italic == 0 {
-                                        transition(&mut para, &mut run, &mut run_bold, &mut run_italic, bold > 0, false);
-                                    }
-                                } else {
-                                    if italic == 0 {
-                                        transition(&mut para, &mut run, &mut run_bold, &mut run_italic, bold > 0, true);
-                                    }
-                                    italic = italic.saturating_add(1);
-                                }
-                            }
-                            "u" => {
-                                let code: i32 = param.trim_start_matches('-').parse().unwrap_or(0);
-                                transition(&mut para, &mut run, &mut run_bold, &mut run_italic, bold > 0, italic > 0);
-                                if let Some(ch) = char::from_u32(code as u32) {
-                                    run.push(ch);
-                                }
-                                if i < chars.len() {
-                                    i = i.saturating_add(1);
-                                }
-                            }
-                            w if skipped.contains(&w) => skip_depth = skip_depth.saturating_add(1),
-                            _ => {}
-                        }
-                    }
-                    _ => i = i.saturating_add(1),
-                }
-            }
-            '\r' | '\n' => i = i.saturating_add(1),
-            _ => {
-                transition(&mut para, &mut run, &mut run_bold, &mut run_italic, bold > 0, italic > 0);
-                run.push(c);
-                i = i.saturating_add(1);
-            }
-        }
-    }
-    flush(&mut para, &mut run, &mut run_bold, &mut run_italic, &mut out, &mut para_prefix);
-    Ok(out)
+/// True for characters that only ever appear in RTF/WordML debris (punctuation, digits and
+/// whitespace), never as the start of a narrative paragraph.
+fn is_debris_char(ch: char) -> bool {
+    ch.is_whitespace() || "()[]{}.,;:'\"`~!@#$%^&*_-+=|\\/<>?0123456789".contains(ch)
 }
 
-fn rtf_parse_stylesheet(data: &str) -> HashMap<u32, String> {
-    let mut map = HashMap::new();
-    let Some(ss_off) = data.find("\\stylesheet") else { return map };
+/// Repair a Markdown narrative that an older RTF converter polluted with WordML debris.
+///
+/// Two kinds of damage are healed, both from the same legacy converter:
+/// - the leaked `{\*\xmlnstbl …}` group left the schema URL plus the run of punctuation and hex
+///   digits that follows it (`http://schemas.microsoft.com/office/word/2003/wordml2450...)()()`)
+///   in front of the real first paragraph, and a hex data run (`0000…`) after the last one;
+/// - the whole embedded OOXML package was dumped as one hex paragraph (`504b0304…`, followed by
+///   Word style names) after the last real paragraph, which inflated a 1 200-character narrative
+///   to 18 000 characters and broke pagination.
+///
+/// Clean Markdown is returned untouched: the head repair only runs when a schema URL sits in the
+/// first 400 characters, and the paragraph tail only when a ZIP magic shows up, which lets legacy
+/// `.pubgen` packages heal on open without risking a rewrite of good text.
+pub fn sanitize_markdown(text: &str) -> String {
+    trim_embedded_package_dump(&strip_head_debris(text))
+}
 
-    let mut depth = 1i32;
-    let mut entry: Vec<char> = Vec::new();
-    let mut in_entry = false;
-
-    for c in data[ss_off..].chars() {
-        match c {
-            '{' => {
-                depth += 1;
-                if depth == 2 {
-                    entry.clear();
-                    in_entry = true;
-                } else if in_entry {
-                    entry.push(c);
-                }
-            }
-            '}' => {
-                if depth == 2 && in_entry {
-                    let mut style_idx: Option<u32> = None;
-                    let mut outline_lvl: Option<u32> = None;
-                    let mut segments: Vec<String> = Vec::new();
-                    let mut seg = String::new();
-                    let mut ei = 0usize;
-
-                    while ei < entry.len() {
-                        if entry.get(ei) == Some(&'\\') {
-                            if !seg.trim().is_empty() {
-                                segments.push(std::mem::take(&mut seg));
-                            } else {
-                                seg.clear();
-                            }
-                            ei = ei.saturating_add(1);
-                            if ei < entry.len() && entry.get(ei).is_some_and(|ch| !ch.is_ascii_alphabetic()) {
-                                ei = ei.saturating_add(1);
-                                continue;
-                            }
-                            let w_start = ei;
-                            while ei < entry.len() && entry.get(ei).is_some_and(|ch| ch.is_ascii_alphabetic()) {
-                                ei = ei.saturating_add(1);
-                            }
-                            let word: String = entry[w_start..ei].iter().collect();
-                            let mut param = String::new();
-                            while ei < entry.len() && entry.get(ei).is_some_and(|ch| ch.is_ascii_digit() || *ch == '-') {
-                                if let Some(&ch) = entry.get(ei) {
-                                    param.push(ch);
-                                }
-                                ei = ei.saturating_add(1);
-                            }
-                            if ei < entry.len() && entry.get(ei) == Some(&' ') {
-                                ei = ei.saturating_add(1);
-                            }
-                            if word == "s" && style_idx.is_none() {
-                                style_idx = param.parse().ok().or(Some(0));
-                            } else if word == "outlinelevel" {
-                                outline_lvl = param.parse().ok();
-                            }
-                        } else if entry.get(ei) == Some(&'{') || entry.get(ei) == Some(&'}') {
-                            ei = ei.saturating_add(1);
-                        } else {
-                            if let Some(&ch) = entry.get(ei) {
-                                seg.push(ch);
-                            }
-                            ei = ei.saturating_add(1);
-                        }
-                    }
-                    if !seg.trim().is_empty() {
-                        segments.push(seg);
-                    }
-
-                    let name = segments.last().map(|s| s.trim().trim_end_matches(';').trim().to_ascii_lowercase()).unwrap_or_default();
-
-                    let prefix = if name.contains("heading 1") || name.contains("judul 1") {
-                        Some("# ".to_string())
-                    } else if name.contains("heading 2") || name.contains("judul 2") {
-                        Some("## ".to_string())
-                    } else if name.contains("heading 3") || name.contains("judul 3") {
-                        Some("### ".to_string())
-                    } else {
-                        outline_lvl.map(|lvl| format!("{} ", "#".repeat((lvl + 1).clamp(1, 6) as usize)))
-                    };
-
-                    if let (Some(idx), Some(pfx)) = (style_idx, prefix) {
-                        map.insert(idx, pfx);
-                    }
-                    in_entry = false;
-                } else if in_entry {
-                    entry.push(c);
-                }
-                depth -= 1;
-                if depth <= 0 {
-                    break;
-                }
-            }
-            _ if in_entry => entry.push(c),
-            _ => {}
-        }
+/// Drop the hex dump of an embedded OOXML package that an old converter appended to a narrative.
+///
+/// `504b0304` / `504b0102` are the hex spellings of the ZIP local-file-header and
+/// central-directory magic (`PK\x03\x04` / `PK\x01\x02`): no sentence contains that run, so
+/// everything from the paragraph that starts with it to the end of the text is converter debris.
+fn trim_embedded_package_dump(text: &str) -> String {
+    const ZIP_MAGICS: [&str; 2] = ["504b0304", "504b0102"];
+    let lower = text.to_ascii_lowercase();
+    let Some(dump_pos) = ZIP_MAGICS.iter().filter_map(|magic| lower.find(magic)).min() else {
+        return text.to_owned();
+    };
+    let Some(head) = text.get(..dump_pos) else {
+        return text.to_owned();
+    };
+    if head.trim().is_empty() {
+        return String::new();
     }
+    // Only cut when the dump starts its own paragraph; text glued onto a sentence is left alone.
+    let Some(boundary) = head.rfind("\n\n") else {
+        return text.to_owned();
+    };
+    text.get(..boundary).unwrap_or(text).trim_end().to_owned()
+}
 
-    map
+/// Drop the WordML debris in front of the first real paragraph of a legacy narrative.
+fn strip_head_debris(text: &str) -> String {
+    const MARKER: &str = "schemas.microsoft.com";
+    let head_len = text.char_indices().nth(400).map_or(text.len(), |(index, _)| index);
+    let Some(head) = text.get(..head_len) else {
+        return text.to_owned();
+    };
+    let Some(url_pos) = head.find(MARKER) else {
+        return text.to_owned();
+    };
+    let tail = text.get(url_pos..).unwrap_or_default();
+    // Skip the leaked URL token (`http://…/wordml2450`), then the punctuation/digit run
+    // behind it, stopping at the first character that can start real text.
+    let token_end = tail.char_indices().find(|(_, ch)| !(ch.is_ascii_alphanumeric() || "./:-_".contains(*ch))).map_or(tail.len(), |(index, _)| index);
+    let resume = tail
+        .get(token_end..)
+        .unwrap_or_default()
+        .char_indices()
+        .find(|(_, ch)| !is_debris_char(*ch))
+        .map_or(tail.len(), |(index, _)| token_end.saturating_add(index));
+
+    // The debris is the head of the converted file, so everything in front of the first real
+    // paragraph goes — including the `http://` scheme that precedes the matched URL. A heading
+    // marker printed before the debris (`# http://…debris…Title`) is kept.
+    let prefix = text.get(..url_pos).unwrap_or_default();
+    let body = text.get(url_pos.saturating_add(resume)..).unwrap_or_default();
+    let mut out = String::new();
+    out.push_str(&leading_heading_marker(prefix));
+    out.push_str(body);
+    trim_trailing_debris(&out)
+}
+
+/// Drop the hex data run the old converter appended after the last paragraph (`0000…ffff…`):
+/// a long uninterrupted block of hex digits at the very end, which no sentence ends with.
+fn trim_trailing_debris(text: &str) -> String {
+    let mut out = text.trim_end().to_owned();
+    while let Some(run_start) = out.char_indices().rev().take_while(|(_, ch)| ch.is_ascii_hexdigit()).last().map(|(index, _)| index) {
+        let run = out.get(run_start..).unwrap_or_default();
+        if run.len() < 40 {
+            break;
+        }
+        out = out.get(..run_start).unwrap_or_default().trim_end().to_owned();
+    }
+    out
+}
+
+/// A Markdown heading marker (`#`, `##`, … plus its space) that sits in front of the debris and
+/// must survive the repair, so the first paragraph keeps its heading style.
+fn leading_heading_marker(prefix: &str) -> String {
+    let trimmed = prefix.trim_start();
+    let hash_count = trimmed.chars().take_while(|ch| *ch == '#').count();
+    if hash_count == 0 || hash_count > 6 {
+        return String::new();
+    }
+    let Some(rest) = trimmed.get(hash_count..) else {
+        return String::new();
+    };
+    if !rest.starts_with(char::is_whitespace) {
+        return String::new();
+    }
+    trimmed.get(..hash_count.saturating_add(1)).unwrap_or_default().to_owned()
 }
 
 fn cell_text(cell: &Data) -> String {
@@ -1109,6 +884,291 @@ fn rows_to_csv(rows: &[Vec<String>]) -> Result<Vec<u8>, IngestError> {
         writer.write_record(row).map_err(|e| IngestError::Invalid(format!("CSV conversion failed: {e}")))?;
     }
     writer.into_inner().map_err(|e| IngestError::Invalid(format!("CSV finalize failed: {e}")))
+}
+
+/// Merged-cell list for one worksheet in UI catalog convention: ((col_start, row_start), (col_end, row_end)).
+/// Only XLSX/XLS carry merge info; other formats report none.
+fn sheet_merges(workbook: &mut Sheets<std::io::BufReader<std::fs::File>>, name: &str) -> Vec<((usize, usize), (usize, usize))> {
+    let cells = match workbook {
+        Sheets::Xlsx(x) => x.worksheet_merge_cells(name).and_then(Result::ok).unwrap_or_default(),
+        Sheets::Xls(x) => x.worksheet_merge_cells(name).unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    cells.iter().map(|d| (((d.start.1) as usize, (d.start.0) as usize), ((d.end.1) as usize, (d.end.0) as usize))).collect()
+}
+
+/// True when the first cell of a row marks a footnote/source row under a table.
+pub fn matches_table_note_keyword(col1: &str) -> bool {
+    let lower = col1.trim().to_lowercase();
+    lower.starts_with("keterangan")
+        || lower.starts_with("ket.")
+        || lower.starts_with("ket ")
+        || lower == "ket"
+        || lower.starts_with("catatan")
+        || lower.starts_with("note")
+        || lower.starts_with("sumber")
+        || lower.starts_with("source")
+}
+
+pub fn is_table_note_or_source_row(row: &[impl AsRef<str>]) -> bool {
+    let Some(col1) = row.first().map(|s| s.as_ref().trim()) else {
+        return false;
+    };
+    if col1.is_empty() || !matches_table_note_keyword(col1) {
+        return false;
+    }
+
+    row.get(1).map(|s| s.as_ref().trim().contains(':')).unwrap_or(false)
+}
+
+/// Reconstruct table column headers by propagating horizontal & vertical
+/// cell merges across header rows and joining ancestor levels with `--`.
+#[allow(clippy::needless_range_loop)]
+pub fn build_merged_table_headers(
+    grid: &[Vec<String>],
+    merges: &[((usize, usize), (usize, usize))],
+    header_start_row: usize,
+    header_end_row: usize,
+    num_cols: usize,
+) -> Vec<String> {
+    let header_rows_count = (header_end_row.saturating_sub(header_start_row) + 1).max(1);
+    let mut eff_grid = vec![vec![String::new(); num_cols]; header_rows_count];
+
+    for (r_offset, r) in (header_start_row..=header_end_row).enumerate() {
+        if let Some(row_cells) = grid.get(r) {
+            for c in 0..num_cols {
+                if let Some(val) = row_cells.get(c) {
+                    eff_grid[r_offset][c] = val.trim().to_string();
+                }
+            }
+        }
+    }
+
+    for &((sc, sr), (ec, er)) in merges {
+        if sr <= header_end_row && er >= header_start_row {
+            let val = grid.get(sr).and_then(|row| row.get(sc)).map(|s| s.trim()).unwrap_or("");
+            if !val.is_empty() && sc < ec {
+                for r in sr.max(header_start_row)..=er.min(header_end_row) {
+                    let r_off = r.saturating_sub(header_start_row);
+                    for c in sc..=ec.min(num_cols.saturating_sub(1)) {
+                        if eff_grid[r_off][c].is_empty() {
+                            eff_grid[r_off][c] = val.to_string();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut col_headers = Vec::with_capacity(num_cols);
+    for c in 0..num_cols {
+        let mut parts: Vec<String> = Vec::new();
+        for r_off in 0..header_rows_count {
+            let val = eff_grid[r_off][c].trim();
+            let abs_row = r_off + header_start_row;
+            let is_vert_merge_continuation = merges.iter().any(|&((sc, sr), (ec, er))| sc <= c && c <= ec && sr < abs_row && er >= abs_row);
+            if !val.is_empty() && !is_vert_merge_continuation && parts.last().map(|s| s.as_str()) != Some(val) {
+                parts.push(val.to_string());
+            }
+        }
+        if parts.is_empty() {
+            col_headers.push(format!("Column {}", c + 1));
+        } else {
+            col_headers.push(parts.join("--"));
+        }
+    }
+    col_headers
+}
+
+/// Determine where the multi-row table header ends (typically 1-3 rows under the title row).
+pub fn detect_header_end_row(grid: &[Vec<String>], merges: &[((usize, usize), (usize, usize))], header_start_row: usize, num_cols: usize) -> usize {
+    if grid.len() <= header_start_row + 1 {
+        return header_start_row;
+    }
+    let mut end_row = header_start_row;
+    for &((_, sr), (_, er)) in merges {
+        if sr == header_start_row && er > header_start_row {
+            end_row = end_row.max(er);
+        }
+    }
+    let candidate = header_start_row + 1;
+    if candidate < grid.len() && candidate <= end_row + 1 && candidate < header_start_row + 3 {
+        let has_horizontal_merges_in_parent = merges.iter().any(|&((sc, sr), (ec, _))| sr == header_start_row && sc < ec);
+        if has_horizontal_merges_in_parent {
+            let row_cells = &grid[candidate];
+            let non_empty_count = row_cells.iter().take(num_cols).filter(|s| !s.trim().is_empty()).count();
+            if non_empty_count > 0 && non_empty_count < num_cols {
+                end_row = end_row.max(candidate);
+            }
+        }
+    }
+    end_row.min(header_start_row + 2).min(grid.len().saturating_sub(1))
+}
+
+/// `true` for a cell holding a plain number (`149.18`, `-0.05`, `1,2 %`): a sub-header label like
+/// `Agustus 2026` keeps its letters, so it is not a number.
+fn is_numeric_cell(cell: Option<&String>) -> bool {
+    let text = cell.map(|cell| cell.trim()).unwrap_or("");
+    if text.is_empty() {
+        return false;
+    }
+    let mut digits = 0usize;
+    for ch in text.chars() {
+        if ch.is_ascii_digit() {
+            digits += 1;
+        } else if !matches!(ch, '%' | ',' | '.' | ' ' | '-' | '+' | '(' | ')' | '\u{a0}') {
+            return false;
+        }
+    }
+    digits > 0
+}
+
+/// Fold a two-row table header into the single-row grouped form the table layout draws.
+///
+/// The layout expresses a grouped header as one row whose columns read `Group--Child` (the same
+/// convention [`merged_table_csv`] writes). Packages produced by the old converter kept the two
+/// header rows of the workbook, so the sub-header row (`| | Agustus | September |`) was inserted as
+/// the table's first data row. Recognising that shape and folding it keeps the group as a spanning
+/// header cell and the children as its second header row. Returns `true` when it folded the rows.
+pub fn merge_multirow_table_header(rows: &mut Vec<Vec<String>>) -> bool {
+    // Older packages kept the caption row ("Tabel 3 …") on top of the header.
+    let header_idx = rows
+        .first()
+        .map(|first| {
+            let filled: Vec<&str> = first.iter().map(|cell| cell.trim()).filter(|cell| !cell.is_empty()).collect();
+            let is_caption = filled.len() == 1
+                && filled.first().is_some_and(|text| {
+                    let lower = text.to_lowercase();
+                    lower.starts_with("tabel ") || lower.starts_with("table ")
+                });
+            usize::from(is_caption)
+        })
+        .unwrap_or(0);
+    // A data row must follow the sub-header row, and the header itself must be present.
+    if rows.len() < header_idx + 3 {
+        return false;
+    }
+    let (Some(header), Some(sub)) = (rows.get(header_idx).cloned(), rows.get(header_idx + 1).cloned()) else {
+        return false;
+    };
+    let cols = header.len().max(sub.len());
+    if cols < 2 {
+        return false;
+    }
+    // A sub-header row starts with empty cells (the row-spanning first column) and then labels
+    // several child columns; anything numeric there means it is really a data row.
+    let sub_labels = (0..cols).filter(|c| sub.get(*c).map(|cell| !cell.trim().is_empty()).unwrap_or(false)).count();
+    if header.first().map(|cell| cell.trim().is_empty()).unwrap_or(true) || sub.first().map(|cell| !cell.trim().is_empty()).unwrap_or(false) {
+        return false;
+    }
+    if sub_labels < 2 || (0..cols).any(|c| is_numeric_cell(sub.get(c))) {
+        return false;
+    }
+    if (0..cols).any(|c| header.get(c).map(|cell| cell.contains("--")).unwrap_or(false)) {
+        return false;
+    }
+
+    let mut merged = vec![String::new(); cols];
+    let mut group = String::new();
+    let last_label = (0..cols).rev().find(|c| sub.get(*c).map(|cell| !cell.trim().is_empty()).unwrap_or(false)).unwrap_or(0);
+    for (c, slot) in merged.iter_mut().enumerate() {
+        let head = header.get(c).map(|cell| cell.trim()).unwrap_or("");
+        if !head.is_empty() {
+            group = head.to_string();
+        }
+        let leaf = sub.get(c).map(|cell| cell.trim()).unwrap_or("");
+        *slot = match (head.is_empty(), leaf.is_empty()) {
+            (false, false) => format!("{head}--{leaf}"),
+            (false, true) => head.to_string(),
+            (true, false) => format!("{group}--{leaf}"),
+            // Nothing on either level (or a trailing padding column): leave it empty.
+            (true, true) if c > last_label || group.is_empty() => String::new(),
+            (true, true) => group.clone(),
+        };
+    }
+    rows[header_idx] = merged;
+    rows.remove(header_idx + 1);
+    true
+}
+
+fn escape_csv_field(val: &str) -> String {
+    if val.contains(',') || val.contains('"') || val.contains('\n') || val.contains('\r') || val.contains(';') {
+        let escaped = val.replace('"', "\"\"");
+        format!("\"{escaped}\"")
+    } else {
+        val.to_string()
+    }
+}
+
+/// Convert one table sheet grid into the catalog CSV convention the page
+/// generator expects: merged multi-row headers joined with `--`, the title
+/// row dropped, note/source rows kept, and an optional `theme,<name>` trailer.
+pub fn merged_table_csv(grid: &[Vec<String>], merges: &[((usize, usize), (usize, usize))], theme: Option<&str>) -> Option<String> {
+    if grid.is_empty() {
+        return None;
+    }
+
+    // Determine the active column count of the table (ignoring trailing empty columns and note rows)
+    let mut num_cols = 0usize;
+    for r in 1..grid.len() {
+        if let Some(row) = grid.get(r) {
+            if is_table_note_or_source_row(row) {
+                continue;
+            }
+            for (c, cell) in row.iter().enumerate() {
+                if !cell.trim().is_empty() {
+                    num_cols = num_cols.max(c + 1);
+                }
+            }
+        }
+    }
+    for &((sc, sr), (ec, _)) in merges {
+        if sr >= 1 {
+            num_cols = num_cols.max(sc + 1).max(ec + 1);
+        }
+    }
+
+    if num_cols == 0 {
+        return None;
+    }
+
+    let header_start_row = 1;
+    let header_end_row = detect_header_end_row(grid, merges, header_start_row, num_cols);
+    let headers = build_merged_table_headers(grid, merges, header_start_row, header_end_row, num_cols);
+
+    let mut csv_lines = Vec::new();
+    csv_lines.push(headers.iter().map(|h| escape_csv_field(h)).collect::<Vec<_>>().join(","));
+
+    let data_start = header_end_row + 1;
+    for row in grid.iter().skip(data_start) {
+        if is_table_note_or_source_row(row) {
+            let last_col = row.iter().rposition(|c| !c.trim().is_empty()).unwrap_or(row.len().saturating_sub(1));
+            let max_idx = last_col.max(2.min(row.len().saturating_sub(1)));
+            let note_cols = row[..=max_idx].iter().map(|c| escape_csv_field(c.trim())).collect::<Vec<_>>();
+            csv_lines.push(note_cols.join(","));
+            continue;
+        }
+
+        let has_any = (0..num_cols).any(|c| row.get(c).map(|s| !s.trim().is_empty()).unwrap_or(false));
+        if !has_any {
+            continue;
+        }
+
+        let line = (0..num_cols)
+            .map(|c| {
+                let cell_val = row.get(c).map(String::as_str).unwrap_or("").trim();
+                escape_csv_field(cell_val)
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        csv_lines.push(line);
+    }
+
+    if let Some(th) = theme.filter(|t| !t.trim().is_empty()) {
+        csv_lines.push(format!("theme,{}", escape_csv_field(th)));
+    }
+
+    Some(csv_lines.join("\n"))
 }
 
 fn safe_sheet_name(name: &str) -> String {
@@ -1142,12 +1202,143 @@ mod tests {
     }
 
     #[test]
-    fn test_rtf_conversion() {
-        let rtf = br#"{\rtf1{\fonttbl{\f0 Arial}}\b Bold \b0 plain \i ital \i0 end\par Second line}"#;
-        let md = rtf_to_md(rtf).expect("rtf to md");
-        assert!(md.contains("**Bold**"));
-        assert!(md.contains("_ital_"));
-        assert!(md.contains("Second line"));
+    fn probe_brs_ingest() {
+        let p = std::path::Path::new("../../plan/pubgen/samples/brs/ntp202610.xlsx");
+        let Ok(r) = ingest_workbook(p) else {
+            eprintln!("skip: no sample");
+            return;
+        };
+        eprintln!("profile={} title={}", r.profile_id, r.metadata.title);
+        for c in &r.metadata.cards {
+            eprintln!("CARD {:?} id={} src={:?} title={:.60}", c.kind, c.id, c.source, c.title);
+        }
+        for (n, b) in &r.csv {
+            let head = String::from_utf8_lossy(b).lines().take(3).collect::<Vec<_>>().join(" | ");
+            eprintln!("CSV {n}: {head:.150}");
+        }
+        for (n, b) in &r.assets {
+            eprintln!("ASSET {n} {}", b.len());
+        }
+    }
+
+    /// Table sheets ingest into the merged-header catalog CSV convention the
+    /// page generator expects: no raw title row, merged headers joined `--`,
+    /// and chart/vector sheets keep the raw grid.
+    #[test]
+    fn test_brs_ingest_table_csv_merged_headers() {
+        let p = std::path::Path::new("../../plan/pubgen/samples/brs/ntp202610.xlsx");
+        let Ok(r) = ingest_workbook(p) else {
+            eprintln!("skip: no sample");
+            return;
+        };
+        let t1 = String::from_utf8_lossy(&r.csv.iter().find(|(n, _)| n == "csv/T1.csv").expect("T1 csv").1).into_owned();
+        let first = t1.lines().next().unwrap_or_default();
+        assert!(first.starts_with("Kode"), "T1 header should be the real merged header, got: {first}");
+        assert!(!t1.contains("Tabel 1 Indeks"), "title row must be dropped from T1.csv");
+        let c1 = String::from_utf8_lossy(&r.csv.iter().find(|(n, _)| n == "csv/C1.csv").expect("C1 csv").1).into_owned();
+        assert!(c1.contains("type,line"), "chart sheet keeps raw spec grid");
+    }
+
+    /// A narrative Markdown written by the old RTF converter starts with the leaked
+    /// WordML group; opening such a `.pubgen` must heal it instead of placing the debris.
+    #[test]
+    fn test_sanitize_markdown_strips_wordml_debris() {
+        let debris = "http://schemas.microsoft.com/office/word/2003/wordml2450...)()()()()()A. Perkembangan Nilai Tukar Petani\n\n# Nilai Tukar Petani (NTP)\n\nNilai Tukar Petani (NTP) diperoleh …";
+        let clean = sanitize_markdown(debris);
+        assert!(clean.starts_with("A. Perkembangan Nilai Tukar Petani"), "debris must be stripped, got: {clean:.120}");
+        assert!(!clean.contains("schemas.microsoft.com"));
+        assert!(!clean.contains("()()"));
+
+        // A heading marker printed before the debris survives, and the trailing hex data run
+        // the old converter appended after the last paragraph is dropped.
+        let headed = "# http://schemas.microsoft.com/office/word/2003/wordml2450...)()()NTP Menurut Subsektor\n\nIsi.\n\n0000000000000000000000000000000000000001";
+        let fixed = sanitize_markdown(headed);
+        assert_eq!(fixed, "# NTP Menurut Subsektor\n\nIsi.");
+
+        // The same converter dumped an embedded OOXML package as one hex paragraph after the
+        // last real paragraph; the paragraph and everything behind it goes.
+        let dumped = "A. Judul\n\nIsi paragraf.\n\n504b030414000600080000002100e9de0fbf\n\nGrid Table 1 Light Accent 6;";
+        assert_eq!(sanitize_markdown(dumped), "A. Judul\n\nIsi paragraf.");
+
+        // Clean Markdown is untouched, even when it happens to mention a schema URL later on.
+        let good = "A. Perkembangan Nilai Tukar Petani\n\n# Nilai Tukar Petani (NTP)\n\nIsi paragraf.\n";
+        assert_eq!(sanitize_markdown(good), good);
+    }
+
+    /// A workbook header grouped over child columns arrives as two CSV rows (`Kode,Subkelompok,
+    /// Indeks Gabungan Subsektor` then `,,Agustus,September,Perubahan`). Folding it keeps the group
+    /// as a spanning header instead of inserting the child labels as the first data row.
+    #[test]
+    fn test_merge_multirow_table_header_folds_subheader() {
+        let mut rows: Vec<Vec<String>> = [
+            vec!["Tabel 1 Indeks Harga Diterima Petani", "", "", "", ""],
+            vec!["Kode", "Subkelompok Pengeluaran", "Indeks Gabungan Subsektor", "", ""],
+            vec!["", "", "Agustus 2026", "September 2026", "Perubahan (%)"],
+            vec!["1", "INDEKS HARGA YANG DITERIMA PETANI", "149.18", "150.77", "1.06"],
+        ]
+        .into_iter()
+        .map(|row| row.into_iter().map(str::to_string).collect::<Vec<String>>())
+        .collect();
+        assert!(merge_multirow_table_header(&mut rows), "the sub-header row is folded");
+        assert_eq!(rows.len(), 3, "caption row kept (the renderer strips it), sub-header row merged");
+        assert_eq!(
+            rows[1],
+            vec![
+                "Kode".to_string(),
+                "Subkelompok Pengeluaran".to_string(),
+                "Indeks Gabungan Subsektor--Agustus 2026".to_string(),
+                "Indeks Gabungan Subsektor--September 2026".to_string(),
+                "Indeks Gabungan Subsektor--Perubahan (%)".to_string(),
+            ]
+        );
+        assert_eq!(rows[2][0], "1", "the first data row stays a data row");
+
+        // A plain one-row-header table is untouched, including its numeric data rows.
+        let mut plain: Vec<Vec<String>> = [vec!["Kode", "Nilai"], vec!["1", "2"], vec!["3", "4"]]
+            .into_iter()
+            .map(|row| row.into_iter().map(str::to_string).collect::<Vec<String>>())
+            .collect();
+        assert!(!merge_multirow_table_header(&mut plain));
+        assert_eq!(plain.len(), 3);
+    }
+
+    /// A narrative sheet keeps paragraph layout by travelling as RTF: an RTF source is passed on
+    /// untouched, and a Word source is converted to RTF (alignment included) instead of Markdown.
+    #[test]
+    fn test_narrative_sheet_writes_rtf_artifacts() {
+        use std::io::Write as _;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let rtf = br"{\rtf1\ansi\deff0{\fonttbl{\f0 Arial;}}\qc\f0\fs24 Centred\par\ql Left\par}";
+        std::fs::write(dir.path().join("U3.rtf"), rtf).expect("write rtf");
+        let mut kv = BTreeMap::new();
+        kv.insert("file".to_string(), "U3.rtf".to_string());
+        let mut texts: Vec<(String, Vec<u8>)> = Vec::new();
+        let (title, source) = process_narrative_sheet(dir.path(), "U3", "U3", &[], &kv, "Ulasan".to_string(), &mut texts);
+        assert_eq!(source.as_deref(), Some("rtf/U3.rtf"));
+        assert!(title.contains("U3.rtf"), "{title}");
+        assert_eq!(texts.len(), 1);
+        assert_eq!(texts[0].0, "rtf/U3.rtf");
+        assert_eq!(texts[0].1.as_slice(), &rtf[..], "an RTF source is passed on untouched");
+
+        // A Word source becomes RTF so the page generator keeps the paragraph layout.
+        let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        w.start_file("word/document.xml", zip::write::SimpleFileOptions::default()).expect("zip entry");
+        let xml = "<w:document><w:body>\
+            <w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:t>Tengah</w:t></w:r></w:p>\
+            <w:p><w:r><w:t>Kiri</w:t></w:r></w:p>\
+            </w:body></w:document>";
+        w.write_all(xml.as_bytes()).expect("write xml");
+        let docx = w.finish().expect("finish zip").into_inner();
+        std::fs::write(dir.path().join("U5.docx"), &docx).expect("write docx");
+        let mut kv = BTreeMap::new();
+        kv.insert("file".to_string(), "U5.docx".to_string());
+        let mut texts: Vec<(String, Vec<u8>)> = Vec::new();
+        let (_title, source) = process_narrative_sheet(dir.path(), "U5", "U5", &[], &kv, "Ulasan".to_string(), &mut texts);
+        assert_eq!(source.as_deref(), Some("rtf/U5.rtf"));
+        let out = String::from_utf8_lossy(&texts[0].1).into_owned();
+        assert!(out.starts_with("{\\rtf"), "{out}");
+        assert!(out.contains("\\qc"), "Word alignment must survive as RTF: {out}");
+        assert!(!out.contains("<w:"), "no WordML markup may leak: {out}");
     }
 
     #[test]
@@ -1240,7 +1431,12 @@ mod tests {
             assert_eq!(report.profile_id, "bps_brs");
             assert_eq!(report.metadata.title, "Perkembangan Nilai Tukar Petani");
             assert!(!report.csv.is_empty(), "CSV files extracted");
-            assert!(!report.md.is_empty(), "MD files extracted from linked RTF");
+            // The linked narrative files come out as RTF, named after the sheet's source file.
+            assert!(report.text.iter().any(|(name, _)| name == "rtf/U1.rtf"), "{:?}", report.text.iter().map(|(n, _)| n).collect::<Vec<_>>());
+            assert!(
+                report.text.iter().all(|(name, bytes)| name.ends_with(".rtf") && bytes.starts_with(b"{\\rtf")),
+                "every narrative artifact is RTF"
+            );
             assert_eq!(report.metadata.extra.get("release_no").map(String::as_str), Some("61/10/32/Th. XXVIII"));
 
             // Verify sheet COV is converted to CSV and updates card Cover

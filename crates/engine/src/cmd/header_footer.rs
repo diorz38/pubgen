@@ -712,6 +712,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         // Compute scope pages and detect canonical geometry
         let target_pages = compute_scope_pages(d, &hf.scope);
         let (doc_cols, doc_gutter, doc_margins) = detect_doc_geometry(d, &target_pages, explicit_margins);
+        let doc_page_size = detect_doc_page_size(d, &target_pages);
 
         // Resolve or create parent spread
         let parent_id = resolve_parent_spread(d, doc_cols, doc_gutter, doc_margins)?;
@@ -736,6 +737,13 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                 sp.pages.push(second);
             }
             for pg in &mut sp.pages {
+                // The parent must be laid out on the document's page size: a parent created before
+                // the document was resized (e.g. the Letter default of a fresh document, then A4
+                // pages) would otherwise place the footer tens of points off.
+                if let Some((width, height)) = doc_page_size {
+                    pg.width = width;
+                    pg.height = height;
+                }
                 pg.margins = doc_margins;
                 pg.columns.count = doc_cols;
                 pg.columns.gutter = doc_gutter;
@@ -1264,6 +1272,24 @@ fn detect_doc_geometry(d: &Document, target_pages: &[usize], explicit_margins: O
 
     // 5. Default fallback
     (1, 12.0, Margins::uniform(36.0))
+}
+
+/// Resolves the page size the header/footer must be laid out against: the page size of the
+/// scoped document pages, else of any document page, else of any existing parent page.
+///
+/// The parent spread can predate a change of document page size (it is created with the page size
+/// current at the time, e.g. the Letter default of a fresh document) while the pages it is applied
+/// to are A4. Laying the frames out on the stale size puts the footer tens of points off.
+fn detect_doc_page_size(d: &Document, target_pages: &[usize]) -> Option<(f64, f64)> {
+    let usable = |pg: &&Page| pg.width > 0.0 && pg.height > 0.0;
+    let size = |pg: &Page| (pg.width, pg.height);
+    target_pages
+        .iter()
+        .filter_map(|&i| d.page(i))
+        .find(usable)
+        .map(size)
+        .or_else(|| d.spreads.iter().flat_map(|sp| &sp.pages).find(usable).map(size))
+        .or_else(|| d.parents.iter().flat_map(|sp| &sp.pages).find(usable).map(size))
 }
 
 /// The BRS page number sits alone past the inner (spine-side) margin edge, level with the
@@ -2132,5 +2158,71 @@ mod tests {
         let doc = &s.doc().unwrap().doc;
         let hf = doc.header_footer.as_ref().expect("header_footer is set");
         assert_eq!(hf.preset, "custom");
+    }
+
+    /// The BRS/BPS pages are A4 while the parent spreads can still be on the Letter default of a
+    /// fresh document (the pages are resized later, the parents are not). The footer must be laid
+    /// out on the page size of the pages it is shown on, or it lands tens of points too high.
+    #[test]
+    fn test_parent_spread_takes_the_document_page_size() {
+        const A4: (f64, f64) = (595.275_590_551_181_2, 841.889_763_779_527_7);
+        let mut s = session_with_doc(true, 4);
+        {
+            let doc = &s.doc().unwrap().doc;
+            assert_eq!((doc.page(0).unwrap().width, doc.page(0).unwrap().height), (612.0, 792.0), "the fresh document is Letter");
+        }
+        // The publisher's pages are A4 while `settings` keeps the Letter default.
+        s.edit(|d, _| {
+            let bps =
+                Margins { top: 57.259_842_519_685_044, bottom: 56.692_913_385_826_78, inside: 53.858_267_716_535_44, outside: 42.519_685_039_370_08 };
+            for sp in &mut d.spreads {
+                let sp = Arc::make_mut(sp);
+                sp.pages.iter_mut().for_each(|pg| {
+                    pg.width = A4.0;
+                    pg.height = A4.1;
+                    pg.margins = bps;
+                    pg.local_margins = true;
+                });
+                sp.relayout();
+            }
+            for p in &mut d.parents {
+                let p = Arc::make_mut(p);
+                p.pages.iter_mut().for_each(|pg| {
+                    pg.width = A4.0;
+                    pg.height = A4.1;
+                });
+                p.relayout();
+            }
+            Ok(serde_json::Value::Null)
+        })
+        .unwrap();
+        // Re-introduce the stale Letter parent spread the real pipeline leaves behind.
+        s.edit(|d, _| {
+            for p in &mut d.parents {
+                let p = Arc::make_mut(p);
+                p.pages.iter_mut().for_each(|pg| {
+                    pg.width = 612.0;
+                    pg.height = 792.0;
+                });
+                p.relayout();
+            }
+            Ok(serde_json::Value::Null)
+        })
+        .unwrap();
+
+        s.execute("layout.headerFooter.apply", &json!({ "preset": "hf-brs" })).unwrap();
+
+        let doc = &s.doc().unwrap().doc;
+        let hf = doc.header_footer.as_ref().unwrap();
+        let parent = doc.parents.iter().find(|p| Some(p.id) == hf.parent).expect("the header/footer parent");
+        for pg in &parent.pages {
+            assert!((pg.width - A4.0).abs() < 1e-6, "parent page width {} should be the document A4 width {}", pg.width, A4.0);
+            assert!((pg.height - A4.1).abs() < 1e-6, "parent page height {} should be the document A4 height {}", pg.height, A4.1);
+        }
+        // The footer box ends 14 pt above the trim edge, exactly where the BPS page template puts it.
+        for id in [hf.footer_items.left, hf.footer_items.right].into_iter().flatten() {
+            let b = doc.item(id).expect("the footer frame exists").bounds();
+            assert!((b.y1 - (A4.1 - 14.0)).abs() < 0.01, "footer bottom {} should sit at the BPS position {}", b.y1, A4.1 - 14.0);
+        }
     }
 }

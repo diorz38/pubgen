@@ -73,7 +73,7 @@ mod tests {
                 profile_id: "bps_brs".into(),
                 metadata,
                 csv: vec![("T1.csv".into(), b"x".to_vec())],
-                md: vec![],
+                text: vec![],
                 assets: vec![],
                 warnings: vec![],
             },

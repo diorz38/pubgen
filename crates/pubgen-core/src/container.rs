@@ -25,7 +25,9 @@ pub enum ContainerError {
 #[derive(Debug, Clone, Default)]
 pub struct ProjectContent {
     pub csv: Vec<(String, Vec<u8>)>,
-    pub md: Vec<(String, Vec<u8>)>,
+    /// Narrative text files: RTF (`rtf/<stem>.rtf`) in new packages, Markdown (`md/<stem>.md`) in
+    /// ones written before the narrative format went back to RTF.
+    pub text: Vec<(String, Vec<u8>)>,
     pub assets: Vec<(String, Vec<u8>)>,
     pub template: Option<Vec<u8>>,
 }
@@ -58,7 +60,7 @@ pub fn save_pubgen(
     write_json(&mut writer, "metadata.json", metadata, options)?;
     reserve_name(&mut names, "glossary.json")?;
     write_json(&mut writer, "glossary.json", glossary, options)?;
-    for (prefix, entries) in [("csv", &content.csv), ("md", &content.md), ("assets", &content.assets)] {
+    for (prefix, entries) in [("csv", &content.csv), ("text", &content.text), ("assets", &content.assets)] {
         for (name, bytes) in entries {
             let path = internal_path(prefix, name)?;
             reserve_name(&mut names, &path)?;
@@ -113,8 +115,9 @@ pub fn open_pubgen(path: &Path) -> Result<OpenedProject, ContainerError> {
         entry.read_to_end(&mut bytes)?;
         if let Some(name) = name.strip_prefix("csv/") {
             content.csv.push((name.to_string(), bytes));
-        } else if let Some(name) = name.strip_prefix("md/") {
-            content.md.push((name.to_string(), bytes));
+        } else if let Some(name) = name.strip_prefix("text/").or_else(|| name.strip_prefix("md/")) {
+            // `md/` is how packages written before the RTF change stored narrative text.
+            content.text.push((name.to_string(), bytes));
         } else if let Some(name) = name.strip_prefix("assets/") {
             content.assets.push((name.to_string(), bytes));
         }
@@ -241,5 +244,33 @@ mod tests {
         save_pubgen(&path, &manifest, &metadata, &Glossary::default(), &content).expect("save");
         let opened = open_pubgen(&path).expect("open");
         assert_eq!(opened.content.csv.len(), 1);
+    }
+
+    #[test]
+    fn round_trip_narrative_text() {
+        let dir = tempfile::tempdir().expect("test tempdir");
+        let path = dir.path().join("x.pubgen");
+        let manifest = ProjectManifest { format_version: 1, name: "X".into(), template: false, slots: vec![] };
+        let metadata = PublicationMetadata {
+            profile_id: "bps_brs".into(),
+            layout: PageLayout::Single,
+            language: Language::Id,
+            title: "X".into(),
+            title_en: None,
+            cards: vec![],
+            extra: BTreeMap::new(),
+        };
+        let mut content = ProjectContent::default();
+        // New artifacts are RTF inside `rtf/`; a name that carries a folder must come back as it
+        // went in, because a card's `source` points at exactly that name.
+        content.text.push(("rtf/U1.rtf".into(), b"{\\rtf1\\qc A}".to_vec()));
+        content.text.push(("POINT.rtf".into(), b"{\\rtf1 B}".to_vec()));
+        save_pubgen(&path, &manifest, &metadata, &Glossary::default(), &content).expect("save");
+        let opened = open_pubgen(&path).expect("open");
+        let names: Vec<&str> = opened.content.text.iter().map(|(name, _)| name.as_str()).collect();
+        assert!(names.contains(&"rtf/U1.rtf"), "narrative artifacts keep their folder: {names:?}");
+        assert!(names.contains(&"POINT.rtf"), "a bare narrative name stays bare: {names:?}");
+        let rtf = opened.content.text.iter().find(|(name, _)| name == "rtf/U1.rtf").map(|(_, bytes)| bytes.clone());
+        assert_eq!(rtf.as_deref(), Some(b"{\\rtf1\\qc A}".as_slice()), "the RTF bytes survive the round trip");
     }
 }

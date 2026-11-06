@@ -92,6 +92,22 @@ const ALLOWED: &[(&str, &str)] = &[
         "ui-egui/src/panels/pubgen/compile.rs",
         "Pubgen publication compiler reads the user-picked manifest and its chapter workbooks, probes that the output folders are writable, and canonicalizes paths to refuse building over a document open in a tab",
     ),
+    (
+        "pubgen-core/src/excel.rs",
+        "Pubgen workbook importer opens the user-picked XLSX and the narrative/image/map files next to it (resolved only against that workbook's own folder) and embeds what it reads in the in-memory ingest report",
+    ),
+    (
+        "pubgen-core/src/container.rs",
+        "Pubgen `.pubgen` container reads and writes the package the user picked: it writes through a temporary file next to the target and renames it over the original, so a failed save never truncates the package",
+    ),
+    (
+        "pubgen-core/src/manifest.rs",
+        "Pubgen manifest loader reads the manifest the user picked and probes the chapter files named inside it, all relative to the manifest's own folder",
+    ),
+    (
+        "ui-egui/src/panels/pubgen/workspace.rs",
+        "Pubgen workspace stages the workbook's exported CSV/narrative/map files into a folder beside the user-picked workbook so page generation can read them, and removes that staging folder again",
+    ),
 ];
 
 fn rust_files(dir: &Path, files: &mut Vec<PathBuf>) {
