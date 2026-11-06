@@ -84,8 +84,12 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
             let (t, s) = process_narrative_sheet(base_dir, name, &file_name, &rows, &kv, card_title, &mut md);
             card_title = t;
             card_source = s;
-        } else if matches!(kind, CardKind::Image | CardKind::MapChart | CardKind::Divider) {
+        } else if matches!(kind, CardKind::Image | CardKind::Divider) {
             let (t, s) = process_image_or_divider_sheet(base_dir, name, &kv, kind, card_title, &mut assets);
+            card_title = t;
+            card_source = s;
+        } else if kind == CardKind::MapChart {
+            let (t, s) = process_map_chart_sheet(base_dir, name, &kv, card_title, &mut card_settings, &mut assets);
             card_title = t;
             card_source = s;
         } else if kind == CardKind::Chart {
@@ -258,14 +262,65 @@ fn process_image_or_divider_sheet(
         if card_title == *name {
             if kind == CardKind::Divider {
                 card_title = format!("Pembatas Bab {name}");
-            } else if kind == CardKind::MapChart {
-                card_title = format!("Peta Tematik {name}");
             } else {
                 card_title = format!("Infografis / Gambar {name} ({just_name})");
             }
         }
         (card_title, Some(format!("assets/{just_name}")))
     }
+}
+
+fn process_map_chart_sheet(
+    base_dir: &Path,
+    name: &str,
+    kv: &BTreeMap<String, String>,
+    mut card_title: String,
+    card_settings: &mut BTreeMap<String, serde_json::Value>,
+    assets: &mut Vec<(String, Vec<u8>)>,
+) -> (String, Option<String>) {
+    let map_val = kv.get("map").or_else(|| kv.get("peta")).map(|s| s.trim()).filter(|s| !s.is_empty());
+    let geojson_val = kv.get("geojson").or_else(|| kv.get("geojson_path")).or_else(|| kv.get("file_geojson")).map(|s| s.trim()).filter(|s| !s.is_empty());
+    let data_val = kv.get("data").or_else(|| kv.get("csv")).or_else(|| kv.get("tabel")).or_else(|| kv.get("data_csv")).map(|s| s.trim()).filter(|s| !s.is_empty());
+
+    if let Some(data) = data_val {
+        card_settings.insert("map_data_csv".to_string(), serde_json::Value::String(data.to_string()));
+    }
+
+    if let Some(map) = map_val {
+        card_settings.insert("map_stock_name".to_string(), serde_json::Value::String(map.to_string()));
+    }
+
+    let is_custom = geojson_val.is_some();
+    card_settings.insert("map_is_custom".to_string(), serde_json::Value::Bool(is_custom));
+
+    let card_source = if let Some(geojson) = geojson_val {
+        card_settings.insert("map_custom_geojson".to_string(), serde_json::Value::String(geojson.to_string()));
+        let just_name = Path::new(geojson).file_name().and_then(|s| s.to_str()).unwrap_or(geojson).to_string();
+        if let Some(bytes) = resolve_file(base_dir, geojson).and_then(|p| std::fs::read(&p).ok()) {
+            let asset_path = format!("assets/{just_name}");
+            if !assets.iter().any(|(p, _): &(String, Vec<u8>)| p == &asset_path) {
+                assets.push((asset_path.clone(), bytes));
+            }
+            Some(asset_path)
+        } else {
+            Some(geojson.to_string())
+        }
+    } else if let Some(map) = map_val {
+        let norm = map.to_uppercase().replace([' ', '-'], "_");
+        Some(format!("assets/pubgen/maps/{norm}_DESA.geojson"))
+    } else {
+        Some(format!("{name}.geojson"))
+    };
+
+    if card_title == *name {
+        if let Some(map) = map_val {
+            card_title = format!("Peta Tematik {name} ({map})");
+        } else {
+            card_title = format!("Peta Tematik {name}");
+        }
+    }
+
+    (card_title, card_source)
 }
 
 fn detect_profile(names: &[String]) -> &'static str {

@@ -138,6 +138,10 @@ pub struct PublicationCard {
     pub map_color_palette: String,
     pub map_show_labels: bool,
     pub map_show_legend: bool,
+    pub map_is_custom: bool,
+    pub map_stock_name: String,
+    pub map_custom_geojson: String,
+    pub map_data_csv: String,
 
     // Image specific
     pub image_area: String,
@@ -200,6 +204,10 @@ impl Default for PublicationCard {
             map_color_palette: "BPS Biru-Teal".into(),
             map_show_labels: true,
             map_show_legend: true,
+            map_is_custom: false,
+            map_stock_name: "CILAMAYA_WETAN".into(),
+            map_custom_geojson: String::new(),
+            map_data_csv: String::new(),
             image_area: "Area Margin".into(),
             toc_style: "Standar".into(),
             toc_columns: "1 Kolom".into(),
@@ -547,6 +555,23 @@ impl OrchestratorWorkspaceState {
                 } else if !card.subtitle.is_empty() {
                     settings.insert("title_en".into(), serde_json::Value::String(card.subtitle.clone()));
                 }
+                if card.kind == CardKind::MapChart {
+                    settings.insert("map_is_custom".into(), serde_json::Value::Bool(card.map_is_custom));
+                    if !card.map_stock_name.is_empty() {
+                        settings.insert("map_stock_name".into(), serde_json::Value::String(card.map_stock_name.clone()));
+                    }
+                    if !card.map_custom_geojson.is_empty() {
+                        settings.insert("map_custom_geojson".into(), serde_json::Value::String(card.map_custom_geojson.clone()));
+                    }
+                    if !card.map_data_csv.is_empty() {
+                        settings.insert("map_data_csv".into(), serde_json::Value::String(card.map_data_csv.clone()));
+                    }
+                    settings.insert("map_chart_type".into(), serde_json::Value::String(card.map_chart_type.clone()));
+                    settings.insert("map_classification".into(), serde_json::Value::String(card.map_classification.clone()));
+                    settings.insert("map_color_palette".into(), serde_json::Value::String(card.map_color_palette.clone()));
+                    settings.insert("map_show_labels".into(), serde_json::Value::Bool(card.map_show_labels));
+                    settings.insert("map_show_legend".into(), serde_json::Value::Bool(card.map_show_legend));
+                }
                 pubgen_core::PublicationCard {
                     id: if card.chapter_id.is_empty() {
                         format!("card_{}", idx + 1)
@@ -705,6 +730,37 @@ pub fn apply_ingest_report_to_state(
                     matches!(card.scope, pubgen_core::CardScope::NewPage),
                 );
                 pc.chapter_id = card.id.clone();
+                if pc.kind == CardKind::MapChart {
+                    if let Some(stk) = card.settings.get("map_stock_name").and_then(|v| v.as_str()) {
+                        pc.map_stock_name = stk.to_string();
+                    }
+                    if let Some(cst) = card.settings.get("map_custom_geojson").and_then(|v| v.as_str()) {
+                        pc.map_custom_geojson = cst.to_string();
+                    }
+                    if let Some(csv) = card.settings.get("map_data_csv").and_then(|v| v.as_str()) {
+                        pc.map_data_csv = csv.to_string();
+                    }
+                    if let Some(isc) = card.settings.get("map_is_custom").and_then(|v| v.as_bool()) {
+                        pc.map_is_custom = isc;
+                    } else {
+                        pc.map_is_custom = !pc.map_custom_geojson.is_empty();
+                    }
+                    if let Some(mt) = card.settings.get("map_chart_type").and_then(|v| v.as_str()) {
+                        pc.map_chart_type = mt.to_string();
+                    }
+                    if let Some(cl) = card.settings.get("map_classification").and_then(|v| v.as_str()) {
+                        pc.map_classification = cl.to_string();
+                    }
+                    if let Some(pal) = card.settings.get("map_color_palette").and_then(|v| v.as_str()) {
+                        pc.map_color_palette = pal.to_string();
+                    }
+                    if let Some(lbl) = card.settings.get("map_show_labels").and_then(|v| v.as_bool()) {
+                        pc.map_show_labels = lbl;
+                    }
+                    if let Some(leg) = card.settings.get("map_show_legend").and_then(|v| v.as_bool()) {
+                        pc.map_show_legend = leg;
+                    }
+                }
                 pc
             })
             .collect();
@@ -859,19 +915,6 @@ fn render_recent_documents(
                     let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(&doc);
                     apply_ingest_report_to_state(state, name, &report);
                 }
-            } else if ext == "pubgen" && p.is_file() {
-                if let Ok(opened) = pubgen_core::container::open_pubgen(p) {
-                    let report = pubgen_core::excel::IngestReport {
-                        profile_id: opened.metadata.profile_id.clone(),
-                        metadata: opened.metadata,
-                        csv: opened.content.csv,
-                        md: opened.content.md,
-                        assets: opened.content.assets,
-                        warnings: Vec::new(),
-                    };
-                    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(&doc);
-                    apply_ingest_report_to_state(state, name, &report);
-                }
             }
             state.execution_log.push(format!("[{}] Membuka berkas {}", format_now(), doc));
             state.view = OrchestratorView::Studio;
@@ -929,23 +972,7 @@ pub fn render_orchestrator_home(
                         ).clicked() {
                             let ctx = ui.ctx().clone();
                             let _ = app.ask_open("pubgenProject", crate::app::file_dialogs::Bound::App, move |_app, path: String| {
-                                let p = std::path::Path::new(&path);
-                                let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
                                 let mut st = get_state(&ctx);
-                                if ext == "pubgen" && p.is_file() {
-                                    if let Ok(opened) = pubgen_core::container::open_pubgen(p) {
-                                        let report = pubgen_core::excel::IngestReport {
-                                            profile_id: opened.metadata.profile_id.clone(),
-                                            metadata: opened.metadata,
-                                            csv: opened.content.csv,
-                                            md: opened.content.md,
-                                            assets: opened.content.assets,
-                                            warnings: Vec::new(),
-                                        };
-                                        let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(path.as_str());
-                                        apply_ingest_report_to_state(&mut st, name, &report);
-                                    }
-                                }
                                 if !st.recent_documents.contains(&path) {
                                     st.recent_documents.insert(0, path.clone());
                                 }
@@ -1353,26 +1380,15 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                 state.view = OrchestratorView::Home;
             }
 
-            // Save .pubgen package button
-            let pkg_tip = if lang.starts_with("id") { "Simpan Paket Publikasi (.pubgen)..." } else { "Save Publication Package (.pubgen)..." };
-            if ui
-                .add(egui::Button::new(RichText::new("📦 .pubgen").font(semibold(11.0))).frame(true).corner_radius(CornerRadius::same(3)))
-                .on_hover_text(pkg_tip)
-                .clicked()
-            {
-                let _ = app.run("pubgen.savePackageAs", serde_json::json!({}));
-            }
-
             // Save button
             if ui
                 .add(egui::Button::new(RichText::new("💾").font(semibold(12.0))).frame(true).corner_radius(CornerRadius::same(3)))
                 .on_hover_text(crate::i18n::tr(lang, "Save"))
                 .clicked()
             {
-                let _ = app.run("pubgen.saveProject", serde_json::json!({}));
                 let now = format_now();
                 state.is_dirty = false;
-                state.execution_log.push(format!("[{now}] Proyek publikasi berhasil disimpan."));
+                state.execution_log.push(format!("[{now}] Proyek publikasi berhasil disimpan ke cache."));
                 state.status_message = Some(("Proyek disimpan".into(), true));
             }
         });
@@ -2678,6 +2694,110 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                     CardKind::MapChart => {
                         egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
                             ui.label(RichText::new("Pengaturan Peta Tematik (Choropleth & Spatial Map):").font(semibold(11.0)).color(Color32::from_rgb(16, 185, 129)));
+
+                            // Pilihan GeoJSON (Stock vs Custom)
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("Sumber GeoJSON:").font(semibold(11.0)));
+                                if ui.selectable_label(!card.map_is_custom, "🗺️ Peta Stock (@assets/pubgen/maps)").clicked() {
+                                    card.map_is_custom = false;
+                                    if card.map_stock_name.is_empty() {
+                                        card.map_stock_name = "CILAMAYA_WETAN".into();
+                                    }
+                                    card.source = format!("assets/pubgen/maps/{}_DESA.geojson", card.map_stock_name.trim_end_matches("_DESA").to_uppercase().replace([' ', '-'], "_"));
+                                }
+                                if ui.selectable_label(card.map_is_custom, "📁 Custom GeoJSON (Link Berkas)").clicked() {
+                                    card.map_is_custom = true;
+                                    if !card.map_custom_geojson.is_empty() {
+                                        card.source = card.map_custom_geojson.clone();
+                                    }
+                                }
+                            });
+
+                            if !card.map_is_custom {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new("Pilihan Peta Wilayah:").font(semibold(11.0)));
+                                    let mut stock_maps = super::charts::stock_maps::list_stock_map_charts();
+                                    if stock_maps.is_empty() {
+                                        stock_maps = vec![
+                                            super::charts::stock_maps::StockMapEntry {
+                                                id: "CILAMAYA_WETAN".into(),
+                                                display_name: "Cilamaya Wetan (Desa)".into(),
+                                                path: std::path::PathBuf::from("assets/pubgen/maps/CILAMAYA_WETAN_DESA.geojson"),
+                                            },
+                                            super::charts::stock_maps::StockMapEntry {
+                                                id: "KARAWANG_TIMUR".into(),
+                                                display_name: "Karawang Timur (Desa)".into(),
+                                                path: std::path::PathBuf::from("assets/pubgen/maps/KARAWANG_TIMUR_DESA.geojson"),
+                                            },
+                                        ];
+                                    }
+                                    let current_norm = card.map_stock_name.trim_end_matches("_DESA").to_uppercase().replace([' ', '-'], "_");
+                                    let selected_display = stock_maps
+                                        .iter()
+                                        .find(|m| m.id == current_norm || m.id == card.map_stock_name.to_uppercase() || m.display_name.eq_ignore_ascii_case(&card.map_stock_name))
+                                        .map(|m| m.display_name.clone())
+                                        .unwrap_or_else(|| {
+                                            if !card.map_stock_name.is_empty() {
+                                                format!("{} (Desa)", card.map_stock_name)
+                                            } else {
+                                                "Pilih Peta Wilayah...".to_string()
+                                            }
+                                        });
+
+                                    craft_ui::ComboBox::from_id_salt("map_stock_select")
+                                        .selected_text(&selected_display)
+                                        .width(260.0)
+                                        .show_ui(ui, |ui| {
+                                            for m in &stock_maps {
+                                                let is_sel = m.id == current_norm || m.display_name == selected_display;
+                                                if ui.selectable_label(is_sel, &m.display_name).clicked() {
+                                                    card.map_stock_name = m.id.clone();
+                                                    card.source = format!("assets/pubgen/maps/{}_DESA.geojson", m.id);
+                                                }
+                                            }
+                                        });
+                                });
+                            } else {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new("Berkas GeoJSON:").font(semibold(11.0)));
+                                    let edit = ui.add(
+                                        egui::TextEdit::singleline(&mut card.map_custom_geojson)
+                                            .desired_width(220.0)
+                                            .hint_text("Contoh: maps/wilayah.geojson"),
+                                    );
+                                    if edit.changed() {
+                                        card.source = card.map_custom_geojson.clone();
+                                    }
+                                    if ui.button("Buka...").clicked() {
+                                        let ctx = ui.ctx().clone();
+                                        let _ = app.ask_open("geojson", crate::app::file_dialogs::Bound::App, move |_app, path| {
+                                            let mut st = get_state(&ctx);
+                                            if let Some(idx) = st.editing_card_idx {
+                                                if let Some(c) = st.cards.get_mut(idx) {
+                                                    c.map_custom_geojson = path.clone();
+                                                    c.source = path;
+                                                    c.map_is_custom = true;
+                                                }
+                                            }
+                                            set_state(&ctx, st);
+                                            ctx.request_repaint();
+                                            Ok(serde_json::Value::Null)
+                                        });
+                                    }
+                                });
+                            }
+
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("Data Matriks (CSV):").font(semibold(11.0)));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut card.map_data_csv)
+                                        .desired_width(220.0)
+                                        .hint_text("Contoh: maps/contoh.csv"),
+                                );
+                            });
+
+                            ui.separator();
+
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(crate::i18n::tr(lang, "Map Type:")).font(semibold(11.0)));
                                 craft_ui::ComboBox::from_id_salt("map_type_select")
@@ -3232,5 +3352,71 @@ mod tests {
         assert_eq!(last_card.kind, pubgen_core::CardKind::MapChart);
         assert_eq!(last_card.scope, pubgen_core::CardScope::NewPage);
         assert_eq!(last_card.source.as_deref(), Some("maps/karawang.geojson"));
+    }
+
+    #[test]
+    fn test_map_chart_card_stock_and_custom_geojson_handling() {
+        let mut state = OrchestratorWorkspaceState::default();
+        let mut stock_card = PublicationCard::new_with(
+            CardKind::MapChart,
+            "Peta Wilayah Kecamatan Cilamaya Wetan",
+            "Peta Tematik Batas Desa",
+            "assets/pubgen/maps/CILAMAYA_WETAN_DESA.geojson",
+            5,
+            true,
+        );
+        stock_card.map_is_custom = false;
+        stock_card.map_stock_name = "CILAMAYA WETAN".into();
+        stock_card.map_data_csv = "maps/contoh.csv".into();
+        state.cards.push(stock_card);
+
+        let mut custom_card = PublicationCard::new_with(
+            CardKind::MapChart,
+            "Peta Tematik Khusus",
+            "Custom GeoJSON Map",
+            "maps/custom_border.geojson",
+            6,
+            false,
+        );
+        custom_card.map_is_custom = true;
+        custom_card.map_custom_geojson = "maps/custom_border.geojson".into();
+        custom_card.map_data_csv = "maps/data_custom.csv".into();
+        state.cards.push(custom_card);
+
+        let meta = state.to_metadata();
+        let meta_stock = &meta.cards[meta.cards.len() - 2];
+        let meta_custom = &meta.cards[meta.cards.len() - 1];
+
+        assert_eq!(meta_stock.settings.get("map_is_custom").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(meta_stock.settings.get("map_stock_name").and_then(|v| v.as_str()), Some("CILAMAYA WETAN"));
+        assert_eq!(meta_stock.settings.get("map_data_csv").and_then(|v| v.as_str()), Some("maps/contoh.csv"));
+
+        assert_eq!(meta_custom.settings.get("map_is_custom").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(meta_custom.settings.get("map_custom_geojson").and_then(|v| v.as_str()), Some("maps/custom_border.geojson"));
+        assert_eq!(meta_custom.settings.get("map_data_csv").and_then(|v| v.as_str()), Some("maps/data_custom.csv"));
+
+        // Roundtrip back to state
+        let report = pubgen_core::excel::IngestReport {
+            profile_id: "bps_dda".into(),
+            metadata: meta,
+            csv: Vec::new(),
+            md: Vec::new(),
+            assets: Vec::new(),
+            warnings: Vec::new(),
+        };
+
+        let mut restored_state = OrchestratorWorkspaceState::default();
+        apply_ingest_report_to_state(&mut restored_state, "test.xlsx", &report);
+
+        let res_stock = &restored_state.cards[restored_state.cards.len() - 2];
+        let res_custom = &restored_state.cards[restored_state.cards.len() - 1];
+
+        assert!(!res_stock.map_is_custom);
+        assert_eq!(res_stock.map_stock_name, "CILAMAYA WETAN");
+        assert_eq!(res_stock.map_data_csv, "maps/contoh.csv");
+
+        assert!(res_custom.map_is_custom);
+        assert_eq!(res_custom.map_custom_geojson, "maps/custom_border.geojson");
+        assert_eq!(res_custom.map_data_csv, "maps/data_custom.csv");
     }
 }
