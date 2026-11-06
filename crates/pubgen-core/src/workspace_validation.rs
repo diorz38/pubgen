@@ -6,10 +6,17 @@ use crate::workspace::{ProjectManifest, PublicationMetadata};
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ValidationSeverity { Warning, Error }
+pub enum ValidationSeverity {
+    Warning,
+    Error,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkspaceDiagnostic { pub code: &'static str, pub severity: ValidationSeverity, pub message: String }
+pub struct WorkspaceDiagnostic {
+    pub code: &'static str,
+    pub severity: ValidationSeverity,
+    pub message: String,
+}
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceDraft {
@@ -17,7 +24,8 @@ pub struct WorkspaceDraft {
     pub metadata: PublicationMetadata,
     pub glossary: crate::workspace::Glossary,
     pub csv: Vec<(String, Vec<u8>)>,
-    pub md: Vec<(String, Vec<u8>)>,
+    /// Narrative text files (RTF; Markdown in packages written before the RTF change).
+    pub text: Vec<(String, Vec<u8>)>,
     pub assets: Vec<(String, Vec<u8>)>,
     pub warnings: Vec<String>,
 }
@@ -34,7 +42,7 @@ impl WorkspaceDraft {
             metadata: report.metadata,
             glossary: crate::workspace::Glossary::default(),
             csv: report.csv,
-            md: report.md,
+            text: report.text,
             assets: report.assets,
             warnings: report.warnings,
         }
@@ -54,10 +62,12 @@ impl WorkspaceDraft {
                 sources.insert(stripped);
             }
         }
-        for (name, _) in &self.md {
+        for (name, _) in &self.text {
             sources.insert(name.as_str());
-            if let Some(stripped) = name.strip_prefix("md/") {
-                sources.insert(stripped);
+            for prefix in ["text/", "md/", "rtf/"] {
+                if let Some(stripped) = name.strip_prefix(prefix) {
+                    sources.insert(stripped);
+                }
             }
         }
         for (name, _) in &self.assets {
@@ -70,7 +80,9 @@ impl WorkspaceDraft {
             if let Some(source) = &card.source {
                 let stripped = source
                     .strip_prefix("csv/")
+                    .or_else(|| source.strip_prefix("text/"))
                     .or_else(|| source.strip_prefix("md/"))
+                    .or_else(|| source.strip_prefix("rtf/"))
                     .or_else(|| source.strip_prefix("assets/"))
                     .unwrap_or(source.as_str());
                 if !sources.contains(source.as_str()) && !sources.contains(stripped) {
@@ -117,11 +129,20 @@ mod tests {
                 extra: BTreeMap::new(),
             },
             csv: csv.into_iter().map(|(name, bytes)| (name.into(), bytes.to_vec())).collect(),
-            md: Vec::new(),
+            text: Vec::new(),
             assets: Vec::new(),
             warnings: Vec::new(),
         }
     }
-    #[test] fn missing_source_is_error() { let draft = WorkspaceDraft::from_ingest("x".into(), report(Some("T1.csv"), vec![])); assert!(!draft.is_valid()); assert_eq!(draft.validate()[0].code, "card.source_missing"); }
-    #[test] fn matching_source_is_valid() { let draft = WorkspaceDraft::from_ingest("x".into(), report(Some("T1.csv"), vec![("T1.csv", b"x") ])); assert!(draft.is_valid()); }
+    #[test]
+    fn missing_source_is_error() {
+        let draft = WorkspaceDraft::from_ingest("x".into(), report(Some("T1.csv"), vec![]));
+        assert!(!draft.is_valid());
+        assert_eq!(draft.validate()[0].code, "card.source_missing");
+    }
+    #[test]
+    fn matching_source_is_valid() {
+        let draft = WorkspaceDraft::from_ingest("x".into(), report(Some("T1.csv"), vec![("T1.csv", b"x")]));
+        assert!(draft.is_valid());
+    }
 }

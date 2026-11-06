@@ -22,7 +22,6 @@ log = { workspace = true }
 rfd = { workspace = true }
 arboard = { workspace = true }
 zip = { workspace = true }
-quick-xml = { workspace = true }
 chrono = { workspace = true }
 
 [build-dependencies]

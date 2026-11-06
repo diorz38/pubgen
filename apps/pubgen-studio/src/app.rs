@@ -17,10 +17,8 @@ pub struct PubgenStudioApp {
 
 impl PubgenStudioApp {
     pub fn new(app: DesignApp, initial_mode: StudioMode, project_path: Option<PathBuf>, container: Option<PubgenContainer>) -> Self {
-        let pending_open = project_path
-            .as_ref()
-            .filter(|path| path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("pubgen")))
-            .cloned();
+        let pending_open =
+            project_path.as_ref().filter(|path| path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("pubgen"))).cloned();
         Self {
             mode: initial_mode,
             app,

@@ -784,6 +784,86 @@ fn measure_frame_content_height(app: &DesignApp, fid: u64) -> Option<f64> {
     Some(cf.content_height)
 }
 
+/// The narrative source of a catalog row.
+///
+/// RTF is the narrative format: it is the only one that carries the paragraph layout (alignment,
+/// indents, spacing) the generator flows into the frame. A row that names an existing file wins —
+/// that is how a staged `rtf/U1.rtf` resolves — and otherwise the row's stem is looked up as
+/// `.rtf`, then `.docx` (a workbook may still link Word files), then `.md` for packages written
+/// before narratives went back to RTF.
+fn resolve_narrative_file(catalog_path: &str, file_val: &str) -> Option<std::path::PathBuf> {
+    if file_val.trim().is_empty() {
+        return None;
+    }
+    let stem = std::path::Path::new(file_val).file_stem().and_then(|stem| stem.to_str()).unwrap_or(file_val);
+    ["rtf", "txt"]
+        .iter()
+        .find_map(|extension| resolve_catalog_related_file(catalog_path, file_val, extension))
+        .or_else(|| ["rtf", "docx"].iter().find_map(|extension| resolve_catalog_related_file(catalog_path, stem, extension)))
+        .or_else(|| ["md", "markdown"].iter().find_map(|extension| resolve_catalog_related_file(catalog_path, stem, extension)))
+}
+
+/// Size a freshly inserted table's columns from their content.
+///
+/// `table.convertFromText` gives every column the same width, which makes a BRS table unreadable:
+/// the label column ("Kode", "Provinsi") is mostly a few characters wide, while the description
+/// column carries long sub-sector names. Weight every column by the widest header/data cell it
+/// holds, then share the table width out, keeping a legible minimum.
+fn fit_brs_table_columns(app: &mut DesignApp, story_id: designcraft_doc::StoryId, matrix: &[Vec<String>], total_width: f64) {
+    if total_width <= 60.0 {
+        return;
+    }
+    let Some(table_id) = app.session.active().and_then(|active| active.doc.story(story_id)).and_then(|story| story.tables.keys().copied().next())
+    else {
+        return;
+    };
+    let cols = matrix.iter().map(Vec::len).max().unwrap_or(0);
+    if cols < 2 {
+        return;
+    }
+    // Header row first, then a sample of body rows: the longest cell in a column decides its room.
+    let mut weights = vec![4.0_f64; cols];
+    for row in matrix.iter().take(14) {
+        for (index, cell) in row.iter().enumerate() {
+            let Some(weight) = weights.get_mut(index) else {
+                continue;
+            };
+            let chars = cell.trim().chars().count() as f64;
+            *weight = weight.max(chars.clamp(3.0, 30.0));
+        }
+    }
+    let sum: f64 = weights.iter().sum();
+    if sum <= 0.0 {
+        return;
+    }
+    let min_width = 42.0_f64.min(total_width / cols as f64);
+    let mut widths: Vec<f64> = weights.iter().map(|weight| total_width * weight / sum).collect();
+    // Pull too-narrow columns up to the minimum and take the difference from the widest ones.
+    for _ in 0..2 {
+        let mut deficit = 0.0_f64;
+        for width in widths.iter_mut() {
+            if *width < min_width {
+                deficit += min_width - *width;
+                *width = min_width;
+            }
+        }
+        if deficit <= 0.0 {
+            break;
+        }
+        let excess: f64 = widths.iter().map(|width| (width - min_width).max(0.0)).sum();
+        if excess <= 0.0 {
+            break;
+        }
+        for width in widths.iter_mut() {
+            let share = (*width - min_width).max(0.0) / excess;
+            *width -= deficit * share;
+        }
+    }
+    for (col, width) in widths.iter().enumerate() {
+        let _ = app.run("table.setColumnWidth", json!({"story": story_id.0, "table": table_id, "cols": [col, col], "width": width}));
+    }
+}
+
 fn thread_overset_narrative(
     app: &mut DesignApp,
     cur_page_idx: &mut usize,
@@ -904,12 +984,14 @@ fn execute_generate_pages_brs(
             cur_y = margin.y0;
         }
 
-        let is_chart = is_chart_type(type_val) || type_val.eq_ignore_ascii_case("line") || title_val.to_lowercase().starts_with("gambar");
+        // A raster illustration is an image even when its caption starts with "Gambar", while
+        // the bare "Gambar" type marks a vector chart whose file is a data CSV.
+        let is_raster =
+            file_val.to_lowercase().ends_with(".png") || file_val.to_lowercase().ends_with(".jpg") || file_val.to_lowercase().ends_with(".jpeg");
+        let is_image = type_val.eq_ignore_ascii_case("image") || is_raster;
+        let is_chart =
+            !is_image && (is_chart_type(type_val) || type_val.eq_ignore_ascii_case("line") || title_val.to_lowercase().starts_with("gambar"));
         let is_table = type_val.eq_ignore_ascii_case("tabel") || type_val.eq_ignore_ascii_case("table") || excel::is_table_sheet_name(file_val);
-        let is_image = type_val.eq_ignore_ascii_case("image")
-            || type_val.eq_ignore_ascii_case("gambar")
-            || file_val.to_lowercase().ends_with(".png")
-            || file_val.to_lowercase().ends_with(".jpg");
         let is_narrative = !is_chart && !is_table && !is_image;
 
         if is_chart {
@@ -967,6 +1049,26 @@ fn execute_generate_pages_brs(
             {
                 let delim = detect_delimiter(&content);
                 matrix = parse_csv_content_with_delim(&content, delim);
+                // Older packages stored the workbook grid as-is, so the table's caption row
+                // ("Tabel 3 …") is still the first row here — the title frame drawn above the
+                // table already shows it. Drop it so the title is not duplicated inside.
+                let caption_row = matrix
+                    .first()
+                    .map(|first| {
+                        let filled: Vec<&str> = first.iter().map(|cell| cell.trim()).filter(|cell| !cell.is_empty()).collect();
+                        filled.len() == 1
+                            && filled
+                                .first()
+                                .is_some_and(|text| text.to_lowercase().starts_with("tabel ") || text.to_lowercase().starts_with("table "))
+                    })
+                    .unwrap_or(false);
+                if caption_row {
+                    matrix.remove(0);
+                }
+                // Older packages also ship a two-row header. The table layout draws a grouped
+                // header from a single row (`Group--Child`), so fold the sub-header row into it —
+                // otherwise the child labels become the first data row.
+                pubgen_core::excel::merge_multirow_table_header(&mut matrix);
             }
 
             let est_h = (matrix.len() as f64 * 18.0 + 50.0).clamp(100.0, avail_h);
@@ -1031,6 +1133,9 @@ fn execute_generate_pages_brs(
                     table_st.card2_theme_override = Some(theme_val.to_string());
                 }
                 if let Ok(info) = execute_insert_table_matrix_info(app, &table_st, Some(&matrix), Some(cur_page_idx)) {
+                    // Equal columns make a BRS table unreadable: the label column is always narrow
+                    // and the description column needs the room, so size them from their content.
+                    fit_brs_table_columns(app, info.story_id, &matrix, margin.x1 - margin.x0);
                     let added = thread_overset_table(app, &mut cur_page_idx, info.story_id, info.frame_id, doc_margins);
                     if added > 0 {
                         let metrics = get_brs_page_metrics(app, cur_page_idx)?;
@@ -1045,7 +1150,7 @@ fn execute_generate_pages_brs(
             cur_y = (tbl_bottom + gap).min(margin.y1);
             generated_count = generated_count.saturating_add(1);
         } else if is_narrative {
-            let rtf_file = resolve_catalog_related_file(&st.card1_path, file_val, "rtf");
+            let story_file = resolve_narrative_file(&st.card1_path, file_val);
             if margin.y1 - cur_y < 80.0 {
                 // Jump to next page
                 app.run("layout.pages.insert", json!({"after": cur_page_idx, "count": 1}))?;
@@ -1068,7 +1173,7 @@ fn execute_generate_pages_brs(
                 }),
             ) && let Some(fid) = res.get("id").and_then(Value::as_u64)
             {
-                if let Some(ref rf) = rtf_file {
+                if let Some(ref rf) = story_file {
                     let _ = app.run(
                         "file.place",
                         json!({

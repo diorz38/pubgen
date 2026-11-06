@@ -1,5 +1,5 @@
 use designcraft_ui_egui::dock::pubgen::workspace::{self, OrchestratorView, OrchestratorWorkspaceState};
-use pubgen_core::{export_workbook, open_pubgen, save_pubgen, ProjectContent, WorkspaceDraft};
+use pubgen_core::{ProjectContent, WorkspaceDraft, export_workbook, open_pubgen, save_pubgen};
 use std::path::{Path, PathBuf};
 
 #[derive(Default)]
@@ -9,7 +9,7 @@ pub struct OrchestratorProject {
     pub status: String,
     pub dirty: bool,
     pub ui_synced: bool,
-    pub md: Vec<(String, Vec<u8>)>,
+    pub text: Vec<(String, Vec<u8>)>,
     pub assets: Vec<(String, Vec<u8>)>,
 }
 
@@ -17,7 +17,7 @@ impl OrchestratorProject {
     pub fn open(&mut self, path: &Path) -> Result<(), String> {
         let opened = open_pubgen(path).map_err(|error| error.to_string())?;
         let csv = opened.content.csv;
-        let md = opened.content.md.clone();
+        let text = opened.content.text.clone();
         let assets = opened.content.assets.clone();
         let metadata = opened.metadata;
         self.draft = Some(WorkspaceDraft {
@@ -25,11 +25,11 @@ impl OrchestratorProject {
             metadata: metadata.clone(),
             glossary: opened.glossary,
             csv,
-            md: md.clone(),
+            text: text.clone(),
             assets: assets.clone(),
             warnings: Vec::new(),
         });
-        self.md = md;
+        self.text = text;
         self.assets = assets;
         self.path = Some(path.to_path_buf());
         self.dirty = false;
@@ -38,7 +38,7 @@ impl OrchestratorProject {
     }
     pub fn save(&mut self, path: &Path) -> Result<(), String> {
         let draft = self.draft.as_ref().ok_or_else(|| "No workspace loaded".to_string())?;
-        let content = ProjectContent { csv: draft.csv.clone(), md: self.md.clone(), assets: self.assets.clone(), ..ProjectContent::default() };
+        let content = ProjectContent { csv: draft.csv.clone(), text: self.text.clone(), assets: self.assets.clone(), ..ProjectContent::default() };
         save_pubgen(path, &draft.manifest, &draft.metadata, &draft.glossary, &content).map_err(|error| error.to_string())?;
         self.path = Some(path.to_path_buf());
         self.dirty = false;
@@ -58,7 +58,7 @@ impl OrchestratorProject {
                 self.path.as_ref().and_then(|path| path.to_str()).unwrap_or("Workbook"),
                 &draft.metadata,
                 &draft.csv,
-                &self.md,
+                &self.text,
                 &self.assets,
             );
             self.ui_synced = true;
@@ -73,12 +73,7 @@ impl OrchestratorProject {
         {
             return draft.metadata.title.clone();
         }
-        self.path
-            .as_ref()
-            .and_then(|path| path.file_stem())
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("Untitled publication")
-            .to_string()
+        self.path.as_ref().and_then(|path| path.file_stem()).and_then(|stem| stem.to_str()).unwrap_or("Untitled publication").to_string()
     }
 }
 
@@ -289,7 +284,13 @@ impl OrchestratorTabs {
 }
 
 fn empty_state() -> OrchestratorWorkspaceState {
-    OrchestratorWorkspaceState { view: OrchestratorView::Home, cards: Vec::new(), content_files: Vec::new(), recent_documents: Vec::new(), ..Default::default() }
+    OrchestratorWorkspaceState {
+        view: OrchestratorView::Home,
+        cards: Vec::new(),
+        content_files: Vec::new(),
+        recent_documents: Vec::new(),
+        ..Default::default()
+    }
 }
 
 fn normalized(value: &serde_json::Value) -> serde_json::Value {

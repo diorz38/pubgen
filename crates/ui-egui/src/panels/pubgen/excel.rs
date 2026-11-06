@@ -1519,7 +1519,6 @@ pub fn parse_divider_sheet(sheet: &ExcelSheetData) -> Option<(String, String, St
 
 /// Automatically reconstruct table column headers by propagating horizontal & vertical
 /// cell merges across header rows and joining ancestor levels with `--`.
-#[allow(clippy::needless_range_loop)]
 pub fn build_merged_table_headers(
     grid: &[Vec<String>],
     merges: &[((usize, usize), (usize, usize))],
@@ -1527,166 +1526,13 @@ pub fn build_merged_table_headers(
     header_end_row: usize,
     num_cols: usize,
 ) -> Vec<String> {
-    let header_rows_count = (header_end_row.saturating_sub(header_start_row) + 1).max(1);
-    let mut eff_grid = vec![vec![String::new(); num_cols]; header_rows_count];
-
-    // 1. Populate direct cell values
-    for (r_offset, r) in (header_start_row..=header_end_row).enumerate() {
-        if let Some(row_cells) = grid.get(r) {
-            for c in 0..num_cols {
-                if let Some(val) = row_cells.get(c) {
-                    eff_grid[r_offset][c] = val.trim().to_string();
-                }
-            }
-        }
-    }
-
-    // 2. Propagate horizontal merges (e.g. B2:C2 has "Jenis Kelamin" in B2 -> copy to C2)
-    for &((sc, sr), (ec, er)) in merges {
-        if sr <= header_end_row && er >= header_start_row {
-            let val = grid.get(sr).and_then(|row| row.get(sc)).map(|s| s.trim()).unwrap_or("");
-            if !val.is_empty() && sc < ec {
-                for r in sr.max(header_start_row)..=er.min(header_end_row) {
-                    let r_off = r.saturating_sub(header_start_row);
-                    for c in sc..=ec.min(num_cols.saturating_sub(1)) {
-                        if eff_grid[r_off][c].is_empty() {
-                            eff_grid[r_off][c] = val.to_string();
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // 3. Chain ancestor header levels down the rows into "Parent--Child"
-    let mut col_headers = Vec::with_capacity(num_cols);
-    for c in 0..num_cols {
-        let mut parts: Vec<String> = Vec::new();
-        for r_off in 0..header_rows_count {
-            let val = eff_grid[r_off][c].trim();
-            let abs_row = r_off + header_start_row;
-
-            // Check if this cell is a continuation of a vertical merge
-            let is_vert_merge_continuation = merges.iter().any(|&((sc, sr), (ec, er))| sc <= c && c <= ec && sr < abs_row && er >= abs_row);
-
-            if !val.is_empty() && !is_vert_merge_continuation && parts.last().map(|s| s.as_str()) != Some(val) {
-                parts.push(val.to_string());
-            }
-        }
-
-        if parts.is_empty() {
-            col_headers.push(format!("Column {}", c + 1));
-        } else {
-            col_headers.push(parts.join("--"));
-        }
-    }
-
-    col_headers
-}
-
-/// Determine where the multi-row table header ends (typically row 1 to row 2 or 3).
-pub fn detect_header_end_row(grid: &[Vec<String>], merges: &[((usize, usize), (usize, usize))], header_start_row: usize, num_cols: usize) -> usize {
-    if grid.len() <= header_start_row + 1 {
-        return header_start_row;
-    }
-
-    let mut end_row = header_start_row;
-
-    // Check merges starting at or overlapping header_start_row
-    for &((_, sr), (_, er)) in merges {
-        if sr == header_start_row && er > header_start_row {
-            end_row = end_row.max(er);
-        }
-    }
-
-    // Check if the next row only has values under horizontally merged columns
-    let candidate = header_start_row + 1;
-    if candidate < grid.len() && candidate <= end_row + 1 && candidate < header_start_row + 3 {
-        let has_horizontal_merges_in_parent = merges.iter().any(|&((sc, sr), (ec, _))| sr == header_start_row && sc < ec);
-        if has_horizontal_merges_in_parent {
-            let row_cells = &grid[candidate];
-            let non_empty_count = row_cells.iter().take(num_cols).filter(|s| !s.trim().is_empty()).count();
-            if non_empty_count > 0 && non_empty_count < num_cols {
-                end_row = end_row.max(candidate);
-            }
-        }
-    }
-
-    // Cap header depth to at most 3 rows to protect against malformed data
-    end_row.min(header_start_row + 2).min(grid.len().saturating_sub(1))
+    pubgen_core::excel::build_merged_table_headers(grid, merges, header_start_row, header_end_row, num_cols)
 }
 
 /// Convert a single worksheet to CSV string with merged headers and optional color theme.
 pub fn worksheet_to_csv_with_theme(sheet: &ExcelSheetData, fallback_theme: Option<&str>) -> Option<String> {
-    if sheet.grid.is_empty() {
-        return None;
-    }
-
-    // Determine the active column count of the table (ignoring trailing empty columns and note rows)
-    let mut num_cols = 0usize;
-    for r in 1..sheet.grid.len() {
-        if let Some(row) = sheet.grid.get(r) {
-            if is_table_note_or_source_row(row) {
-                continue;
-            }
-            for (c, cell) in row.iter().enumerate() {
-                if !cell.trim().is_empty() {
-                    num_cols = num_cols.max(c + 1);
-                }
-            }
-        }
-    }
-    // Also consider merge cells
-    for &((sc, sr), (ec, _)) in &sheet.merges {
-        if sr >= 1 {
-            num_cols = num_cols.max(sc + 1).max(ec + 1);
-        }
-    }
-
-    if num_cols == 0 {
-        return None;
-    }
-
-    let header_start_row = 1;
-    let header_end_row = detect_header_end_row(&sheet.grid, &sheet.merges, header_start_row, num_cols);
-    let headers = build_merged_table_headers(&sheet.grid, &sheet.merges, header_start_row, header_end_row, num_cols);
-
-    let mut csv_lines = Vec::new();
-    csv_lines.push(headers.iter().map(|h| escape_csv_field(h)).collect::<Vec<_>>().join(","));
-
-    // Emit data rows
-    let data_start = header_end_row + 1;
-    for r in data_start..sheet.grid.len() {
-        let row = &sheet.grid[r];
-        if is_table_note_or_source_row(row) {
-            let last_col = row.iter().rposition(|c| !c.trim().is_empty()).unwrap_or(row.len().saturating_sub(1));
-            let max_idx = last_col.max(2.min(row.len().saturating_sub(1)));
-            let note_cols = row[..=max_idx].iter().map(|c| escape_csv_field(c.trim())).collect::<Vec<_>>();
-            csv_lines.push(note_cols.join(","));
-            continue;
-        }
-
-        let has_any = (0..num_cols).any(|c| row.get(c).map(|s| !s.trim().is_empty()).unwrap_or(false));
-        if !has_any {
-            continue;
-        }
-
-        let line = (0..num_cols)
-            .map(|c| {
-                let cell_val = row.get(c).map(String::as_str).unwrap_or("").trim();
-                escape_csv_field(cell_val)
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        csv_lines.push(line);
-    }
-
-    let effective_theme = extract_theme_from_sheet(sheet).or_else(|| fallback_theme.map(str::to_string));
-    if let Some(th) = effective_theme {
-        csv_lines.push(format!("theme,{}", escape_csv_field(&th)));
-    }
-
-    Some(csv_lines.join("\n"))
+    let theme = extract_theme_from_sheet(sheet).or_else(|| fallback_theme.map(str::to_string));
+    pubgen_core::excel::merged_table_csv(&sheet.grid, &sheet.merges, theme.as_deref())
 }
 
 /// Convert a single worksheet to CSV string with merged headers.
@@ -3832,14 +3678,29 @@ pub fn execute_excel_and_generate(app: &mut DesignApp, st: &mut PubgenState, pat
     if !st.excel_auto_generate || st.card1_records.is_empty() {
         return Ok(conv_msg);
     }
+    match generate_publication_pages(app, st) {
+        Ok(gen_msg) => Ok(format!("{conv_msg}, {gen_msg}")),
+        Err(e) => Err(format!("{conv_msg}, but page generation failed: {e}")),
+    }
+}
 
+/// Run the automatic page-generation stages over the catalog already loaded in `st`:
+/// document setup, cover pages, "Page from CSV" body pages, back cover and the
+/// profile header/footer. Shared by the Excel import pipeline and the Orchestrator
+/// workspace generator so both produce identical DesignCraft pages.
+pub fn generate_publication_pages(app: &mut DesignApp, st: &mut PubgenState) -> Result<String, String> {
     let is_brs = st.active_profile().id == "bps_brs" || st.cover_style == 13;
     let is_dda = st.active_profile().id == "bps_dda" || st.hf_style.eq_ignore_ascii_case("hf-dda") || st.hf_style.eq_ignore_ascii_case("dda");
 
-    // Ensure an active document exists
+    // Ensure an active document exists. BPS profiles print A4: creating the document on the
+    // Letter default would leave `settings` (and every spread created with it) on Letter while the
+    // template pages are A4, which puts the header/footer parent tens of points off.
+    const BPS_PAGE: (f64, f64) = (595.2755905511812, 841.8897637795277);
     if app.session.active().is_none() {
         if is_brs {
-            let _ = app.run("file.new", json!({"facingPages": true}));
+            let _ = app.run("file.new", json!({"width": BPS_PAGE.0, "height": BPS_PAGE.1, "facingPages": true}));
+        } else if is_dda {
+            let _ = app.run("file.new", json!({"width": BPS_PAGE.0, "height": BPS_PAGE.1}));
         } else {
             let _ = app.run("file.new", json!({}));
         }
@@ -3866,7 +3727,7 @@ pub fn execute_excel_and_generate(app: &mut DesignApp, st: &mut PubgenState, pat
                 }
                 Err(e) => {
                     st.cover_status = Some((e.clone(), false));
-                    return Ok(format!("{conv_msg}, but BRS cover failed: {e}"));
+                    return Ok(format!("but BRS cover failed: {e}"));
                 }
             }
         } else {
@@ -3878,7 +3739,7 @@ pub fn execute_excel_and_generate(app: &mut DesignApp, st: &mut PubgenState, pat
                     if st.cover_include_inside_back
                         && let Err(e) = execute_generate_inside_cover(app)
                     {
-                        return Ok(format!("{conv_msg}, but inside cover failed: {e}"));
+                        return Ok(format!("but inside cover failed: {e}"));
                     }
                     let cover_msg =
                         if st.cover_include_inside_back { format!("Front Cover & Inside Cover ({sname})") } else { format!("Cover ({sname})") };
@@ -3887,7 +3748,7 @@ pub fn execute_excel_and_generate(app: &mut DesignApp, st: &mut PubgenState, pat
                 }
                 Err(e) => {
                     st.cover_status = Some((e.clone(), false));
-                    return Ok(format!("{conv_msg}, but cover failed: {e}"));
+                    return Ok(format!("but cover failed: {e}"));
                 }
             }
         }
@@ -3933,15 +3794,14 @@ pub fn execute_excel_and_generate(app: &mut DesignApp, st: &mut PubgenState, pat
                 st.hf_top_accent_bar = false;
                 super::header_footer::execute_apply_header_footer(app, st)?;
             }
-            let count = st.card2_sheet_tables.len();
             if let Some(cover_msg) = cover_res_msg {
-                return Ok(format!("Converted {count} sheets & auto-generated pages + cover ({gen_msg}; {cover_msg})!"));
+                return Ok(format!("auto-generated pages + cover ({gen_msg}; {cover_msg})!"));
             }
-            Ok(format!("Converted {count} sheets & auto-generated pages ({gen_msg})!"))
+            Ok(format!("auto-generated pages ({gen_msg})!"))
         }
         Err(e) => {
             st.card1_status = Some((e.clone(), false));
-            Err(format!("{conv_msg}, but page generation failed: {e}"))
+            Err(format!("page generation failed: {e}"))
         }
     }
 }
