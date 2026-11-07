@@ -1,5 +1,0 @@
-{"command":"file.new"}
-{"command":"frame.create","params":{"rect":[36,36,300,80],"content":"text","text":"Old title"}}
-{"command":"object.rename","params":{"id":"$1.id","name":"slot:title"}}
-{"command":"frame.create","params":{"rect":[36,140,560,400],"content":"text","text":"Body"}}
-{"command":"object.rename","params":{"id":"$3.id","name":"slot:body_flow"}}
