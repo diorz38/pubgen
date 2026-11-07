@@ -226,7 +226,7 @@ fn designcraft_orchestrator_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
     let rtl = crate::i18n::is_rtl(&lang);
     crate::menus::menu_button(ui, crate::rtl::widget(ui, "DesignCraft"), |ui| {
         popup(ui, rtl, 240.0, |ui| {
-            if ui.button(crate::rtl::widget(ui, "🎨 Switch to DesignCraft Studio")).clicked() {
+            if ui.button(crate::rtl::widget(ui, "Switch to DesignCraft Studio")).clicked() {
                 set_orchestrator_mode(ui.ctx(), false);
                 ui.close();
             }
@@ -268,11 +268,11 @@ fn view_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
             submenu(ui, &lang, rtl, "Language / Bahasa", 180.0, |ui| {
                 let is_id = app.ui.language == "id";
                 let is_en = app.ui.language.is_empty() || app.ui.language == "en";
-                if ui.selectable_label(is_id, "🇮🇩 Bahasa Indonesia").clicked() {
+                if ui.selectable_label(is_id, "Bahasa Indonesia").clicked() {
                     let _ = app.run("app.language", serde_json::json!({"lang": "id"}));
                     ui.close();
                 }
-                if ui.selectable_label(is_en, "🇬🇧 English").clicked() {
+                if ui.selectable_label(is_en, "English").clicked() {
                     let _ = app.run("app.language", serde_json::json!({"lang": ""}));
                     ui.close();
                 }

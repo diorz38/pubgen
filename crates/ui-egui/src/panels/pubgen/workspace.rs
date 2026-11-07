@@ -1461,7 +1461,7 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                 ui.horizontal(|ui| {
                     let (icon_r, _) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::hover());
                     ui.painter().rect_filled(icon_r, 10.0, t.accent_strong);
-                    ui.painter().text(icon_r.center(), Align2::CENTER_CENTER, "📊", FontId::proportional(22.0), Color32::WHITE);
+                    crate::icons::paint(ui.painter(), icon_r.shrink(11.0), "panel-pages", Color32::WHITE);
                     ui.add_space(14.0);
                     ui.vertical(|ui| {
                         ui.label(
@@ -1477,7 +1477,7 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                 // ACTIONS ROW
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
-                    let open_label = crate::i18n::tr(lang, "📂 Open file (.pubgen)");
+                    let open_label = crate::i18n::tr(lang, "Open file (.pubgen)");
                     if ui
                         .add(
                             egui::Button::new(RichText::new(open_label).size(13.0).color(Color32::WHITE))
@@ -1490,12 +1490,12 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                         trigger_host_tab_action(ui.ctx(), HostTabAction::Open);
                     }
 
-                    let import_label = if lang.starts_with("id") { "📊 Impor Manifest (XLSX)" } else { "📊 Import Manifest (XLSX)" };
+                    let import_label = if lang.starts_with("id") { "Impor Manifest (XLSX)" } else { "Import Manifest (XLSX)" };
                     if ui.add(egui::Button::new(RichText::new(import_label).size(13.0)).corner_radius(16.0).min_size(vec2(0.0, 32.0))).clicked() {
                         trigger_host_tab_action(ui.ctx(), HostTabAction::Import);
                     }
 
-                    let brs_label = if lang.starts_with("id") { "📰 Sampel BRS" } else { "📰 Sample BRS" };
+                    let brs_label = if lang.starts_with("id") { "Sampel BRS" } else { "Sample BRS" };
                     if ui.add(egui::Button::new(RichText::new(brs_label).size(13.0)).corner_radius(16.0).min_size(vec2(0.0, 32.0))).clicked() {
                         let sample = std::path::Path::new("plan/pubgen/samples/brs/ntp202610.xlsx");
                         if sample.is_file() {
@@ -1507,7 +1507,7 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                         }
                     }
 
-                    let dda_label = if lang.starts_with("id") { "📑 Sampel DDA" } else { "📑 Sample DDA" };
+                    let dda_label = if lang.starts_with("id") { "Sampel DDA" } else { "Sample DDA" };
                     if ui.add(egui::Button::new(RichText::new(dda_label).size(13.0)).corner_radius(16.0).min_size(vec2(0.0, 32.0))).clicked() {
                         let sample = std::path::Path::new("plan/pubgen/samples/SINGLE_LANG/BAB_02_2025.xlsx");
                         if sample.is_file() {
@@ -1519,7 +1519,7 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                         }
                     }
                     if !state.cards.is_empty() {
-                        let studio_label = crate::i18n::tr(lang, "➡ Open Active Studio");
+                        let studio_label = crate::i18n::tr(lang, "Open Active Studio");
                         if ui
                             .add(
                                 egui::Button::new(RichText::new(studio_label).size(13.0).color(t.success))
@@ -1881,19 +1881,13 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         ui.label(RichText::new(crate::i18n::tr(lang, "Sources & Content")).font(semibold(13.5)).color(t.text_strong));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             // Home button
-            let home_btn = ui
-                .add(egui::Button::new(RichText::new("⌂").font(semibold(12.0))).frame(true).corner_radius(CornerRadius::same(3)))
-                .on_hover_text(crate::i18n::tr(lang, "Home"));
-            home_btn.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr(lang, "Home")));
+            let home_btn = crate::icons::button(ui, "home", 22.0, false, &crate::i18n::tr(lang, "Home"));
             if home_btn.clicked() {
                 state.view = OrchestratorView::Home;
             }
 
             // Save button
-            let save_btn = ui
-                .add(egui::Button::new(RichText::new("💾").font(semibold(12.0))).frame(true).corner_radius(CornerRadius::same(3)))
-                .on_hover_text(crate::i18n::tr(lang, "Save"));
-            save_btn.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr(lang, "Save")));
+            let save_btn = crate::icons::button(ui, "preset-save", 22.0, false, &crate::i18n::tr(lang, "Save"));
             if save_btn.clicked() {
                 let now = format_now();
                 state.is_dirty = false;
@@ -1969,10 +1963,8 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         if ui
             .add_sized(
                 [btn_w, 22.0],
-                egui::Button::new(
-                    RichText::new(format!("📊 {}", crate::i18n::tr(lang, "Import Excel"))).font(FontId::proportional(10.5)).color(t.text),
-                )
-                .corner_radius(CornerRadius::same(3)),
+                egui::Button::new(RichText::new(crate::i18n::tr(lang, "Import Excel")).font(FontId::proportional(10.5)).color(t.text))
+                    .corner_radius(CornerRadius::same(3)),
             )
             .on_hover_text(crate::i18n::tr(lang, "Import Excel"))
             .clicked()
@@ -1999,10 +1991,8 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         if ui
             .add_sized(
                 [btn_w, 22.0],
-                egui::Button::new(
-                    RichText::new(format!("🎨 {}", crate::i18n::tr(lang, "Import Metadata"))).font(FontId::proportional(10.5)).color(t.text),
-                )
-                .corner_radius(CornerRadius::same(3)),
+                egui::Button::new(RichText::new(crate::i18n::tr(lang, "Import Metadata")).font(FontId::proportional(10.5)).color(t.text))
+                    .corner_radius(CornerRadius::same(3)),
             )
             .on_hover_text(crate::i18n::tr(lang, "Import Metadata"))
             .clicked()
@@ -2271,10 +2261,8 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
 
         if ui
             .add(
-                egui::Button::new(
-                    RichText::new(format!("🔍 {}", crate::i18n::tr(lang, "Run QA Audit"))).font(FontId::proportional(10.5)).color(t.text),
-                )
-                .corner_radius(CornerRadius::same(3)),
+                egui::Button::new(RichText::new(crate::i18n::tr(lang, "Run QA Audit")).font(FontId::proportional(10.5)).color(t.text))
+                    .corner_radius(CornerRadius::same(3)),
             )
             .on_hover_text(crate::i18n::tr(lang, "Run QA Audit"))
             .clicked()
@@ -2288,10 +2276,8 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
         if let Some(pdf) = &state.last_output_pdf {
             if ui
                 .add(
-                    egui::Button::new(
-                        RichText::new(format!("👁 {}", crate::i18n::tr(lang, "View Latest PDF"))).font(FontId::proportional(10.5)).color(t.accent),
-                    )
-                    .corner_radius(CornerRadius::same(3)),
+                    egui::Button::new(RichText::new(crate::i18n::tr(lang, "View Latest PDF")).font(FontId::proportional(10.5)).color(t.accent))
+                        .corner_radius(CornerRadius::same(3)),
                 )
                 .on_hover_text(crate::i18n::tr(lang, "Open {path}").replace("{path}", pdf))
                 .clicked()
@@ -2317,9 +2303,9 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
         let is_tab2 = state.center_tab == OrchestratorTab::VisualLivePreview;
         let is_tab3 = state.center_tab == OrchestratorTab::LogEksekusi;
 
-        let tab1_title = format!("📑 {}", crate::i18n::tr(lang, "Page Structure"));
-        let tab2_title = format!("👁 {}", crate::i18n::tr(lang, "Visual Live Preview"));
-        let tab3_title = format!("📋 {}", crate::i18n::tr(lang, "Execution Log"));
+        let tab1_title = crate::i18n::tr(lang, "Page Structure");
+        let tab2_title = crate::i18n::tr(lang, "Visual Live Preview");
+        let tab3_title = crate::i18n::tr(lang, "Execution Log");
 
         if tab_button(ui, &tab1_title, is_tab1, t).clicked() {
             state.center_tab = OrchestratorTab::StrukturHalaman;
@@ -2980,11 +2966,9 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
     if ui
         .add_sized(
             [ui.available_width(), btn_h],
-            egui::Button::new(
-                RichText::new(format!("⚡ {}", crate::i18n::tr(lang, "Generate Publication"))).font(semibold(12.0)).color(Color32::WHITE),
-            )
-            .fill(t.accent_strong)
-            .corner_radius(CornerRadius::same(4)),
+            egui::Button::new(RichText::new(crate::i18n::tr(lang, "Generate Publication")).font(semibold(12.0)).color(Color32::WHITE))
+                .fill(t.accent_strong)
+                .corner_radius(CornerRadius::same(4)),
         )
         .on_hover_text(crate::i18n::tr(lang, "Generate Publication"))
         .clicked()
@@ -3002,11 +2986,9 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
     if ui
         .add_sized(
             [ui.available_width(), btn_h],
-            egui::Button::new(
-                RichText::new(format!("🚀 {}", crate::i18n::tr(lang, "Generate & Publish PDF"))).font(semibold(12.0)).color(Color32::WHITE),
-            )
-            .fill(t.accent_strong)
-            .corner_radius(CornerRadius::same(4)),
+            egui::Button::new(RichText::new(crate::i18n::tr(lang, "Generate & Publish PDF")).font(semibold(12.0)).color(Color32::WHITE))
+                .fill(t.accent_strong)
+                .corner_radius(CornerRadius::same(4)),
         )
         .on_hover_text(crate::i18n::tr(lang, "Generate & Publish PDF"))
         .clicked()
@@ -3212,11 +3194,11 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(crate::i18n::tr(lang, "Scope:")).font(semibold(11.0)).color(t.text_strong));
                         let is_np = card.scope_new_page;
-                        if ui.selectable_label(is_np, format!("📄 {}", crate::i18n::tr(lang, "New Page"))).clicked() {
+                        if ui.selectable_label(is_np, crate::i18n::tr(lang, "New Page")).clicked() {
                             card.scope_new_page = true;
                             card.tag2 = "Halaman Baru".into();
                         }
-                        if ui.selectable_label(!is_np, format!("🧩 {}", crate::i18n::tr(lang, "New Object"))).clicked() {
+                        if ui.selectable_label(!is_np, crate::i18n::tr(lang, "New Object")).clicked() {
                             card.scope_new_page = false;
                             card.tag2 = "Objek Baru".into();
                         }
@@ -3308,9 +3290,9 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                             ui.add_space(4.0);
 
                             ui.horizontal(|ui| {
-                                ui.selectable_value(&mut card.cover_tab, 0, RichText::new("🎨 Desain Sampul").font(semibold(11.0)));
-                                ui.selectable_value(&mut card.cover_tab, 1, RichText::new("📋 Metadata Rilis & PIC").font(semibold(11.0)));
-                                ui.selectable_value(&mut card.cover_tab, 2, RichText::new("🔑 Kunci & Nilai Lembar COV").font(semibold(11.0)));
+                                ui.selectable_value(&mut card.cover_tab, 0, RichText::new("Desain Sampul").font(semibold(11.0)));
+                                ui.selectable_value(&mut card.cover_tab, 1, RichText::new("Metadata Rilis & PIC").font(semibold(11.0)));
+                                ui.selectable_value(&mut card.cover_tab, 2, RichText::new("Kunci & Nilai Lembar COV").font(semibold(11.0)));
                             });
                             ui.separator();
 
@@ -3476,7 +3458,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                                     });
                             });
 
-                            if ui.button(format!("⚡ {}", crate::i18n::tr(lang, "Apply to All Tables"))).clicked() {
+                            if ui.button(crate::i18n::tr(lang, "Apply to All Tables")).clicked() {
                                 apply_all_tables = true;
                             }
                         });
@@ -3506,14 +3488,14 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                             // Pilihan GeoJSON (Stock vs Custom)
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(crate::i18n::tr(lang, "GeoJSON Source:")).font(semibold(11.0)));
-                                if ui.selectable_label(!card.map_is_custom, crate::i18n::tr(lang, "🗺️ Stock Map (@assets/pubgen/maps)")).clicked() {
+                                if ui.selectable_label(!card.map_is_custom, crate::i18n::tr(lang, "Stock Map (@assets/pubgen/maps)")).clicked() {
                                     card.map_is_custom = false;
                                     if card.map_stock_name.is_empty() {
                                         card.map_stock_name = "CILAMAYA_WETAN".into();
                                     }
                                     card.source = format!("assets/pubgen/maps/{}_DESA.geojson", card.map_stock_name.trim_end_matches("_DESA").to_uppercase().replace([' ', '-'], "_"));
                                 }
-                                if ui.selectable_label(card.map_is_custom, crate::i18n::tr(lang, "📁 Custom GeoJSON (File Link)")).clicked() {
+                                if ui.selectable_label(card.map_is_custom, crate::i18n::tr(lang, "Custom GeoJSON (File Link)")).clicked() {
                                     card.map_is_custom = true;
                                     if !card.map_custom_geojson.is_empty() {
                                         card.source = card.map_custom_geojson.clone();
@@ -3765,7 +3747,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                         .corner_radius(CornerRadius::same(4))
                         .inner_margin(Margin::same(8))
                         .show(ui, |ui| {
-                            ui.label(RichText::new(crate::i18n::tr(lang, "📑 Header & Footer Settings:")).font(semibold(11.0)).color(t.text_strong));
+                            ui.label(RichText::new(crate::i18n::tr(lang, "Header & Footer Settings:")).font(semibold(11.0)).color(t.text_strong));
                             ui.add_space(3.0);
 
                             let ctx = ui.ctx().clone();
@@ -3773,13 +3755,13 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new(crate::i18n::tr(lang, "Apply Option:")).font(semibold(10.5)).color(t.text_strong));
                                     let is_forward = card.hf_scope_forward;
-                                    if ui.selectable_label(!is_forward, format!("📄 {}", crate::i18n::tr(lang, "Apply for this page only"))).clicked() {
+                                    if ui.selectable_label(!is_forward, crate::i18n::tr(lang, "Apply for this page only")).clicked() {
                                         card.hf_scope_forward = false;
                                         pubgen_st.hf_scope = 3;
                                         pubgen_st.hf_scope_start = card_page;
                                         pubgen_st.hf_scope_end = card_page;
                                     }
-                                    if ui.selectable_label(is_forward, format!("📑 {}", crate::i18n::tr(lang, "Apply from this page forward"))).clicked() {
+                                    if ui.selectable_label(is_forward, crate::i18n::tr(lang, "Apply from this page forward")).clicked() {
                                         card.hf_scope_forward = true;
                                         pubgen_st.hf_scope = 4;
                                         pubgen_st.hf_scope_start = card_page;
@@ -3830,7 +3812,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                     if ui.button(crate::i18n::tr(lang, "Cancel")).clicked() {
                         state.card_delete_confirm = false;
                     }
-                } else if ui.button(RichText::new(format!("🗑 {}", crate::i18n::tr(lang, "Delete Card"))).color(t.danger)).clicked() {
+                } else if ui.button(RichText::new(crate::i18n::tr(lang, "Delete Card")).color(t.danger)).clicked() {
                     state.card_delete_confirm = true;
                 }
 
@@ -4182,7 +4164,7 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
     let mut close = false;
     let mut chosen_action = None;
 
-    let guard_title = format!("⚠️ {}", crate::i18n::tr(lang, "Compilation Safety Guard"));
+    let guard_title = crate::i18n::tr(lang, "Compilation Safety Guard");
     egui::Window::new(guard_title).collapsible(false).resizable(false).fixed_size([460.0, 240.0]).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).show(
         ctx,
         |ui| {
@@ -4214,7 +4196,7 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
                     .add_sized(
                         [175.0, 26.0],
                         egui::Button::new(
-                            RichText::new(crate::i18n::tr(lang, "💾 Save as New Version (v2)")).font(semibold(11.0)).color(Color32::WHITE),
+                            RichText::new(crate::i18n::tr(lang, "Save as New Version (v2)")).font(semibold(11.0)).color(Color32::WHITE),
                         )
                         .fill(t.accent_strong),
                     )
@@ -4228,10 +4210,8 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
                 if ui
                     .add_sized(
                         [165.0, 26.0],
-                        egui::Button::new(
-                            RichText::new(crate::i18n::tr(lang, "⚠️ Overwrite Layout")).font(semibold(11.0)).color(t.caption_close_text),
-                        )
-                        .fill(t.caption_close),
+                        egui::Button::new(RichText::new(crate::i18n::tr(lang, "Overwrite Layout")).font(semibold(11.0)).color(t.caption_close_text))
+                            .fill(t.caption_close),
                     )
                     .on_hover_text(crate::i18n::tr(lang, "Replace the active document with a fresh compile from the source data"))
                     .clicked()
@@ -4433,14 +4413,14 @@ mod tests {
 
         // F8: workspace chrome strings the Orchestrator renders through tr() (UI consistency F8).
         for (key, id) in [
-            ("📂 Open file (.pubgen)", "📂 Buka Berkas (.pubgen)"),
-            ("➡ Open Active Studio", "➡ Buka Studio Aktif"),
+            ("Open file (.pubgen)", "Buka Berkas (.pubgen)"),
+            ("Open Active Studio", "Buka Studio Aktif"),
             ("Layout Engine", "Mesin Tata Letak"),
             ("● Integrated (DesignCraft Native OK)", "● Terintegrasi (DesignCraft Native OK)"),
             ("Detected Slots", "Slot Terdeteksi"),
             ("Page Layout Preview (Live Spread Document)", "Pratinjau Tata Letak Halaman (Live Spread Document)"),
-            ("💾 Save as New Version (v2)", "💾 Simpan Versi Baru (v2)"),
-            ("⚠️ Overwrite Layout", "⚠️ Timpa Tata Letak"),
+            ("Save as New Version (v2)", "Simpan Versi Baru (v2)"),
+            ("Overwrite Layout", "Timpa Tata Letak"),
             ("Thematic Map Settings (Choropleth & Spatial Map):", "Pengaturan Peta Tematik (Choropleth & Spatial Map):"),
             ("Opening file {path}", "Membuka berkas {path}"),
             ("QA audit finished: 0 errors, 0 warnings. Print standard passed.", "Audit QA selesai: 0 error, 0 warning. Standar cetak lolos."),

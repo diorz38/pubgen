@@ -1,4 +1,4 @@
-# GUI consistency review: Publication Orchestrator vs. DesignCraft
+﻿# GUI consistency review: Publication Orchestrator vs. DesignCraft
 
 Status: open — F1 fixed (2026-11-07), see §8 · Scope: `apps/pubgen-studio` + `crates/ui-egui` Orchestrator surface · Reference: DesignCraft mode (same shell, same tokens) · Base: `studio` @ `34c4ac6f`
 
@@ -498,7 +498,7 @@ success-colour heuristic now matches both languages (`berhasil`/`finished`/`QA a
 residuals (data, not chrome): persisted `card.tag1/tag2` values, the default seed log line, and the
 never-rendered `status_message` writes keep their original language. 1339 tests pass; clippy clean.
 
-Not done yet: F4 (emoji vs icon font), F5 (type/radius scale),
+Not done yet: F5 (type/radius scale),
 F9 (menu rows bypass `Item::Cmd`).
 
 **2026-11-07 — F13 + F16 fixed (card footer clipping, `Source::`).** Branch `studio`.
@@ -584,3 +584,22 @@ and the menu-bar tests were updated with the label. Verified: 1340 tests pass, c
 `cargo check -p pubgen-studio`. Internal Rust identifiers (`PubgenStudioApp`, `PubgenContainer`, module/file
 names, `.pubgen` extension) are deliberately unchanged: they are not user-visible and renaming them would
 churn every import for no UI gain.
+**2026-11-07 — F4 fixed (emoji chrome glyphs replaced by the icon font).** The Orchestrator painted 20
+distinct emoji codepoints as its interface vocabulary — 📊 hero, 📂/📊/📰/📑/➡ on Home, 📊/🎨 on the import
+row, ⌂/💾 glyph buttons, 🔍/👁 on the QA row, 📑/👁/📋 on the centre tabs, ⚡/🚀 on the Generate CTAs, 🗑 on
+delete, ⚠️ on the guard, 🎨/📋/🔑 on the cover modal tabs, 🗺️/📁 in the map picker — while DesignCraft's
+whole chrome is the monochrome 20×20 icon font in `icons.rs`. Every one of those labels is now text-only and
+the three places that were icons rather than labels use `crate::icons::paint` / `crate::icons::button`:
+the Home hero block paints `panel-pages` instead of "📊", and the Sources panel header uses
+`icons::button(ui, "home", 22.0, …)` / `icons::button(ui, "preset-save", 22.0, …)` instead of "⌂"/"💾"
+(`icons::button` already publishes its own `Role::Button` node and hover tooltip, so the F7 labels there were
+removed). Emoji prefixes were also stripped from the seven i18n keys that carried them
+(`Open file (.pubgen)`, `Open Active Studio`, `Stock Map (@assets/pubgen/maps)`, `Custom GeoJSON (File Link)`,
+`Header & Footer Settings:`, `Save as New Version (v2)`, `Overwrite Layout`) and from the View▸Language rows
+and the "Switch to DesignCraft Studio" menu row. What deliberately stays: the geometric marks `●` (status
+dots), `✓` (menu checkmark), `✎` (edit link), `▼/▶` (tree disclosure) — the reference uses the same
+typographic marks — and `CardKind::icon()`, whose 📕/📝/📈/🗺️/📊/🖼/📑/🔖 badges describe content types for
+which the icon font has no artwork (the same carve-out §7.1 gives the card thumbnails; adding eight icons is
+its own artwork task). Verified: 1340 tests pass, clippy clean, `cargo build -p pubgen-studio`; captures
+`.ui-shots/home-after-f4.png` (hero block now draws white icon strokes on the accent square, measured 86
+light pixels inside its 40×40 interior) and `.ui-shots/worksheet-after-f4.png`.
