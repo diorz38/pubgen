@@ -1,6 +1,6 @@
 # GUI consistency review: Publication Orchestrator vs. DesignCraft
 
-Status: open — F1 fixed (2026-11-07), see §8 · Scope: `apps/pubgen-studio` + `crates/ui-egui` Orchestrator surface · Reference: DesignCraft mode (same shell, same tokens) · Base: `studio` @ `34c4ac6f`
+Status: implemented — all findings F1–F16 fixed (2026-11-07), see §8 · Scope: `apps/pubgen-studio` + `crates/ui-egui` Orchestrator surface · Reference: DesignCraft mode (same shell, same tokens) · Base: `studio` @ `34c4ac6f`
 
 Product decisions that scope the work: §7 (2026-11-07) — dense tool surface, mode pills as chrome, ID
 primary with complete EN, two columns.
