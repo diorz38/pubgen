@@ -1379,11 +1379,7 @@ fn render_recent_documents(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, 
     if state.recent_documents.is_empty() {
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().min(720.0), 54.0), Sense::hover());
         ui.painter().rect(rect, 8.0, t.panel, Stroke::new(1.0, t.divider), egui::StrokeKind::Inside);
-        let msg = if lang.starts_with("id") {
-            "ℹ Belum ada riwayat berkas *.pubgen. Buka berkas proyek atau impor XLSX untuk memulai."
-        } else {
-            "ℹ No *.pubgen history yet. Open a project file or import XLSX to get started."
-        };
+        let msg = crate::i18n::tr(lang, "No recent .pubgen files yet. Open a project file or import an XLSX to begin.");
         ui.painter().text(pos2(rect.min.x + 16.0, rect.center().y), Align2::LEFT_CENTER, msg, FontId::proportional(12.0), t.text_dim);
     } else {
         let mut clicked_doc: Option<String> = None;
@@ -1413,7 +1409,7 @@ fn render_recent_documents(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, 
             } else if (ext == "xlsx" || ext == "xlsm") && p.is_file() {
                 trigger_host_tab_action(ui.ctx(), HostTabAction::ImportPath(p.to_path_buf()));
             } else {
-                state.execution_log.push(format!("[{}] Membuka berkas {}", format_now(), doc));
+                state.execution_log.push(format!("[{}] {}", format_now(), crate::i18n::tr(lang, "Opening file {path}").replace("{path}", &doc)));
                 state.view = OrchestratorView::Studio;
             }
         }
@@ -1440,11 +1436,7 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                         ui.label(
                             RichText::new(crate::i18n::tr(lang, "Welcome to Publication Orchestrator")).font(semibold(24.0)).color(t.text_strong),
                         );
-                        let subtitle = if lang.starts_with("id") {
-                            "Tata letak publikasi statistik cetak dan digital — cepat, terbuka, dan otomatis."
-                        } else {
-                            "Page layout for print and screen — fast, open and scriptable."
-                        };
+                        let subtitle = crate::i18n::tr(lang, "Page layout for print and screen — fast, open and scriptable.");
                         ui.label(RichText::new(subtitle).size(13.5).color(t.text_dim));
                     });
                 });
@@ -1454,7 +1446,7 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                 // ACTIONS ROW
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
-                    let open_label = if lang.starts_with("id") { "📂 Buka Berkas (.pubgen)" } else { "📂 Open file (.pubgen)" };
+                    let open_label = crate::i18n::tr(lang, "📂 Open file (.pubgen)");
                     if ui
                         .add(
                             egui::Button::new(RichText::new(open_label).size(13.0).color(Color32::WHITE))
@@ -1496,7 +1488,7 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                         }
                     }
                     if !state.cards.is_empty() {
-                        let studio_label = if lang.starts_with("id") { "➡ Buka Studio Aktif" } else { "➡ Open Active Studio" };
+                        let studio_label = crate::i18n::tr(lang, "➡ Open Active Studio");
                         if ui
                             .add(
                                 egui::Button::new(RichText::new(studio_label).size(13.0).color(t.success))
@@ -1857,7 +1849,7 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
             {
                 let now = format_now();
                 state.is_dirty = false;
-                state.execution_log.push(format!("[{now}] Proyek publikasi berhasil disimpan ke cache."));
+                state.execution_log.push(format!("[{now}] {}", crate::i18n::tr(lang, "Publication project saved to cache.")));
                 state.status_message = Some(("Proyek disimpan".into(), true));
             }
         });
@@ -1878,6 +1870,7 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
             .on_hover_text(crate::i18n::tr(lang, "Import Source"))
             .clicked()
         {
+            let lang = lang.to_string();
             let ctx = ui.ctx().clone();
             let _ = app.ask_open("dataMerge", crate::app::file_dialogs::Bound::App, move |_app, path| {
                 let p = std::path::Path::new(&path);
@@ -1911,7 +1904,12 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                         st.content_files.push(ContentItem { path: target_path.clone(), size_bytes: bytes.len() });
                         st.cached_content.insert(target_path.clone(), bytes.clone());
                         let now = format_now();
-                        st.execution_log.push(format!("[{now}] Berkas sumber ditambahkan: {target_path} ({} B)", bytes.len()));
+                        st.execution_log.push(format!(
+                            "[{now}] {}",
+                            crate::i18n::tr(&lang, "Source file added: {path} ({n} bytes)")
+                                .replace("{path}", &target_path)
+                                .replace("{n}", &bytes.len().to_string())
+                        ));
                         set_state(&ctx, st);
                         ctx.request_repaint();
                     }
@@ -2236,7 +2234,7 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
         {
             let now = format_now();
             state.last_qa_clean = true;
-            state.execution_log.push(format!("[{now}] Audit QA selesai: 0 error, 0 warning. Standar cetak lolos."));
+            state.execution_log.push(format!("[{now}] {}", crate::i18n::tr(lang, "QA audit finished: 0 errors, 0 warnings. Print standard passed.")));
             state.status_message = Some(("Audit QA Mutu Lolos (100%)".into(), true));
         }
 
@@ -2248,11 +2246,11 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
                     )
                     .corner_radius(CornerRadius::same(3)),
                 )
-                .on_hover_text(format!("Buka {pdf}"))
+                .on_hover_text(crate::i18n::tr(lang, "Open {path}").replace("{path}", pdf))
                 .clicked()
             {
                 let now = format_now();
-                state.execution_log.push(format!("[{now}] Membuka berkas hasil rilis: {pdf}"));
+                state.execution_log.push(format!("[{now}] {}", crate::i18n::tr(lang, "Opening release file: {path}").replace("{path}", pdf)));
                 state.status_message = Some(("Membuka berkas PDF".into(), true));
             }
         }
@@ -2301,7 +2299,7 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
             });
         }
         OrchestratorTab::VisualLivePreview => {
-            render_visual_live_preview(app, ui, state, t);
+            render_visual_live_preview(app, ui, state, t, lang);
         }
         OrchestratorTab::LogEksekusi => {
             render_log_eksekusi(app, ui, state, t);
@@ -2766,12 +2764,12 @@ fn render_tag_pill(ui: &mut Ui, label: &str, t: &Tokens) {
 // VISUAL LIVE PREVIEW TAB & LOG EKSEKUSI TAB
 // ============================================================================
 
-fn render_visual_live_preview(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens) {
+fn render_visual_live_preview(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, lang: &str) {
     ScrollArea::vertical().id_salt("pubgen_center_preview_scroll").auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Pratinjau Tata Letak Halaman (Live Spread Document)").font(semibold(11.5)).color(t.text_strong));
+            ui.label(RichText::new(crate::i18n::tr(lang, "Page Layout Preview (Live Spread Document)")).font(semibold(11.5)).color(t.text_strong));
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.label(RichText::new(format!("Total: {} Halaman", state.cards.len())).font(FontId::proportional(10.5)).color(t.text_dim));
@@ -2861,13 +2859,15 @@ fn render_log_eksekusi(_app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrat
                 ui.set_width(ui.available_width());
 
                 for line in &state.execution_log {
-                    ui.label(RichText::new(line).font(FontId::monospace(10.5)).color(if line.contains("Audit QA") || line.contains("berhasil") {
-                        t.success
-                    } else if line.contains("Error") {
-                        t.danger
-                    } else {
-                        t.text
-                    }));
+                    ui.label(RichText::new(line).font(FontId::monospace(10.5)).color(
+                        if line.contains("Audit QA") || line.contains("QA audit") || line.contains("berhasil") || line.contains("finished") {
+                            t.success
+                        } else if line.contains("Error") {
+                            t.danger
+                        } else {
+                            t.text
+                        },
+                    ));
                 }
             });
     });
@@ -2931,7 +2931,7 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
             state.show_guard_dialog = true;
             state.guard_is_publish = false;
         } else {
-            execute_compile(app, ui.ctx(), state, false);
+            execute_compile(app, ui.ctx(), state, false, lang);
         }
     }
 
@@ -2953,7 +2953,7 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
             state.show_guard_dialog = true;
             state.guard_is_publish = true;
         } else {
-            execute_compile(app, ui.ctx(), state, true);
+            execute_compile(app, ui.ctx(), state, true, lang);
         }
     }
 
@@ -2966,23 +2966,23 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
         .corner_radius(CornerRadius::same(3))
         .inner_margin(Margin::symmetric(8, 6))
         .show(ui, |ui| {
-            ui.label(RichText::new("Mesin Tata Letak").font(semibold(10.5)).color(t.text_dim));
+            ui.label(RichText::new(crate::i18n::tr(lang, "Layout Engine")).font(semibold(10.5)).color(t.text_dim));
             ui.horizontal(|ui| {
-                ui.label(RichText::new("● Terintegrasi (DesignCraft Native OK)").font(semibold(10.5)).color(t.success));
+                ui.label(RichText::new(crate::i18n::tr(lang, "● Integrated (DesignCraft Native OK)")).font(semibold(10.5)).color(t.success));
             });
         });
 
     ui.separator();
 
     // 4. Slot Terdeteksi (Slot character budget & fit)
-    ui.label(RichText::new(format!("Slot Terdeteksi ({})", state.slots.len())).font(semibold(11.5)).color(t.text_strong));
+    ui.label(RichText::new(format!("{} ({})", crate::i18n::tr(lang, "Detected Slots"), state.slots.len())).font(semibold(11.5)).color(t.text_strong));
 
     ScrollArea::vertical().id_salt("pubgen_right_slots_scroll").auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(4.0, 6.0);
 
         if state.slots.is_empty() {
             ui.label(
-                RichText::new("Belum ada slot ditemukan. Buka template .designcraft terlebih dahulu.")
+                RichText::new(crate::i18n::tr(lang, "No slots detected yet. Open a .designcraft template first."))
                     .font(FontId::proportional(10.5))
                     .color(t.text_dim),
             );
@@ -3103,16 +3103,27 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                 ui.label(RichText::new(card.kind.icon()).size(18.0));
                 ui.vertical(|ui| {
                     ui.label(
-                        RichText::new(format!("{} {}", card.kind.label(lang), if card.scope_new_page { "(Halaman Baru)" } else { "(Objek Baru)" }))
+                        RichText::new(format!("{} {}", card.kind.label(lang), if card.scope_new_page {
+                            crate::i18n::tr(lang, "(New Page)")
+                        } else {
+                            crate::i18n::tr(lang, "(New Object)")
+                        }))
                             .font(semibold(12.0))
                             .color(t.text_strong),
                     );
                     ui.label(
-                        RichText::new(format!(
-                            "Halaman {} · Tata Letak: {}",
-                            card.page,
-                            if state.page_layout_facing { "Double-Page (Facing Spreads)" } else { "Single-Page" }
-                        ))
+                        RichText::new(
+                            crate::i18n::tr(lang, "Page {p} · Layout: {l}")
+                                .replace("{p}", &card.page.to_string())
+                                .replace(
+                                    "{l}",
+                                    if state.page_layout_facing {
+                                        crate::i18n::tr(lang, "Double-Page (Facing Spreads)")
+                                    } else {
+                                        crate::i18n::tr(lang, "Single-Page")
+                                    },
+                                ),
+                        )
                         .font(FontId::proportional(10.0))
                         .color(t.text_dim),
                     );
@@ -3409,7 +3420,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                     }
                     CardKind::Chart => {
                         egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                            ui.label(RichText::new("Pengaturan Visualisasi Grafik:").font(semibold(11.0)).color(t.text_strong));
+                            ui.label(RichText::new(crate::i18n::tr(lang, "Chart Visualisation Settings:")).font(semibold(11.0)).color(t.text_strong));
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(crate::i18n::tr(lang, "Chart Type:")).font(semibold(11.0)));
                                 craft_ui::ComboBox::from_id_salt("chart_type_select")
@@ -3427,19 +3438,19 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                     }
                     CardKind::MapChart => {
                         egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                            ui.label(RichText::new("Pengaturan Peta Tematik (Choropleth & Spatial Map):").font(semibold(11.0)).color(t.text_strong));
+                            ui.label(RichText::new(crate::i18n::tr(lang, "Thematic Map Settings (Choropleth & Spatial Map):")).font(semibold(11.0)).color(t.text_strong));
 
                             // Pilihan GeoJSON (Stock vs Custom)
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new("Sumber GeoJSON:").font(semibold(11.0)));
-                                if ui.selectable_label(!card.map_is_custom, "🗺️ Peta Stock (@assets/pubgen/maps)").clicked() {
+                                ui.label(RichText::new(crate::i18n::tr(lang, "GeoJSON Source:")).font(semibold(11.0)));
+                                if ui.selectable_label(!card.map_is_custom, crate::i18n::tr(lang, "🗺️ Stock Map (@assets/pubgen/maps)")).clicked() {
                                     card.map_is_custom = false;
                                     if card.map_stock_name.is_empty() {
                                         card.map_stock_name = "CILAMAYA_WETAN".into();
                                     }
                                     card.source = format!("assets/pubgen/maps/{}_DESA.geojson", card.map_stock_name.trim_end_matches("_DESA").to_uppercase().replace([' ', '-'], "_"));
                                 }
-                                if ui.selectable_label(card.map_is_custom, "📁 Custom GeoJSON (Link Berkas)").clicked() {
+                                if ui.selectable_label(card.map_is_custom, crate::i18n::tr(lang, "📁 Custom GeoJSON (File Link)")).clicked() {
                                     card.map_is_custom = true;
                                     if !card.map_custom_geojson.is_empty() {
                                         card.source = card.map_custom_geojson.clone();
@@ -3449,7 +3460,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
 
                             if !card.map_is_custom {
                                 ui.horizontal(|ui| {
-                                    ui.label(RichText::new("Pilihan Peta Wilayah:").font(semibold(11.0)));
+                                    ui.label(RichText::new(crate::i18n::tr(lang, "Region Map Picker:")).font(semibold(11.0)));
                                     let mut stock_maps = super::charts::stock_maps::list_stock_map_charts();
                                     if stock_maps.is_empty() {
                                         stock_maps = vec![
@@ -3474,7 +3485,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                                             if !card.map_stock_name.is_empty() {
                                                 format!("{} (Desa)", card.map_stock_name)
                                             } else {
-                                                "Pilih Peta Wilayah...".to_string()
+                                                crate::i18n::tr(lang, "Pick a region map…").to_string()
                                             }
                                         });
 
@@ -3493,7 +3504,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                                 });
                             } else {
                                 ui.horizontal(|ui| {
-                                    ui.label(RichText::new("Berkas GeoJSON:").font(semibold(11.0)));
+                                    ui.label(RichText::new(crate::i18n::tr(lang, "GeoJSON file:")).font(semibold(11.0)));
                                     let edit = ui.add(
                                         egui::TextEdit::singleline(&mut card.map_custom_geojson)
                                             .desired_width(220.0)
@@ -3580,7 +3591,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                     }
                     CardKind::Image => {
                         egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                            ui.label(RichText::new("Pengaturan Gambar & Ilustrasi:").font(semibold(11.0)).color(t.text_strong));
+                            ui.label(RichText::new(crate::i18n::tr(lang, "Image & Illustration Settings:")).font(semibold(11.0)).color(t.text_strong));
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(crate::i18n::tr(lang, "Placement Area:")).font(semibold(11.0)));
                                 craft_ui::ComboBox::from_id_salt("image_area_select")
@@ -3598,7 +3609,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                     }
                     CardKind::Toc => {
                         egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                            ui.label(RichText::new("Pengaturan Daftar Isi (TOC):").font(semibold(11.0)).color(t.text_strong));
+                            ui.label(RichText::new(crate::i18n::tr(lang, "Table of Contents (TOC) Settings:")).font(semibold(11.0)).color(t.text_strong));
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(crate::i18n::tr(lang, "TOC Style:")).font(semibold(11.0)));
                                 craft_ui::ComboBox::from_id_salt("toc_style_select")
@@ -3630,13 +3641,13 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                     }
                     CardKind::Narrative => {
                         egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                            ui.label(RichText::new("Pengaturan Format Teks & Paragraf:").font(semibold(11.0)).color(t.text_strong));
+                            ui.label(RichText::new(crate::i18n::tr(lang, "Text & Paragraph Format Settings:")).font(semibold(11.0)).color(t.text_strong));
                             ui.label(RichText::new("Teks narasi di-parse secara otomatis dari dokumen RTF yang terhubung. Perataan paragraf, indentasi, heading, dan quote dipertahankan sesuai stylesheet BPS.").font(FontId::proportional(10.5)).color(t.text_dim));
                         });
                     }
                     CardKind::Divider => {
                         egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                            ui.label(RichText::new("Pengaturan Pembatas Bab (Chapter Divider):").font(semibold(11.0)).color(t.text_strong));
+                            ui.label(RichText::new(crate::i18n::tr(lang, "Chapter Divider Settings:")).font(semibold(11.0)).color(t.text_strong));
                             ui.label(RichText::new("Pembatas bab A4 full bleed dengan judul dwibahasa, ornamen grafis batik atau minimalis, dan penomoran bab otomatis.").font(FontId::proportional(10.5)).color(t.text_dim));
                         });
                     }
@@ -3687,7 +3698,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                         .corner_radius(CornerRadius::same(4))
                         .inner_margin(Margin::same(8))
                         .show(ui, |ui| {
-                            ui.label(RichText::new("📑 Pengaturan Header & Footer:").font(semibold(11.0)).color(t.text_strong));
+                            ui.label(RichText::new(crate::i18n::tr(lang, "📑 Header & Footer Settings:")).font(semibold(11.0)).color(t.text_strong));
                             ui.add_space(3.0);
 
                             let ctx = ui.ctx().clone();
@@ -4048,10 +4059,13 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
     super::excel::generate_publication_pages(app, &mut st)
 }
 
-fn execute_compile(app: &mut DesignApp, ctx: &egui::Context, state: &mut OrchestratorWorkspaceState, publish: bool) {
+fn execute_compile(app: &mut DesignApp, ctx: &egui::Context, state: &mut OrchestratorWorkspaceState, publish: bool, lang: &str) {
     let now = format_now();
     let pages_count = state.cards.len();
-    state.execution_log.push(format!("[{now}] Memulai generate struktur {pages_count} halaman publikasi dari worksheet aktif..."));
+    state.execution_log.push(format!(
+        "[{now}] {}",
+        crate::i18n::tr(lang, "Generating {n} publication page structures from the active worksheet…").replace("{n}", &pages_count.to_string())
+    ));
 
     let pdf_path = format!("outputs/{}.pdf", sanitize_file_stem(&state.meta_title));
     match generate_from_workspace(app, state) {
@@ -4060,7 +4074,9 @@ fn execute_compile(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orchest
             if publish {
                 match app.run("file.exportPdf", serde_json::json!({ "path": pdf_path })) {
                     Ok(_) => {
-                        state.execution_log.push(format!("[{now}] Ekspor berkas PDF rilis: {pdf_path}"));
+                        state
+                            .execution_log
+                            .push(format!("[{now}] {}", crate::i18n::tr(lang, "Exported release PDF: {path}").replace("{path}", &pdf_path)));
                         state.last_output_pdf = Some(pdf_path.clone());
                         state.status_message = Some(("Kompilasi & Publikasi PDF Berhasil".into(), true));
                     }
@@ -4106,15 +4122,18 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
 
             ui.label(
-                RichText::new("Tata letak aktif terdeteksi telah memiliki halaman dan modifikasi manual.").font(semibold(12.5)).color(t.text_strong),
+                RichText::new(crate::i18n::tr(lang, "The active layout already has pages and manual edits."))
+                    .font(semibold(12.5))
+                    .color(t.text_strong),
             );
 
             ui.label(
-                RichText::new(
-                    "Kompilasi ulang akan membuat ulang seluruh halaman dari data worksheet aktif. \
-                     Setiap penyesuaian tipografi, posisi bingkai, atau gaya manual yang dilakukan di mode \
-                     DesignCraft dapat tertimpa.",
-                )
+                RichText::new(crate::i18n::tr(
+                    lang,
+                    "Recompiling rebuilds every page from the active worksheet data. \
+                     Typography adjustments, frame positions, or manual styles made in DesignCraft mode \
+                     may be overwritten.",
+                ))
                 .font(FontId::proportional(11.0))
                 .color(t.text_dim),
             );
@@ -4127,10 +4146,12 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
                 if ui
                     .add_sized(
                         [175.0, 26.0],
-                        egui::Button::new(RichText::new("💾 Simpan Versi Baru (v2)").font(semibold(11.0)).color(Color32::WHITE))
-                            .fill(t.accent_strong),
+                        egui::Button::new(
+                            RichText::new(crate::i18n::tr(lang, "💾 Save as New Version (v2)")).font(semibold(11.0)).color(Color32::WHITE),
+                        )
+                        .fill(t.accent_strong),
                     )
-                    .on_hover_text("Pertahankan tata letak lama dan kompilasi ke berkas versi baru (_v2)")
+                    .on_hover_text(crate::i18n::tr(lang, "Keep the old layout and compile into a new (_v2) file"))
                     .clicked()
                 {
                     chosen_action = Some(1); // New version
@@ -4140,10 +4161,12 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
                 if ui
                     .add_sized(
                         [165.0, 26.0],
-                        egui::Button::new(RichText::new("⚠️ Timpa Tata Letak").font(semibold(11.0)).color(t.caption_close_text))
-                            .fill(t.caption_close),
+                        egui::Button::new(
+                            RichText::new(crate::i18n::tr(lang, "⚠️ Overwrite Layout")).font(semibold(11.0)).color(t.caption_close_text),
+                        )
+                        .fill(t.caption_close),
                     )
-                    .on_hover_text("Ganti dokumen aktif dengan kompilasi segar dari sumber data")
+                    .on_hover_text(crate::i18n::tr(lang, "Replace the active document with a fresh compile from the source data"))
                     .clicked()
                 {
                     chosen_action = Some(2); // Overwrite
@@ -4171,7 +4194,7 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
             // Save the current manual layout as v2, then regenerate fresh pages in a new document.
             let v2 = format!("outputs/{stem}_v2.designcraft");
             let v2_pdf = format!("outputs/{stem}_v2.pdf");
-            state.execution_log.push(format!("[{now}] Menyimpan tata letak lama ke: {v2}"));
+            state.execution_log.push(format!("[{now}] {}", crate::i18n::tr(lang, "Saving old layout to: {path}").replace("{path}", &v2)));
             let _ = app.run("file.saveAs", serde_json::json!({ "path": v2 }));
             let _ = app.run("file.new", serde_json::json!({}));
             match generate_from_workspace(app, state) {
@@ -4180,7 +4203,9 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
                     if is_publish {
                         match app.run("file.exportPdf", serde_json::json!({ "path": v2_pdf })) {
                             Ok(_) => {
-                                state.execution_log.push(format!("[{now}] Ekspor berkas PDF rilis: {v2_pdf}"));
+                                state
+                                    .execution_log
+                                    .push(format!("[{now}] {}", crate::i18n::tr(lang, "Exported release PDF: {path}").replace("{path}", &v2_pdf)));
                                 state.last_output_pdf = Some(v2_pdf);
                                 state.status_message = Some(("Kompilasi ke versi baru (v2) berhasil".into(), true));
                             }
@@ -4327,6 +4352,24 @@ mod tests {
         assert_eq!(crate::i18n::tr("id", "Add Card:"), "Tambah Kartu:");
         assert_eq!(crate::i18n::tr("id", "Add New Page"), "Tambah Halaman Baru");
         assert_eq!(crate::i18n::tr("id", "Add New Object"), "Tambah Objek Baru");
+
+        // F8: workspace chrome strings the Orchestrator renders through tr() (UI consistency F8).
+        for (key, id) in [
+            ("📂 Open file (.pubgen)", "📂 Buka Berkas (.pubgen)"),
+            ("➡ Open Active Studio", "➡ Buka Studio Aktif"),
+            ("Layout Engine", "Mesin Tata Letak"),
+            ("● Integrated (DesignCraft Native OK)", "● Terintegrasi (DesignCraft Native OK)"),
+            ("Detected Slots", "Slot Terdeteksi"),
+            ("Page Layout Preview (Live Spread Document)", "Pratinjau Tata Letak Halaman (Live Spread Document)"),
+            ("💾 Save as New Version (v2)", "💾 Simpan Versi Baru (v2)"),
+            ("⚠️ Overwrite Layout", "⚠️ Timpa Tata Letak"),
+            ("Thematic Map Settings (Choropleth & Spatial Map):", "Pengaturan Peta Tematik (Choropleth & Spatial Map):"),
+            ("Opening file {path}", "Membuka berkas {path}"),
+            ("QA audit finished: 0 errors, 0 warnings. Print standard passed.", "Audit QA selesai: 0 error, 0 warning. Standar cetak lolos."),
+        ] {
+            assert_eq!(crate::i18n::tr("id", key), id, "missing ID row for {key:?}");
+            assert_eq!(crate::i18n::tr("en", key), key, "EN must be the source key");
+        }
 
         // English fallback
         assert_eq!(crate::i18n::tr("", "Execution & Verification"), "Execution & Verification");

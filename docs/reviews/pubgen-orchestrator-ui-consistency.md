@@ -484,8 +484,22 @@ Orchestrator mode is active the title is "PubGen Studio — {publication}" using
 mojibake-emoji heading). Kept: `render_close_dialog` (used by app.rs), `guard_dialog`, `project`. Verified:
 `cargo check`/`clippy -p pubgen-studio --all-targets` clean.
 
-Not done yet: F4 (emoji vs icon font), F5 (type/radius scale), F6 (three tab treatments), F7 (accessibility
-widget_info sweep), F8 (i18n EN/ID completeness), F9 (menu rows bypass `Item::Cmd`), F10 (naming rest),
+**2026-11-07 — F8 first sweep fixed (workspace chrome + guard dialog fully bilingual).** Every
+user-visible Indonesian literal in `panels/pubgen/workspace.rs` render paths now routes through
+`crate::i18n::tr` with English source keys and new `i18n/id.rs` rows (41 added): Home subtitle/open/
+studio labels and empty-recent hint, QA log lines, PDF hover/open log, live-preview header, right-panel
+Layout Engine/Integrated status, Detected Slots heading and empty-slot hint, card-edit modal scope and
+page/layout line, all seven per-kind settings headers (chart/map/image/TOC/text/divider/header-footer),
+GeoJSON source picker rows, and the whole Re-compilation Guard dialog (title strings, body, both action
+buttons and hovers, log lines). `execute_compile` and `render_visual_live_preview` gained a `lang`
+parameter; the Import Source dialog callback captures an owned `lang` String. The Execution Log
+success-colour heuristic now matches both languages (`berhasil`/`finished`/`QA audit`). Test
+`orchestrator_workspace_strings_are_bilingual` extended with an 11-key EN/ID completeness loop. Known
+residuals (data, not chrome): persisted `card.tag1/tag2` values, the default seed log line, and the
+never-rendered `status_message` writes keep their original language. 1339 tests pass; clippy clean.
+
+Not done yet: F4 (emoji vs icon font), F5 (type/radius scale), F6 (three tab treatments),
+F7 (accessibility widget_info sweep), F9 (menu rows bypass `Item::Cmd`), F10 (naming rest),
 F12 (status-bar semantics), F14 (fixed 320 px dock), F15 (blank status bar).
 
 **2026-11-07 — F13 + F16 fixed (card footer clipping, `Source::`).** Branch `studio`.
