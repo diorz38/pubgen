@@ -432,7 +432,21 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
                     });
                 });
             });
-            // Centred title.
+            // Centred title. The Orchestrator names the publication workspace, not the layout document.
+            #[cfg(feature = "pubgen")]
+            let title = if crate::menus::pubgen_bar::is_orchestrator_mode(ui.ctx()) {
+                let ws = crate::dock::pubgen::workspace::get_state(ui.ctx());
+                match ws.meta_title.trim() {
+                    "" => "PubGen Studio".to_string(),
+                    t => format!("PubGen Studio — {t}"),
+                }
+            } else {
+                match app.session.active() {
+                    Some(d) => format!("DesignCraft — {}", crate::rtl::isolate(&d.title())),
+                    None => "DesignCraft".to_string(),
+                }
+            };
+            #[cfg(not(feature = "pubgen"))]
             let title = match app.session.active() {
                 Some(d) => format!("DesignCraft — {}", crate::rtl::isolate(&d.title())),
                 None => "DesignCraft".to_string(),

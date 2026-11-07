@@ -470,10 +470,17 @@ swallowed into commit `4707294b` by in-flight DDA work; F2 continues on top).
   (`assets/templates/{data_tables,dividers,front_matter}/001_*.designcraft`) nondeterministically — restored
   with `git checkout`; worth a separate fix (tests must not dirty tracked binaries).
 
-Not done yet: F3 (app-bar centre title says "DesignCraft" in Orchestrator), F4 (emoji vs icon font),
-F5 (type/radius scale), F6 (three tab treatments), F7 (accessibility widget_info sweep), F8 (i18n EN/ID
-completeness), F9 (menu rows bypass `Item::Cmd`), F10 rest, F11 (dead chrome modules), F12 (status-bar
-semantics), F14 (fixed 320 px dock), F15 (blank status bar).
+**2026-11-07 — F3 fixed (centre title names the mode).** `chrome/app_bar.rs`: the centred title was
+unconditionally "DesignCraft — {doc}" even in Orchestrator. Now `#[cfg(feature = "pubgen")]`-gated: when the
+Orchestrator mode is active the title is "PubGen Studio — {publication}" using the workspace
+`meta_title` (bare "PubGen Studio" when empty), and DesignCraft keeps its existing title. Verified at
+2560 px width: screenshot `.ui-shots/worksheet-after-f3-wide.png` shows the centred
+"PubGen Studio — Perkembangan Nilai Tukar Petani"; 1339 tests pass; clippy clean with and without the
+`pubgen` feature.
+
+Not done yet: F4 (emoji vs icon font), F5 (type/radius scale), F6 (three tab treatments), F7 (accessibility
+widget_info sweep), F8 (i18n EN/ID completeness), F9 (menu rows bypass `Item::Cmd`), F10 rest, F11 (dead
+chrome modules), F12 (status-bar semantics), F14 (fixed 320 px dock), F15 (blank status bar).
 
 **2026-11-07 — F13 + F16 fixed (card footer clipping, `Source::`).** Branch `studio`.
 
