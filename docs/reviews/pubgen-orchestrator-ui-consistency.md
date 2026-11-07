@@ -499,8 +499,7 @@ residuals (data, not chrome): persisted `card.tag1/tag2` values, the default see
 never-rendered `status_message` writes keep their original language. 1339 tests pass; clippy clean.
 
 Not done yet: F4 (emoji vs icon font), F5 (type/radius scale), F6 (three tab treatments),
-F9 (menu rows bypass `Item::Cmd`), F10 (naming rest),
-F12 (status-bar semantics), F14 (fixed 320 px dock), F15 (blank status bar).
+F9 (menu rows bypass `Item::Cmd`), F10 (naming rest), F14 (fixed 320 px dock).
 
 **2026-11-07 — F13 + F16 fixed (card footer clipping, `Source::`).** Branch `studio`.
 
@@ -531,3 +530,18 @@ translated too (`Total: {n} pages`, `Page & Section Numbering Options:`), and th
 reuses the translated log sentence instead of a hardcoded Indonesian one. Test
 `orchestrator_workspace_strings_are_bilingual` grew to cover the new keys (1339 tests pass; clippy clean; a
 `PrintWindow` capture of the Worksheet is pixel-identical outside the title-bar row, i.e. no visual change).
+
+**2026-11-07 — F12 + F15 fixed (the status bar showed the canvas document, and was empty).** The 17 px
+bottom bar is host chrome and renders in both modes, but its contents are DesignCraft facts — zoom %,
+spread navigation, page box, `[Basic] (working)`, text-overflow preflight — and the Orchestrator has no
+canvas; with no layout document active it took the "no session" branch and painted nothing at all (measured:
+5 distinct colours across its whole left half, i.e. an empty band). `chrome/status_bar.rs` now branches on
+`pubgen_bar::is_orchestrator_mode` *before* the session check and renders the publication instead:
+`Publication Orchestrator` · publication title (or `Untitled publication`) with a `*` dirty marker and
+hover-to-see-full-name truncation · `{n} items` · `Home`/`Worksheet` · the workspace's last status message.
+It uses the same 10.5 px proportional font, `t.text`/`t.text_strong`/`t.text_dim` and the bar's existing
+17 px/`t.panel` frame, publishes a `Role::Label` node for the title, and the whole branch is
+`#[cfg(feature = "pubgen")]`. Verified: 1339 tests pass (also `cargo check` without the `pubgen` feature);
+clippy clean; `PrintWindow` capture of the Worksheet now shows 161 distinct colours in that band instead of
+5 (`.ui-shots/worksheet-after-f12.png`). The QA `● Clean` fact stays in the centre header/its dock tab for
+now — its permanent home is the one open question (§7.6).

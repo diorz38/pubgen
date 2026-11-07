@@ -4390,6 +4390,9 @@ mod tests {
             ("Increase {label}", "Tambah {label}"),
             ("Total: {n} pages", "Total: {n} Halaman"),
             ("Page & Section Numbering Options:", "Opsi Penomoran Halaman & Seksi:"),
+            ("Untitled publication", "Publikasi tanpa judul"),
+            ("{n} items", "{n} item"),
+            ("Worksheet", "Lembar Kerja"),
         ] {
             assert_eq!(crate::i18n::tr("id", key), id, "missing ID row for {key:?}");
             assert_eq!(crate::i18n::tr("en", key), key, "EN must be the source key");

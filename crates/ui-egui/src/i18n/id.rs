@@ -361,4 +361,8 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     // Chrome strings missed by the first F8 sweep.
     ("Total: {n} pages", "Total: {n} Halaman"),
     ("Page & Section Numbering Options:", "Opsi Penomoran Halaman & Seksi:"),
+    // Orchestrator status bar (UI consistency F12/F15).
+    ("Untitled publication", "Publikasi tanpa judul"),
+    ("{n} items", "{n} item"),
+    ("Worksheet", "Lembar Kerja"),
 ];

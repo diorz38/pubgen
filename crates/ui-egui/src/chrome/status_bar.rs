@@ -83,6 +83,49 @@ fn show_preflight(app: &mut DesignApp) {
     }
 }
 
+/// Status bar contents in Orchestrator mode: the publication the workspace holds, not the layout
+/// document's zoom/spread/preflight (DesignCraft-only facts).
+#[cfg(feature = "pubgen")]
+fn orchestrator_status(app: &mut DesignApp, ui: &mut egui::Ui, t: &Tokens, small: &egui::FontId) {
+    let lang = app.ui.language.clone();
+    let state = crate::dock::pubgen::workspace::get_state(ui.ctx());
+    let mode = crate::i18n::tr(&lang, "Publication Orchestrator");
+    ui.label(egui::RichText::new(mode).font(small.clone()).color(t.text));
+    ui.add_space(12.0);
+
+    let title = if state.meta_title.trim().is_empty() {
+        crate::i18n::tr(&lang, "Untitled publication").to_string()
+    } else {
+        state.meta_title.trim().to_string()
+    };
+    let shown = format!("{}{}", if state.is_dirty { "*" } else { "" }, title);
+    let color = t.text_strong;
+    let galley = crate::rtl::truncated(ui.ctx(), &shown, small.clone(), color, 320.0);
+    let (r, resp) = ui.allocate_exact_size(galley.size(), Sense::hover());
+    ui.painter().galley(r.min, galley.clone(), Color32::PLACEHOLDER);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &shown));
+    if galley.elided {
+        let full = shown.clone();
+        resp.on_hover_text(full);
+    }
+
+    ui.add_space(12.0);
+    let items = crate::i18n::tr(&lang, "{n} items").replace("{n}", &state.cards.len().to_string());
+    ui.label(egui::RichText::new(items).font(small.clone()).color(t.text_dim));
+
+    ui.add_space(12.0);
+    let view = match state.view {
+        crate::dock::pubgen::workspace::OrchestratorView::Home => crate::i18n::tr(&lang, "Home"),
+        crate::dock::pubgen::workspace::OrchestratorView::Studio => crate::i18n::tr(&lang, "Worksheet"),
+    };
+    ui.label(egui::RichText::new(view).font(small.clone()).color(t.text_dim));
+
+    if let Some((message, _ok)) = &state.status_message {
+        ui.add_space(12.0);
+        ui.label(egui::RichText::new(message).font(small.clone()).color(t.text_dim));
+    }
+}
+
 pub fn status_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let resp = egui::Panel::bottom("status_bar")
@@ -92,6 +135,13 @@ pub fn status_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
             ui.spacing_mut().item_spacing.x = 4.0;
             ui.horizontal_centered(|ui| {
                 let small = egui::FontId::proportional(10.5);
+                // The layout document's zoom, spread and preflight describe the DesignCraft canvas, which
+                // the Orchestrator does not show; there the bar reports the publication workspace instead.
+                #[cfg(feature = "pubgen")]
+                if crate::menus::pubgen_bar::is_orchestrator_mode(ui.ctx()) {
+                    orchestrator_status(app, ui, &t, &small);
+                    return;
+                }
                 if app.session.active().is_none() {
                     ui.label(egui::RichText::new(&app.ui.status).font(small).color(t.text_dim));
                     return;
