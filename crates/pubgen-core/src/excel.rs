@@ -87,6 +87,15 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
         if let Some(ten) = kv.get("title_en").or_else(|| kv.get("judul_en")) {
             card_settings.insert("title_en".to_string(), serde_json::Value::String(ten.clone()));
         }
+        if let Some(fen) = kv.get("file_en").or_else(|| kv.get("berkas_en")) {
+            card_settings.insert("file_en".to_string(), serde_json::Value::String(fen.clone()));
+        }
+        if let Some(tpl) = kv.get("template").or_else(|| kv.get("diivider")).or_else(|| kv.get("divider")) {
+            card_settings.insert("template".to_string(), serde_json::Value::String(tpl.clone()));
+        }
+        if let Some(thm) = kv.get("theme").or_else(|| kv.get("table_theme")).or_else(|| kv.get("colortheme")) {
+            card_settings.insert("theme".to_string(), serde_json::Value::String(thm.clone()));
+        }
 
         if kind == CardKind::Narrative {
             let (t, s) = process_narrative_sheet(base_dir, name, &file_name, &rows, &kv, card_title, &mut texts);
@@ -178,13 +187,40 @@ fn ingest_cover_sheet(
         }
     }
 
-    for key in ["image_theme1", "image_theme2", "qr", "pic_photo", "image", "imagehero", "theme1", "theme2"] {
+    for key in [
+        "image_theme1",
+        "image_theme2",
+        "qr",
+        "pic_photo",
+        "image",
+        "imagehero",
+        "image_hero",
+        "image_1",
+        "image_landscape",
+        "image_lanscape",
+        "landscape",
+        "logo",
+        "officelogo",
+        "office_logo",
+        "event_theme",
+        "themeevent",
+        "imageback",
+        "backimage",
+        "backcover",
+        "theme1",
+        "theme2",
+    ] {
         let Some(file_name) = metadata.extra.get(key) else { continue };
         let Some(resolved) = resolve_file(base_dir, file_name) else { continue };
         let Ok(bytes) = std::fs::read(&resolved) else { continue };
-        let asset_path = format!("assets/{file_name}");
+        let just_name = Path::new(file_name).file_name().and_then(|s| s.to_str()).unwrap_or(file_name);
+        let normalized = file_name.replace('\\', "/");
+        let asset_path = format!("assets/{just_name}");
         if !assets.iter().any(|(p, _): &(String, Vec<u8>)| p == &asset_path) {
-            assets.push((asset_path, bytes));
+            assets.push((asset_path.clone(), bytes.clone()));
+        }
+        if !assets.iter().any(|(p, _): &(String, Vec<u8>)| p == &normalized) {
+            assets.push((normalized, bytes));
         }
     }
     Ok(())
@@ -265,6 +301,24 @@ fn process_narrative_sheet(
 
     if !texts.iter().any(|(p, _): &(String, Vec<u8>)| p == &rtf_path) {
         texts.push((rtf_path.clone(), rtf_bytes));
+    }
+
+    if let Some(fen) = kv.get("file_en").or_else(|| kv.get("berkas_en"))
+        && let Some((path, bytes)) = resolve_narrative_file(base_dir, fen, name).and_then(|p| std::fs::read(&p).ok().map(|b| (p, b)))
+    {
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+        let fen_stem = Path::new(fen).file_stem().and_then(|s| s.to_str()).unwrap_or(fen);
+        let fen_rtf = if ext == "rtf" {
+            Some(bytes)
+        } else {
+            designcraft_textimport::to_rtf(&format!("{fen_stem}.{ext}"), &bytes).ok()
+        };
+        if let Some(b) = fen_rtf {
+            let fen_path = format!("rtf/{fen_stem}.rtf");
+            if !texts.iter().any(|(p, _): &(String, Vec<u8>)| p == &fen_path) {
+                texts.push((fen_path, b));
+            }
+        }
     }
 
     if name == "U1" {
@@ -578,17 +632,81 @@ fn parse_cover(rows: &[Vec<String>], metadata: &mut PublicationMetadata, warning
         }
         let norm: String = raw_key.to_ascii_lowercase().chars().filter(|c| !matches!(c, '_' | ' ' | '-')).collect();
         match norm.as_str() {
+            "style" | "coverstyle" | "template" => {
+                metadata.extra.insert("style".into(), value);
+            }
+            "level" => {
+                metadata.extra.insert("level".into(), value);
+            }
             "title" | "title1" | "titleid" => {
                 metadata.title = value.clone();
                 metadata.extra.insert("title".into(), value);
             }
-            "titleen" | "title2" | "title_en" => {
+            "title2" => {
+                if metadata.title_en.is_none() {
+                    metadata.title_en = Some(value.clone());
+                }
+                metadata.extra.insert("title2".into(), value);
+            }
+            "titleen" | "title_en" => {
                 metadata.title_en = Some(value.clone());
                 metadata.extra.insert("title_en".into(), value);
             }
-            "no" | "nomor" | "releaseno" | "volumeno" | "katalog" | "catalogue" | "nocatalogue" => {
+            "year" | "tahun" => {
+                metadata.extra.insert("year".into(), value);
+            }
+            "volume" | "vol" | "volumeno" => {
+                metadata.extra.insert("volume".into(), value);
+            }
+            "nocatalogue" | "catalogue" | "catalog" | "katalog" | "nokatalog" | "katalogbps" => {
+                metadata.extra.insert("catalogue".into(), value);
+            }
+            "issn" | "isbn" | "code" => {
+                metadata.extra.insert("code".into(), value);
+            }
+            "agency" | "puboffice" | "officename" | "instansi" | "lembaga" => {
+                agency = value.clone();
+                metadata.extra.insert("agency".into(), value.clone());
+                metadata.extra.insert("pub_office".into(), value);
+            }
+            "officeaddress" | "address" | "alamat" | "alamatkantor" => {
+                metadata.extra.insert("office_address".into(), value);
+            }
+            "tabletheme" | "theme" | "tablecolor" | "color" | "colortheme" | "warna" => {
+                metadata.extra.insert("table_theme".into(), value.clone());
+                metadata.extra.insert("theme".into(), value);
+            }
+            "eventtheme" | "themeevent" | "imageback" | "backimage" | "backcover" => {
+                metadata.extra.insert("event_theme".into(), value);
+            }
+            "palette" | "aipalette" | "colorpalette" | "palet" => {
+                metadata.extra.insert("palette".into(), value);
+            }
+            "image1" | "imagehero" | "image" => {
+                metadata.extra.insert("image_hero".into(), value.clone());
+                metadata.extra.insert("image_1".into(), value);
+            }
+            "imagelanscape" | "imagelandscape" | "landscape" => {
+                metadata.extra.insert("image_landscape".into(), value.clone());
+                metadata.extra.insert("image_lanscape".into(), value);
+            }
+            "officelogo" | "logo" => {
+                metadata.extra.insert("logo".into(), value.clone());
+                metadata.extra.insert("office_logo".into(), value);
+            }
+            "releaseno" | "no_release" | "norelease" => {
                 release_no = value.clone();
                 metadata.extra.insert("release_no".into(), value);
+            }
+            "no" | "nomor" => {
+                // If it is pure digits or dotted digits (like catalogue), store as catalogue if catalogue not yet set
+                let is_pure_dotted_num = !value.is_empty() && value.chars().all(|c| c.is_ascii_digit() || c == '.');
+                if is_pure_dotted_num && !metadata.extra.contains_key("catalogue") {
+                    metadata.extra.insert("catalogue".into(), value);
+                } else {
+                    release_no = value.clone();
+                    metadata.extra.insert("release_no".into(), value);
+                }
             }
             "date" | "tanggal" | "tgl" | "releasedate" | "volumedate" => {
                 let fmt = format_excel_date(&value);
@@ -600,9 +718,35 @@ fn parse_cover(rows: &[Vec<String>], metadata: &mut PublicationMetadata, warning
                 release_month = fmt.clone();
                 metadata.extra.insert("release_month".into(), fmt);
             }
-            "agency" | "puboffice" | "officename" | "instansi" | "lembaga" => {
-                agency = value.clone();
-                metadata.extra.insert("agency".into(), value);
+            "point" | "poin" | "highlight" => {
+                metadata.extra.insert("point".into(), value);
+            }
+            "qr" | "qrcode" | "qr_code" => {
+                metadata.extra.insert("qr".into(), value);
+            }
+            "picname" | "pic" | "narasumber" | "nama" => {
+                metadata.extra.insert("pic_name".into(), value);
+            }
+            "picphoto" | "photo" | "foto" => {
+                metadata.extra.insert("pic_photo".into(), value);
+            }
+            "position" | "jabatan" => {
+                metadata.extra.insert("pic_position".into(), value);
+            }
+            "office" | "kantor" => {
+                metadata.extra.insert("pic_office".into(), value);
+            }
+            "phone" | "telepon" | "telp" => {
+                metadata.extra.insert("pic_phone".into(), value);
+            }
+            "email" | "surel" => {
+                metadata.extra.insert("pic_email".into(), value);
+            }
+            "imagetheme1" | "theme1" => {
+                metadata.extra.insert("image_theme1".into(), value);
+            }
+            "imagetheme2" | "theme2" => {
+                metadata.extra.insert("image_theme2".into(), value);
             }
             _ => {
                 metadata.extra.insert(raw_key.to_ascii_lowercase(), value);
@@ -614,7 +758,7 @@ fn parse_cover(rows: &[Vec<String>], metadata: &mut PublicationMetadata, warning
         warnings.push("COVER sheet has no title field".into());
     }
 
-    if metadata.title_en.is_none() && (!release_date.is_empty() || !agency.is_empty()) {
+    if metadata.title_en.is_none() && (!release_date.is_empty() || !agency.is_empty()) && !release_no.is_empty() {
         metadata.title_en = Some(if !release_date.is_empty() && !agency.is_empty() {
             format!("{release_date} · {agency}")
         } else if !release_date.is_empty() {

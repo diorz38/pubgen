@@ -3606,11 +3606,18 @@ pub(crate) fn apply_excel_cover(st: &mut PubgenState, cover: &ExcelCoverData, ba
     if !cover.office_address.trim().is_empty() || !cover.event_theme.trim().is_empty() {
         st.cover_include_inside_back = true;
     }
-    if st.active_profile().id == "bps_brs" || !cover.release_no.is_empty() || !cover.points_body.is_empty() {
+    let is_brs_profile = st.active_profile().id == "bps_brs";
+    let is_dda_profile = st.active_profile().id == "bps_dda";
+
+    if is_brs_profile || (!is_dda_profile && (!cover.release_no.is_empty() || !cover.points_body.is_empty())) {
         st.cover_style = 13;
         st.cover_include_inside_back = false;
         st.bilingual_output = false;
         st.card2_table_footer = false;
+    } else if is_dda_profile {
+        st.cover_include_inside_back = true;
+        st.card2_table_footer = true;
+        st.bilingual_output = true;
     }
     if !cover.table_theme.trim().is_empty()
         && let Some(th) = parse_table_color_theme(&cover.table_theme)
@@ -3689,7 +3696,7 @@ pub fn execute_excel_and_generate(app: &mut DesignApp, st: &mut PubgenState, pat
 /// profile header/footer. Shared by the Excel import pipeline and the Orchestrator
 /// workspace generator so both produce identical DesignCraft pages.
 pub fn generate_publication_pages(app: &mut DesignApp, st: &mut PubgenState) -> Result<String, String> {
-    let is_brs = st.active_profile().id == "bps_brs" || st.cover_style == 13;
+    let is_brs = st.active_profile().id == "bps_brs" || (st.active_profile().id != "bps_dda" && st.cover_style == 13);
     let is_dda = st.active_profile().id == "bps_dda" || st.hf_style.eq_ignore_ascii_case("hf-dda") || st.hf_style.eq_ignore_ascii_case("dda");
 
     // Ensure an active document exists. BPS profiles print A4: creating the document on the
@@ -3700,10 +3707,38 @@ pub fn generate_publication_pages(app: &mut DesignApp, st: &mut PubgenState) -> 
         if is_brs {
             let _ = app.run("file.new", json!({"width": BPS_PAGE.0, "height": BPS_PAGE.1, "facingPages": true}));
         } else if is_dda {
-            let _ = app.run("file.new", json!({"width": BPS_PAGE.0, "height": BPS_PAGE.1}));
+            let _ = app.run(
+                "file.new",
+                json!({
+                    "width": BPS_PAGE.0,
+                    "height": BPS_PAGE.1,
+                    "facingPages": true,
+                    "margins": {
+                        "top": 20.2 * 72.0 / 25.4,
+                        "bottom": 20.0 * 72.0 / 25.4,
+                        "inside": 19.0 * 72.0 / 25.4,
+                        "outside": 15.0 * 72.0 / 25.4
+                    }
+                }),
+            );
         } else {
             let _ = app.run("file.new", json!({}));
         }
+    } else if is_dda {
+        let _ = app.run(
+            "layout.documentSetup",
+            json!({
+                "width": BPS_PAGE.0,
+                "height": BPS_PAGE.1,
+                "facingPages": true,
+                "margins": {
+                    "top": 20.2 * 72.0 / 25.4,
+                    "bottom": 20.0 * 72.0 / 25.4,
+                    "inside": 19.0 * 72.0 / 25.4,
+                    "outside": 15.0 * 72.0 / 25.4
+                }
+            }),
+        );
     }
 
     // Apply default options for automatic page and table generation

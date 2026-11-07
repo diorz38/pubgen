@@ -80,6 +80,11 @@ pub struct Tokens {
     pub tab_strip: Color32,
     /// Smart guides and spacing marks drawn over the page.
     pub smart_guide: Color32,
+    /// Text that reports success ("Clean", "Integrated"): readable as *text* on `panel` in every
+    /// brightness, so it is not the saturated fill colour a green badge would use.
+    pub success: Color32,
+    /// Text that reports failure ("2 errors"): same rule as `success`, on the red side.
+    pub danger: Color32,
     /// Measurement labels on the canvas (smart dimensions, gaps).
     pub measure_bg: Color32,
     pub measure_text: Color32,
@@ -132,6 +137,8 @@ impl Tokens {
             section_divider: hex(0x282828),
             tab_strip: hex(0x282828),
             smart_guide: hex(0x00c853),
+            success: hex(0x6ee7a8),
+            danger: hex(0xfca5a5),
             measure_bg: Color32::from_rgba_unmultiplied(70, 70, 70, 230),
             measure_text: Color32::WHITE,
             readout_bg: hex(0xa8a8a8),
@@ -170,6 +177,8 @@ impl Tokens {
                 ruler_text: hex(0xffffff),
                 section_divider: hex(0x4b4b4b),
                 tab_strip: hex(0x424242),
+                success: hex(0x86efac),
+                danger: hex(0xfecaca),
                 ..dark
             },
             Brightness::MediumLight => Tokens {
@@ -200,6 +209,8 @@ impl Tokens {
                 ruler_text: hex(0x1e1e1e),
                 section_divider: hex(0x9c9c9c),
                 tab_strip: hex(0xa6a6a6),
+                success: hex(0x063f1e),
+                danger: hex(0x6b1a10),
                 ..dark
             },
             Brightness::Light => Tokens {
@@ -230,6 +241,8 @@ impl Tokens {
                 ruler_text: hex(0x1e1e1e),
                 section_divider: hex(0xd0d0d0),
                 tab_strip: hex(0xe2e2e2),
+                success: hex(0x0b6b32),
+                danger: hex(0xb3261e),
                 ..dark
             },
             Brightness::HighContrast => Tokens {
@@ -261,6 +274,8 @@ impl Tokens {
                 ruler_text: hex(0xffffff),
                 section_divider: hex(0xffffff),
                 tab_strip: hex(0x000000),
+                success: hex(0x4ade80),
+                danger: hex(0xf87171),
                 // White on InDesign's grey is too faint here: black, as the rest of the chrome.
                 readout_bg: hex(0x000000),
                 readout_text: Color32::WHITE,
@@ -893,5 +908,20 @@ mod readout_tests {
         let hc = Tokens::for_brightness(Brightness::HighContrast);
         assert_eq!(hc.readout_bg, egui::Color32::BLACK);
         assert!(contrast(hc.readout_text, hc.readout_bg) >= 4.5);
+    }
+
+    /// Status text and the Orchestrator's own tab/pill labels are painted on `panel`, `well` or
+    /// `tab_strip`, never on a saturated fill. A regression here is what made the Orchestrator
+    /// unreadable outside Medium Dark (white galley painted over a token-coloured layout, and
+    /// Tailwind's `#4ade80`/`#f87171` used as text), so every brightness is checked.
+    #[test]
+    fn status_and_label_text_is_readable_on_every_surface() {
+        for b in Brightness::ALL {
+            let t = Tokens::for_brightness(b);
+            assert!(contrast(t.success, t.panel) >= 4.5, "success on panel, {b:?}: {}", contrast(t.success, t.panel));
+            assert!(contrast(t.danger, t.panel) >= 4.5, "danger on panel, {b:?}: {}", contrast(t.danger, t.panel));
+            assert!(contrast(t.text_strong, t.well) >= 4.5, "active tab label, {b:?}");
+            assert!(contrast(t.text_dim, t.tab_strip) >= 4.5, "inactive tab label, {b:?}");
+        }
     }
 }

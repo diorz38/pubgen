@@ -44,11 +44,12 @@ pub enum CardKind {
     Table,
     Image,
     Toc,
+    Divider,
 }
 
 impl CardKind {
-    pub const ALL: [CardKind; 7] =
-        [CardKind::Cover, CardKind::Narrative, CardKind::Chart, CardKind::MapChart, CardKind::Table, CardKind::Image, CardKind::Toc];
+    pub const ALL: [CardKind; 8] =
+        [CardKind::Cover, CardKind::Narrative, CardKind::Chart, CardKind::MapChart, CardKind::Table, CardKind::Image, CardKind::Toc, CardKind::Divider];
 
     pub fn label(self, lang: &str) -> &'static str {
         match self {
@@ -59,6 +60,7 @@ impl CardKind {
             CardKind::Table => crate::i18n::tr(lang, "Table"),
             CardKind::Image => crate::i18n::tr(lang, "Image"),
             CardKind::Toc => crate::i18n::tr(lang, "Table of Contents"),
+            CardKind::Divider => crate::i18n::tr(lang, "Divider"),
         }
     }
 
@@ -71,6 +73,7 @@ impl CardKind {
             CardKind::Table => "📊",
             CardKind::Image => "🖼",
             CardKind::Toc => "📑",
+            CardKind::Divider => "🔖",
         }
     }
 }
@@ -289,6 +292,7 @@ impl PublicationCard {
             CardKind::Table => "Tabel".into(),
             CardKind::Image => "Gambar".into(),
             CardKind::Toc => "Daftar Isi".into(),
+            CardKind::Divider => "Pembatas".into(),
         };
         card.tag2 = if is_new_page { "Halaman Baru".into() } else { "Objek Baru".into() };
         card
@@ -693,6 +697,7 @@ impl OrchestratorWorkspaceState {
                         CardKind::MapChart => pubgen_core::CardKind::MapChart,
                         CardKind::Narrative => pubgen_core::CardKind::Narrative,
                         CardKind::Image => pubgen_core::CardKind::Image,
+                        CardKind::Divider => pubgen_core::CardKind::Divider,
                     },
                     scope: if card.scope_new_page { pubgen_core::CardScope::NewPage } else { pubgen_core::CardScope::NewObject },
                     source: if card.source.is_empty() || card.source == "Tanpa sumber" { None } else { Some(card.source.clone()) },
@@ -744,10 +749,12 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
     }
     .into();
 
-    if let Some(no) =
-        report.metadata.extra.get("release_no").or_else(|| report.metadata.extra.get("no")).or_else(|| report.metadata.extra.get("catalogue"))
-    {
-        state.meta_release_no = no.clone();
+    if state.selected_profile == "bps_brs" {
+        if let Some(no) = report.metadata.extra.get("release_no").or_else(|| report.metadata.extra.get("no")) {
+            state.meta_release_no = no.clone();
+        }
+    } else {
+        state.meta_release_no.clear();
     }
     if let Some(date) = report.metadata.extra.get("release_date").or_else(|| report.metadata.extra.get("date")) {
         state.meta_release_date = date.clone();
@@ -823,7 +830,7 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
                         pubgen_core::CardKind::MapChart => CardKind::MapChart,
                         pubgen_core::CardKind::Narrative => CardKind::Narrative,
                         pubgen_core::CardKind::Image => CardKind::Image,
-                        pubgen_core::CardKind::Divider => CardKind::Image,
+                        pubgen_core::CardKind::Divider => CardKind::Divider,
                     },
                     &card.title,
                     subtitle,
@@ -910,6 +917,12 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
                         if let Some(idx) = super::excel::cover_style_index(tmpl) {
                             pc.cover_style_idx = idx;
                         }
+                    } else if state.selected_profile == "bps_dda" {
+                        pc.cover_template = "003_chevron_medallion.designcraft".to_string();
+                        pc.cover_style_idx = 3;
+                    }
+                    if state.selected_profile == "bps_dda" || pc.settings.contains_key("office_address") || pc.settings.contains_key("event_theme") {
+                        pc.cover_inside_back = true;
                     }
                     if let Some(th) = pc.settings.get("theme") {
                         pc.cover_theme_preset = th.clone();
@@ -1139,7 +1152,9 @@ fn render_host_tabs(ui: &mut Ui, t: &Tokens, lang: &str) -> Option<HostTabAction
         );
 
         let text = ui.painter().with_clip_rect(r);
-        text.galley(pos2(r.min.x + 32.0, r.center().y - galley.size().y / 2.0), galley, Color32::WHITE);
+        // PLACEHOLDER keeps the token colour the galley was laid out with; WHITE here made the tab
+        // label unreadable in the light themes.
+        text.galley(pos2(r.min.x + 32.0, r.center().y - galley.size().y / 2.0), galley, Color32::PLACEHOLDER);
         ui.painter().line_segment([r.right_top(), r.right_bottom()], Stroke::new(1.0, t.border));
 
         if cresp.clicked() {
@@ -1476,7 +1491,7 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                         let studio_label = if lang.starts_with("id") { "➡ Buka Studio Aktif" } else { "➡ Open Active Studio" };
                         if ui
                             .add(
-                                egui::Button::new(RichText::new(studio_label).size(13.0).color(Color32::from_rgb(16, 185, 129)))
+                                egui::Button::new(RichText::new(studio_label).size(13.0).color(t.success))
                                     .corner_radius(16.0)
                                     .min_size(vec2(0.0, 32.0)),
                             )
@@ -2256,13 +2271,13 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
                 ui.label(
                     RichText::new(format!("● {}", crate::i18n::tr(lang, "Clean (QA Fit 100%)")))
                         .font(semibold(10.5))
-                        .color(Color32::from_rgb(74, 222, 128)),
+                        .color(t.success),
                 );
             } else {
                 ui.label(
                     RichText::new(format!("● {}", crate::i18n::tr(lang, "Issues Detected")))
                         .font(semibold(10.5))
-                        .color(Color32::from_rgb(248, 113, 113)),
+                        .color(t.danger),
                 );
             }
         });
@@ -2323,7 +2338,7 @@ fn tab_button(ui: &mut Ui, label: &str, active: bool, t: &Tokens) -> Response {
         ui.painter().rect_filled(rect, CornerRadius::same(3), t.hover);
     }
 
-    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, Color32::WHITE);
+    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, Color32::PLACEHOLDER);
 
     resp
 }
@@ -2429,6 +2444,20 @@ fn paint_card_thumbnail(painter: &egui::Painter, rect: Rect, kind: CardKind, t: 
                 );
             }
         }
+        CardKind::Divider => {
+            // Gold/Amber divider spread thumbnail
+            painter.rect(rect, CornerRadius::same(2), t.panel_darker, Stroke::new(1.0, Color32::from_rgb(217, 119, 6)), StrokeKind::Inside);
+            painter.rect_filled(
+                Rect::from_min_size(rect.min + vec2(4.0, 18.0), vec2(28.0, 8.0)),
+                CornerRadius::same(1),
+                Color32::from_rgb(245, 158, 11),
+            );
+            painter.rect_filled(
+                Rect::from_min_size(rect.min + vec2(8.0, 30.0), vec2(20.0, 3.0)),
+                CornerRadius::same(1),
+                Color32::from_rgb(251, 191, 36),
+            );
+        }
     }
 }
 
@@ -2532,9 +2561,11 @@ fn card_details_width(card_w: f32) -> f32 {
 /// Height a page card needs so every text line stays visible: pill row +
 /// wrapped title + wrapped source + footer, with the card's inner padding.
 fn measured_card_height(painter: &egui::Painter, card: &PublicationCard, details_w: f32, lang: &str) -> f32 {
-    let title = painter.layout(card.title.clone(), semibold(12.0), Color32::WHITE, details_w);
+    // Only metrics matter here (nothing is painted): PLACEHOLDER keeps the layout independent of the
+    // theme's text colour.
+    let title = painter.layout(card.title.clone(), semibold(12.0), Color32::PLACEHOLDER, details_w);
     let src = format!("{}: {}", crate::i18n::tr(lang, "Source:"), card.source);
-    let source = painter.layout(src, FontId::proportional(11.0), Color32::WHITE, details_w);
+    let source = painter.layout(src, FontId::proportional(11.0), Color32::PLACEHOLDER, details_w);
     const PILL_H: f32 = 16.0;
     const FOOTER_H: f32 = 16.0;
     const LINE_GAP: f32 = 2.0;
@@ -2655,6 +2686,7 @@ fn render_card_action_bar(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t
             CardKind::Image => crate::i18n::tr(lang, "Image"),
             CardKind::Cover => crate::i18n::tr(lang, "Cover"),
             CardKind::Toc => crate::i18n::tr(lang, "Table of Contents"),
+            CardKind::Divider => crate::i18n::tr(lang, "Divider"),
         };
 
         craft_ui::ComboBox::from_id_salt("add_card_kind_combo")
@@ -2667,6 +2699,7 @@ fn render_card_action_bar(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t
                 ui.selectable_value(&mut state.new_card_kind, CardKind::Table, crate::i18n::tr(lang, "Table"));
                 ui.selectable_value(&mut state.new_card_kind, CardKind::Image, crate::i18n::tr(lang, "Image"));
                 ui.selectable_value(&mut state.new_card_kind, CardKind::Toc, crate::i18n::tr(lang, "Table of Contents"));
+                ui.selectable_value(&mut state.new_card_kind, CardKind::Divider, crate::i18n::tr(lang, "Divider"));
             });
 
         let btn_fill = Color32::from_rgb(37, 99, 235);
@@ -2688,6 +2721,7 @@ fn render_card_action_bar(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t
                 CardKind::Image => "Infografis Baru",
                 CardKind::Cover => "Sampul Baru",
                 CardKind::Toc => "Daftar Isi Baru",
+                CardKind::Divider => "Pembatas Bab Baru",
             };
             state.cards.push(PublicationCard::new_with(
                 state.new_card_kind,
@@ -2719,6 +2753,7 @@ fn render_card_action_bar(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t
                 CardKind::Image => "Objek Gambar",
                 CardKind::Cover => "Objek Sampul",
                 CardKind::Toc => "Objek Daftar Isi",
+                CardKind::Divider => "Objek Pembatas Bab",
             };
             state.cards.push(PublicationCard::new_with(
                 state.new_card_kind,
@@ -2741,7 +2776,7 @@ fn render_tag_pill(ui: &mut Ui, label: &str, t: &Tokens) {
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
 
     ui.painter().rect(rect, CornerRadius::same(2), t.well, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
-    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, Color32::WHITE);
+    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, Color32::PLACEHOLDER);
 }
 
 // ============================================================================
@@ -2844,9 +2879,9 @@ fn render_log_eksekusi(_app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrat
 
                 for line in &state.execution_log {
                     ui.label(RichText::new(line).font(FontId::monospace(10.5)).color(if line.contains("Audit QA") || line.contains("berhasil") {
-                        Color32::from_rgb(74, 222, 128)
+                        t.success
                     } else if line.contains("Error") {
-                        Color32::from_rgb(248, 113, 113)
+                        t.danger
                     } else {
                         t.text
                     }));
@@ -2950,7 +2985,7 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
         .show(ui, |ui| {
             ui.label(RichText::new("Mesin Tata Letak").font(semibold(10.5)).color(t.text_dim));
             ui.horizontal(|ui| {
-                ui.label(RichText::new("● Terintegrasi (DesignCraft Native OK)").font(semibold(10.5)).color(Color32::from_rgb(74, 222, 128)));
+                ui.label(RichText::new("● Terintegrasi (DesignCraft Native OK)").font(semibold(10.5)).color(t.success));
             });
         });
 
@@ -2985,9 +3020,9 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
                                     if let Some(budget) = slot.budget {
                                         let is_ok = char_count <= budget;
                                         ui.label(RichText::new(if is_ok { "● OK" } else { "● Over" }).font(semibold(10.0)).color(if is_ok {
-                                            Color32::from_rgb(74, 222, 128)
+                                            t.success
                                         } else {
-                                            Color32::from_rgb(248, 113, 113)
+                                            t.danger
                                         }));
                                         ui.label(RichText::new(format!("{char_count}/{budget}")).font(FontId::proportional(10.0)).color(t.text_dim));
                                     } else {
@@ -3147,6 +3182,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                                             CardKind::Table => "Tabel".into(),
                                             CardKind::Image => "Gambar".into(),
                                             CardKind::Toc => "Daftar Isi".into(),
+                                            CardKind::Divider => "Pembatas".into(),
                                         };
                                     }
                                 }
@@ -3165,7 +3201,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                             ui.add_sized([ui.available_width(), 22.0], egui::TextEdit::singleline(&mut card.title_en));
                         }
 
-                        let show_chapter = matches!(card.kind, CardKind::Narrative | CardKind::Table | CardKind::Chart | CardKind::MapChart);
+                        let show_chapter = matches!(card.kind, CardKind::Narrative | CardKind::Table | CardKind::Chart | CardKind::MapChart | CardKind::Divider);
                         if show_chapter {
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(crate::i18n::tr(lang, "Chapter / Section ID:")).font(semibold(11.0)).color(t.text_strong));
@@ -3408,7 +3444,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                     }
                     CardKind::MapChart => {
                         egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                            ui.label(RichText::new("Pengaturan Peta Tematik (Choropleth & Spatial Map):").font(semibold(11.0)).color(Color32::from_rgb(16, 185, 129)));
+                            ui.label(RichText::new("Pengaturan Peta Tematik (Choropleth & Spatial Map):").font(semibold(11.0)).color(t.text_strong));
 
                             // Pilihan GeoJSON (Stock vs Custom)
                             ui.horizontal(|ui| {
@@ -3615,6 +3651,12 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                             ui.label(RichText::new("Teks narasi di-parse secara otomatis dari dokumen RTF yang terhubung. Perataan paragraf, indentasi, heading, dan quote dipertahankan sesuai stylesheet BPS.").font(FontId::proportional(10.5)).color(t.text_dim));
                         });
                     }
+                    CardKind::Divider => {
+                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                            ui.label(RichText::new("Pengaturan Pembatas Bab (Chapter Divider):").font(semibold(11.0)).color(t.text_strong));
+                            ui.label(RichText::new("Pembatas bab A4 full bleed dengan judul dwibahasa, ornamen grafis batik atau minimalis, dan penomoran bab otomatis.").font(FontId::proportional(10.5)).color(t.text_dim));
+                        });
+                    }
                 }
 
                 // Section 4: Penomoran Halaman & Seksi (Halaman Baru)
@@ -3720,14 +3762,14 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
             ui.horizontal(|ui| {
                 // Delete button with confirmation
                 if state.card_delete_confirm {
-                    ui.label(RichText::new(crate::i18n::tr(lang, "Confirm Delete?")).font(semibold(10.5)).color(Color32::from_rgb(239, 68, 68)));
+                    ui.label(RichText::new(crate::i18n::tr(lang, "Confirm Delete?")).font(semibold(10.5)).color(t.danger));
                     if ui.add(egui::Button::new(RichText::new(crate::i18n::tr(lang, "Yes, Delete")).color(Color32::WHITE)).fill(Color32::from_rgb(220, 38, 38))).clicked() {
                         delete_card = true;
                     }
                     if ui.button(crate::i18n::tr(lang, "Cancel")).clicked() {
                         state.card_delete_confirm = false;
                     }
-                } else if ui.button(RichText::new(format!("🗑 {}", crate::i18n::tr(lang, "Delete Card"))).color(Color32::from_rgb(239, 68, 68))).clicked() {
+                } else if ui.button(RichText::new(format!("🗑 {}", crate::i18n::tr(lang, "Delete Card"))).color(t.danger)).clicked() {
                     state.card_delete_confirm = true;
                 }
 
@@ -3811,7 +3853,11 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
     // (`excel::execute_excel_to_csvs`), otherwise BRS loses its table style,
     // theme and header/footer preset (`state::apply_profile`, `state.rs:787`).
     st.apply_profile(super::profiles::ProfileManager::get_profile(&state.selected_profile), false);
-    st.bilingual_output = false;
+    if state.selected_profile == "bps_dda" || state.doc_language == "Indonesian-English" {
+        st.bilingual_output = true;
+    } else if state.selected_profile == "bps_brs" {
+        st.bilingual_output = false;
+    }
 
     // Stage the cached content into a temp folder so the file-based generators can read it. The
     // folder is unique per call: two generations can run at once in one process (a second tab, or
@@ -3839,21 +3885,102 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
     if let Some(card) = cover_card {
         st.excel_had_cover = true;
         st.cover_include_inside_back = card.cover_inside_back;
+        st.cover_style = card.cover_style_idx;
+        if !card.cover_template.trim().is_empty() {
+            if let Some(idx) = super::excel::cover_style_index(&card.cover_template) {
+                st.cover_style = idx;
+            }
+        }
         let mut cover = super::excel::ExcelCoverData {
-            title1: state.meta_title.clone(),
-            title2: state.meta_subtitle.clone(),
-            pub_office: state.meta_agency.clone(),
-            agency: state.meta_agency.clone(),
-            release_no: state.meta_release_no.clone(),
-            release_date: state.meta_release_date.clone(),
-            release_month: state.meta_release_month.clone(),
+            style: if !card.cover_template.trim().is_empty() {
+                card.cover_template.clone()
+            } else {
+                card.settings.get("style").cloned().unwrap_or_default()
+            },
+            title1: if !card.title.trim().is_empty() {
+                card.title.strip_prefix("Sampul Rilis: ").or_else(|| card.title.strip_prefix("Sampul Publikasi: ")).unwrap_or(&card.title).to_string()
+            } else {
+                state.meta_title.clone()
+            },
+            title2: if !card.cover_title2.trim().is_empty() {
+                card.cover_title2.clone()
+            } else if !card.subtitle.trim().is_empty() {
+                card.subtitle.clone()
+            } else {
+                state.meta_subtitle.clone()
+            },
+            title_en: if !card.title_en.trim().is_empty() {
+                card.title_en.clone()
+            } else {
+                card.settings.get("title_en").cloned().unwrap_or_default()
+            },
+            year: if !card.cover_year.trim().is_empty() {
+                card.cover_year.clone()
+            } else {
+                card.settings.get("year").cloned().unwrap_or_default()
+            },
+            volume: if !card.cover_volume.trim().is_empty() {
+                card.cover_volume.clone()
+            } else {
+                card.settings.get("volume").cloned().unwrap_or_default()
+            },
+            catalogue: if !card.cover_catalogue.trim().is_empty() {
+                card.cover_catalogue.clone()
+            } else {
+                card.settings.get("catalogue").cloned().unwrap_or_default()
+            },
+            code: if !card.cover_code_num.trim().is_empty() {
+                card.cover_code_num.clone()
+            } else {
+                card.settings.get("code").cloned().unwrap_or_default()
+            },
+            pub_office: if !card.cover_pub_office.trim().is_empty() {
+                card.cover_pub_office.clone()
+            } else {
+                state.meta_agency.clone()
+            },
+            agency: if !card.cover_pub_office.trim().is_empty() {
+                card.cover_pub_office.clone()
+            } else {
+                state.meta_agency.clone()
+            },
+            office_address: if !card.cover_office_address.trim().is_empty() {
+                card.cover_office_address.clone()
+            } else {
+                card.settings.get("office_address").cloned().unwrap_or_default()
+            },
+            table_theme: card.settings.get("table_theme").or_else(|| card.settings.get("theme")).cloned().unwrap_or_default(),
+            event_theme: card.settings.get("event_theme").cloned().unwrap_or_default(),
+            palette: card.cover_ai_palette.clone(),
+            release_no: if state.selected_profile == "bps_brs" {
+                if !card.cover_release_no.trim().is_empty() {
+                    card.cover_release_no.clone()
+                } else {
+                    state.meta_release_no.clone()
+                }
+            } else {
+                String::new()
+            },
+            release_date: if !card.cover_release_date.trim().is_empty() {
+                card.cover_release_date.clone()
+            } else {
+                state.meta_release_date.clone()
+            },
+            release_month: if !card.cover_release_month.trim().is_empty() {
+                card.cover_release_month.clone()
+            } else {
+                state.meta_release_month.clone()
+            },
             ..Default::default()
         };
-        if !card.title.trim().is_empty() {
-            cover.title1 = card.title.clone();
+        if let Some(h) = card.settings.get("image_hero").or_else(|| card.settings.get("image_1")) {
+            cover.image_hero = h.clone();
         }
-        if !card.subtitle.trim().is_empty() {
-            cover.title2 = card.subtitle.clone();
+        if let Some(l) = card.settings.get("image_landscape").or_else(|| card.settings.get("image_lanscape")) {
+            cover.image_landscape = l.clone();
+        }
+        if let Some(lg) = card.settings.get("logo").or_else(|| card.settings.get("office_logo")) {
+            cover.logo = lg.clone();
         }
         if !card.cover_pic_name.is_empty() || !card.cover_pic_photo.is_empty() {
             cover.pic_name = card.cover_pic_name.clone();
@@ -3863,9 +3990,10 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         }
         st.excel_cover = Some(cover.clone());
         super::excel::apply_excel_cover(&mut st, &cover, Some(&stage));
+        sync_card_to_pubgen_state(card, state, &mut st);
     }
 
-    // Catalog rows: [type, number, title, file] like the converted XLSX catalog.
+    // Catalog rows: [type, number, title, file, template, title_en, file_en, theme] like the converted XLSX catalog.
     let mut rows: Vec<Vec<String>> = Vec::new();
     for card in state.cards.iter().filter(|c| c.kind != CardKind::Cover && c.kind != CardKind::Toc) {
         let mut file = staged(&card.source).unwrap_or_default();
@@ -3878,6 +4006,7 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
                 }
             }
             CardKind::Table => "Tabel",
+            CardKind::Divider => "Divider",
             CardKind::Chart | CardKind::MapChart => {
                 // Raster chart: place the bound image; vector spec: the data CSV.
                 if let Some(img) = staged(&card.chart_image) {
@@ -3889,23 +4018,80 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
             }
             _ => "Image",
         };
-        // Number labels ("1", "02.01") are parsed out of the card title.
-        let number = super::excel::extract_dotted_number(&card.title)
-            .or_else(|| card.title.split_whitespace().find(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_digit())).map(str::to_string))
-            .unwrap_or_default();
-        rows.push(vec![typ.to_string(), number, card.title.clone(), file]);
+        let number = if card.kind == CardKind::Divider {
+            super::excel::extract_first_two_digit_number(&card.title)
+                .or_else(|| super::excel::extract_dotted_number(&card.title))
+                .or_else(|| {
+                    let d: String = card.title.chars().filter(|c| c.is_ascii_digit()).collect();
+                    (!d.is_empty()).then(|| if d.len() == 1 { format!("0{d}") } else { d })
+                })
+                .unwrap_or_else(|| "01".to_string())
+        } else {
+            super::excel::extract_dotted_number(&card.title)
+                .or_else(|| card.title.split_whitespace().find(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_digit())).map(str::to_string))
+                .unwrap_or_default()
+        };
+        let template = if card.kind == CardKind::Divider {
+            card.settings
+                .get("template")
+                .or_else(|| card.settings.get("style"))
+                .map(|s| super::excel::resolve_divider_template(s))
+                .unwrap_or_else(|| "assets/templates/dividers/002_batik_infographic.designcraft".to_string())
+        } else {
+            card.settings.get("template").cloned().unwrap_or_default()
+        };
+        let title_en = if !card.title_en.trim().is_empty() {
+            card.title_en.clone()
+        } else {
+            card.settings.get("title_en").cloned().unwrap_or_default()
+        };
+        let file_en = card.settings.get("file_en").and_then(|fen| staged(fen)).unwrap_or_default();
+        let theme = if !card.table_theme.trim().is_empty() {
+            card.table_theme.clone()
+        } else {
+            card.settings.get("theme").or_else(|| card.settings.get("table_theme")).cloned().unwrap_or_default()
+        };
+        rows.push(vec![typ.to_string(), number, card.title.clone(), file, template, title_en, file_en, theme]);
     }
     if rows.is_empty() && !st.excel_had_cover {
         return Err("the worksheet has no publication cards to generate from".into());
     }
-    st.card1_headers = vec!["type".into(), "number".into(), "title".into(), "file".into()];
+    st.card1_headers = vec![
+        "type".into(),
+        "number".into(),
+        "title".into(),
+        "file".into(),
+        "template".into(),
+        "title_en".into(),
+        "file_en".into(),
+        "theme".into(),
+    ];
     st.card1_records = rows;
     st.card1_type_col = 0;
     st.card1_num_col = 1;
     st.card1_title_col = 2;
     st.card1_file_col = 3;
+    st.card1_template_col = 4;
+    st.card1_title_en_col = 5;
+    st.card1_file_en_col = 6;
     st.card1_range_to = st.card1_records.len();
+
+    let catalog_csv_path = stage.join("catalog.csv");
+    let mut catalog_content = st.card1_headers.join(",") + "\n";
+    for r in &st.card1_records {
+        let line: Vec<String> = r.iter().map(|f| super::excel::escape_csv_field(f)).collect();
+        catalog_content.push_str(&line.join(","));
+        catalog_content.push('\n');
+    }
+    let _ = std::fs::write(&catalog_csv_path, &catalog_content);
+    st.card1_path = catalog_csv_path.to_string_lossy().to_string();
+
     st.card2_sheet_tables = state.cards.iter().filter(|c| c.kind == CardKind::Table).filter_map(|c| staged(&c.source)).collect();
+    st.card2_sheet_idx = 0;
+    if let Some(first_table) = st.card2_sheet_tables.first().cloned() {
+        st.card2_path = first_table.clone();
+        super::csv::load_card2_csv(&mut st, &first_table);
+    }
 
     super::excel::generate_publication_pages(app, &mut st)
 }
@@ -4346,6 +4532,11 @@ mod tests {
             apply_ingest_report_to_state(&mut state, "BAB_02_2025.xlsx", &report);
             assert_eq!(state.selected_profile, "bps_dda");
 
+            // DIV must be Divider (Pembatas)
+            let div_card = state.cards.iter().find(|c| c.chapter_id == "DIV").expect("DIV card exists");
+            assert_eq!(div_card.kind, CardKind::Divider);
+            assert_eq!(div_card.tag1, "Pembatas");
+
             // R02 must be Paragraph (Narrative)
             let r02_card = state.cards.iter().find(|c| c.chapter_id == "R02").expect("R02 card exists");
             assert_eq!(r02_card.kind, CardKind::Narrative);
@@ -4361,6 +4552,18 @@ mod tests {
             assert_eq!(c02_card.kind, CardKind::Image);
             assert_eq!(c02_card.tag1, "Gambar");
             assert!(c02_card.title.contains("Panjang Jalan"));
+
+            // Verify end-to-end page generation produces DDA layout, not BRS
+            let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+            app.run("file.new", serde_json::json!({})).unwrap();
+            let res = generate_from_workspace(&mut app, &state);
+            assert!(res.is_ok(), "generate_from_workspace on DDA should succeed: {res:?}");
+            let msg = res.unwrap();
+            assert!(msg.contains("auto-generated pages"), "should confirm generated pages: {msg}");
+
+            let doc = &app.session.active().unwrap().doc;
+            assert!(doc.settings.facing_pages, "DDA document must use facing pages");
+            assert!(doc.page_count() >= 6, "DDA sample should produce several pages, got {}", doc.page_count());
         }
     }
 
