@@ -43,26 +43,21 @@ pub fn set_pubgen_menus_on(ctx: &egui::Context, on: bool) {
     ctx.data_mut(|d| d.insert_temp(egui::Id::unique(ON), on));
 }
 
-fn mode_tab_button(
-    ui: &mut egui::Ui,
-    label: &str,
-    active: bool,
-    active_bg: egui::Color32,
-    active_stroke: egui::Color32,
-    active_text: egui::Color32,
-    tip: &str,
-) -> egui::Response {
+fn mode_tab_button(ui: &mut egui::Ui, label: &str, active: bool, tip: &str) -> egui::Response {
     let t = crate::theme::Tokens::get(ui.ctx());
     let font = crate::theme::semibold(11.5);
-    let galley = ui.painter().layout_no_wrap(label.to_string(), font.clone(), if active { active_text } else { t.text_dim });
+    let galley = ui.painter().layout_no_wrap(label.to_string(), font.clone(), if active { t.text_strong } else { t.text_dim });
     let size = egui::vec2(galley.size().x + 14.0, 20.0);
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label.to_string()));
     let p = ui.painter();
 
     if active {
-        p.rect_filled(rect, 3.0, active_bg);
-        p.rect_stroke(rect, 3.0, egui::Stroke::new(1.0, active_stroke), egui::StrokeKind::Inside);
-        p.galley(rect.center() - galley.size() / 2.0, galley, active_text);
+        // ponytail: a single selected-pill treatment (row_selected + accent rim); if the modes ever
+        // need distinct identities again, add one token per mode instead of a literal here.
+        p.rect_filled(rect, 3.0, t.row_selected);
+        p.rect_stroke(rect, 3.0, egui::Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+        p.galley(rect.center() - galley.size() / 2.0, galley, t.text_strong);
     } else if resp.hovered() {
         p.rect_filled(rect, 3.0, t.hover);
         let hover_galley = ui.painter().layout_no_wrap(label.to_string(), font, t.text);
@@ -74,32 +69,27 @@ fn mode_tab_button(
     resp.on_hover_text(tip)
 }
 
-/// Renders the mode switcher ("Designcraft" | "Orchestrator") with distinct backgrounds for the active mode.
+/// Renders the mode switcher ("DesignCraft" | "Orchestrator"); the active pill uses the theme's
+/// selection colours so both modes share one chrome treatment in every brightness.
 pub fn render_mode_switch(app: &mut DesignApp, ui: &mut egui::Ui) {
     let orchestrator = is_orchestrator_mode(ui.ctx());
 
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
 
-        // --- Designcraft Button ---
+        // --- DesignCraft Button ---
         let dc_active = !orchestrator;
-        let dc_bg = egui::Color32::from_rgb(32, 54, 72);
-        let dc_stroke = egui::Color32::from_rgb(52, 130, 175);
-        let dc_text = egui::Color32::from_rgb(70, 185, 220);
         let dc_tip = crate::i18n::tr(&app.ui.language, "DesignCraft Layout Studio");
 
-        if mode_tab_button(ui, "Designcraft", dc_active, dc_bg, dc_stroke, dc_text, &dc_tip).clicked() {
+        if mode_tab_button(ui, "DesignCraft", dc_active, &dc_tip).clicked() {
             set_orchestrator_mode(ui.ctx(), false);
         }
 
         // --- Orchestrator Button ---
         let orch_active = orchestrator;
-        let orch_bg = egui::Color32::from_rgb(32, 62, 58);
-        let orch_stroke = egui::Color32::from_rgb(50, 150, 130);
-        let orch_text = egui::Color32::from_rgb(90, 215, 180);
         let orch_tip = crate::i18n::tr(&app.ui.language, "Publication Orchestrator");
 
-        if mode_tab_button(ui, "Orchestrator", orch_active, orch_bg, orch_stroke, orch_text, &orch_tip).clicked() {
+        if mode_tab_button(ui, "Orchestrator", orch_active, &orch_tip).clicked() {
             set_orchestrator_mode(ui.ctx(), true);
             let _ = app.run("window.panel.activate", serde_json::json!({"panel": "pubgen"}));
         }
@@ -603,7 +593,9 @@ mod tests {
 
         let order = ["File", "Publication", "Publication Tools", "Automation & Content", "DesignCraft", "View", "Shortcut", "Help"];
 
-        let positions: Vec<Option<usize>> = order.iter().map(|m| texts.iter().position(|t| t == m)).collect();
+        // The mode pills render first in the bar, and the DesignCraft pill's label is the same
+        // string as the later "DesignCraft" menu, so match the *last* occurrence of each name.
+        let positions: Vec<Option<usize>> = order.iter().map(|m| texts.iter().rposition(|t| t == m)).collect();
 
         for (i, top) in order.iter().enumerate() {
             assert!(positions[i].is_some(), "missing {top} in {texts:?}");

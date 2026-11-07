@@ -48,8 +48,16 @@ pub enum CardKind {
 }
 
 impl CardKind {
-    pub const ALL: [CardKind; 8] =
-        [CardKind::Cover, CardKind::Narrative, CardKind::Chart, CardKind::MapChart, CardKind::Table, CardKind::Image, CardKind::Toc, CardKind::Divider];
+    pub const ALL: [CardKind; 8] = [
+        CardKind::Cover,
+        CardKind::Narrative,
+        CardKind::Chart,
+        CardKind::MapChart,
+        CardKind::Table,
+        CardKind::Image,
+        CardKind::Toc,
+        CardKind::Divider,
+    ];
 
     pub fn label(self, lang: &str) -> &'static str {
         match self {
@@ -1425,7 +1433,7 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                 // HERO
                 ui.horizontal(|ui| {
                     let (icon_r, _) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::hover());
-                    ui.painter().rect_filled(icon_r, 10.0, Color32::from_rgb(37, 99, 235));
+                    ui.painter().rect_filled(icon_r, 10.0, t.accent_strong);
                     ui.painter().text(icon_r.center(), Align2::CENTER_CENTER, "📊", FontId::proportional(22.0), Color32::WHITE);
                     ui.add_space(14.0);
                     ui.vertical(|ui| {
@@ -1513,15 +1521,8 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                     ui.spacing_mut().item_spacing.x = 16.0;
 
                     // 1. DDA BPS
-                    if render_profile_card(
-                        ui,
-                        t,
-                        ProfileCardKind::Dda,
-                        "DDA BPS",
-                        "Daerah Dalam Angka",
-                        "A4 (210 × 297 mm) • Facing Pages",
-                        Color32::from_rgb(59, 130, 246),
-                    ) {
+                    if render_profile_card(ui, t, ProfileCardKind::Dda, "DDA BPS", "Daerah Dalam Angka", "A4 (210 × 297 mm) • Facing Pages", t.accent)
+                    {
                         state.selected_profile = "bps_dda".into();
                         state.page_layout_facing = true;
                         state.paper_size = "A4 (210 x 297 mm)".into();
@@ -1536,7 +1537,7 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                         "BRS BPS",
                         "Berita Resmi Statistik",
                         "A4 (210 × 297 mm) • Single Page",
-                        Color32::from_rgb(245, 158, 11),
+                        t.live_corner,
                     ) {
                         state.selected_profile = "bps_brs".into();
                         state.page_layout_facing = false;
@@ -1546,15 +1547,7 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
 
                     // 3. General
                     let gen_sub = if lang.starts_with("id") { "Laporan Standar Umum" } else { "Generic Publication Report" };
-                    if render_profile_card(
-                        ui,
-                        t,
-                        ProfileCardKind::Generic,
-                        "General",
-                        gen_sub,
-                        "A4 (210 × 297 mm) • Single Page",
-                        Color32::from_rgb(156, 163, 175),
-                    ) {
+                    if render_profile_card(ui, t, ProfileCardKind::Generic, "General", gen_sub, "A4 (210 × 297 mm) • Single Page", t.text_dim) {
                         state.selected_profile = "generic_report".into();
                         state.page_layout_facing = false;
                         state.paper_size = "A4 (210 x 297 mm)".into();
@@ -2196,7 +2189,7 @@ fn render_margin_stepper(ui: &mut Ui, label: &str, val: &mut u32, t: &Tokens) {
         ui.spacing_mut().item_spacing = vec2(3.0, 0.0);
         ui.label(RichText::new(format!("{label}: {val}mm")).font(FontId::proportional(10.5)).color(t.text));
         let btn_size = vec2(17.0, 18.0);
-        let btn_fill = Color32::from_rgb(37, 99, 235);
+        let btn_fill = t.accent_strong;
         if ui
             .add_sized(
                 btn_size,
@@ -2251,9 +2244,7 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
             if ui
                 .add(
                     egui::Button::new(
-                        RichText::new(format!("👁 {}", crate::i18n::tr(lang, "View Latest PDF")))
-                            .font(FontId::proportional(10.5))
-                            .color(Color32::from_rgb(56, 189, 248)),
+                        RichText::new(format!("👁 {}", crate::i18n::tr(lang, "View Latest PDF"))).font(FontId::proportional(10.5)).color(t.accent),
                     )
                     .corner_radius(CornerRadius::same(3)),
                 )
@@ -2268,17 +2259,9 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if state.last_qa_clean {
-                ui.label(
-                    RichText::new(format!("● {}", crate::i18n::tr(lang, "Clean (QA Fit 100%)")))
-                        .font(semibold(10.5))
-                        .color(t.success),
-                );
+                ui.label(RichText::new(format!("● {}", crate::i18n::tr(lang, "Clean (QA Fit 100%)"))).font(semibold(10.5)).color(t.success));
             } else {
-                ui.label(
-                    RichText::new(format!("● {}", crate::i18n::tr(lang, "Issues Detected")))
-                        .font(semibold(10.5))
-                        .color(t.danger),
-                );
+                ui.label(RichText::new(format!("● {}", crate::i18n::tr(lang, "Issues Detected"))).font(semibold(10.5)).color(t.danger));
             }
         });
     });
@@ -2658,11 +2641,8 @@ fn render_facing_card(
         child_ui.horizontal(|ui| {
             ui.label(RichText::new(format!("{} {}", crate::i18n::tr(lang, "Pg."), card.page)).font(semibold(11.0)).color(t.text_dim));
             ui.add_space(8.0);
-            let edit_resp = ui.link(
-                RichText::new(format!("✎ {}", crate::i18n::tr(lang, "Click to edit")))
-                    .font(FontId::proportional(11.0))
-                    .color(Color32::from_rgb(56, 189, 248)),
-            );
+            let edit_resp =
+                ui.link(RichText::new(format!("✎ {}", crate::i18n::tr(lang, "Click to edit"))).font(FontId::proportional(11.0)).color(t.accent));
             if edit_resp.clicked() {
                 clicked_edit = true;
             }
@@ -2702,7 +2682,7 @@ fn render_card_action_bar(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t
                 ui.selectable_value(&mut state.new_card_kind, CardKind::Divider, crate::i18n::tr(lang, "Divider"));
             });
 
-        let btn_fill = Color32::from_rgb(37, 99, 235);
+        let btn_fill = t.accent_strong;
         if ui
             .add(
                 egui::Button::new(RichText::new(format!("+ {}", crate::i18n::tr(lang, "Add New Page"))).font(semibold(11.0)).color(Color32::WHITE))
@@ -2937,7 +2917,7 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
             egui::Button::new(
                 RichText::new(format!("⚡ {}", crate::i18n::tr(lang, "Generate Publication"))).font(semibold(12.0)).color(Color32::WHITE),
             )
-            .fill(Color32::from_rgb(14, 116, 144))
+            .fill(t.accent_strong)
             .corner_radius(CornerRadius::same(4)),
         )
         .on_hover_text(crate::i18n::tr(lang, "Generate Publication"))
@@ -2959,7 +2939,7 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
             egui::Button::new(
                 RichText::new(format!("🚀 {}", crate::i18n::tr(lang, "Generate & Publish PDF"))).font(semibold(12.0)).color(Color32::WHITE),
             )
-            .fill(Color32::from_rgb(22, 101, 52))
+            .fill(t.accent_strong)
             .corner_radius(CornerRadius::same(4)),
         )
         .on_hover_text(crate::i18n::tr(lang, "Generate & Publish PDF"))
@@ -3763,7 +3743,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                 // Delete button with confirmation
                 if state.card_delete_confirm {
                     ui.label(RichText::new(crate::i18n::tr(lang, "Confirm Delete?")).font(semibold(10.5)).color(t.danger));
-                    if ui.add(egui::Button::new(RichText::new(crate::i18n::tr(lang, "Yes, Delete")).color(Color32::WHITE)).fill(Color32::from_rgb(220, 38, 38))).clicked() {
+                    if ui.add(egui::Button::new(RichText::new(crate::i18n::tr(lang, "Yes, Delete")).color(t.caption_close_text)).fill(t.caption_close)).clicked() {
                         delete_card = true;
                     }
                     if ui.button(crate::i18n::tr(lang, "Cancel")).clicked() {
@@ -3774,7 +3754,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                 }
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.add(egui::Button::new(RichText::new(format!("✓ {}", crate::i18n::tr(lang, "Save & Close"))).font(semibold(11.0)).color(Color32::WHITE)).fill(Color32::from_rgb(37, 99, 235))).clicked() {
+                    if ui.add(egui::Button::new(RichText::new(format!("✓ {}", crate::i18n::tr(lang, "Save & Close"))).font(semibold(11.0)).color(Color32::WHITE)).fill(t.accent_strong)).clicked() {
                         close = true;
                     }
 
@@ -3914,11 +3894,7 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
             } else {
                 card.settings.get("title_en").cloned().unwrap_or_default()
             },
-            year: if !card.cover_year.trim().is_empty() {
-                card.cover_year.clone()
-            } else {
-                card.settings.get("year").cloned().unwrap_or_default()
-            },
+            year: if !card.cover_year.trim().is_empty() { card.cover_year.clone() } else { card.settings.get("year").cloned().unwrap_or_default() },
             volume: if !card.cover_volume.trim().is_empty() {
                 card.cover_volume.clone()
             } else {
@@ -3934,16 +3910,8 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
             } else {
                 card.settings.get("code").cloned().unwrap_or_default()
             },
-            pub_office: if !card.cover_pub_office.trim().is_empty() {
-                card.cover_pub_office.clone()
-            } else {
-                state.meta_agency.clone()
-            },
-            agency: if !card.cover_pub_office.trim().is_empty() {
-                card.cover_pub_office.clone()
-            } else {
-                state.meta_agency.clone()
-            },
+            pub_office: if !card.cover_pub_office.trim().is_empty() { card.cover_pub_office.clone() } else { state.meta_agency.clone() },
+            agency: if !card.cover_pub_office.trim().is_empty() { card.cover_pub_office.clone() } else { state.meta_agency.clone() },
             office_address: if !card.cover_office_address.trim().is_empty() {
                 card.cover_office_address.clone()
             } else {
@@ -3953,19 +3921,11 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
             event_theme: card.settings.get("event_theme").cloned().unwrap_or_default(),
             palette: card.cover_ai_palette.clone(),
             release_no: if state.selected_profile == "bps_brs" {
-                if !card.cover_release_no.trim().is_empty() {
-                    card.cover_release_no.clone()
-                } else {
-                    state.meta_release_no.clone()
-                }
+                if !card.cover_release_no.trim().is_empty() { card.cover_release_no.clone() } else { state.meta_release_no.clone() }
             } else {
                 String::new()
             },
-            release_date: if !card.cover_release_date.trim().is_empty() {
-                card.cover_release_date.clone()
-            } else {
-                state.meta_release_date.clone()
-            },
+            release_date: if !card.cover_release_date.trim().is_empty() { card.cover_release_date.clone() } else { state.meta_release_date.clone() },
             release_month: if !card.cover_release_month.trim().is_empty() {
                 card.cover_release_month.clone()
             } else {
@@ -4040,11 +4000,8 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         } else {
             card.settings.get("template").cloned().unwrap_or_default()
         };
-        let title_en = if !card.title_en.trim().is_empty() {
-            card.title_en.clone()
-        } else {
-            card.settings.get("title_en").cloned().unwrap_or_default()
-        };
+        let title_en =
+            if !card.title_en.trim().is_empty() { card.title_en.clone() } else { card.settings.get("title_en").cloned().unwrap_or_default() };
         let file_en = card.settings.get("file_en").and_then(|fen| staged(fen)).unwrap_or_default();
         let theme = if !card.table_theme.trim().is_empty() {
             card.table_theme.clone()
@@ -4056,16 +4013,8 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
     if rows.is_empty() && !st.excel_had_cover {
         return Err("the worksheet has no publication cards to generate from".into());
     }
-    st.card1_headers = vec![
-        "type".into(),
-        "number".into(),
-        "title".into(),
-        "file".into(),
-        "template".into(),
-        "title_en".into(),
-        "file_en".into(),
-        "theme".into(),
-    ];
+    st.card1_headers =
+        vec!["type".into(), "number".into(), "title".into(), "file".into(), "template".into(), "title_en".into(), "file_en".into(), "theme".into()];
     st.card1_records = rows;
     st.card1_type_col = 0;
     st.card1_num_col = 1;
@@ -4176,7 +4125,7 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
                     .add_sized(
                         [175.0, 26.0],
                         egui::Button::new(RichText::new("💾 Simpan Versi Baru (v2)").font(semibold(11.0)).color(Color32::WHITE))
-                            .fill(Color32::from_rgb(37, 99, 235)),
+                            .fill(t.accent_strong),
                     )
                     .on_hover_text("Pertahankan tata letak lama dan kompilasi ke berkas versi baru (_v2)")
                     .clicked()
@@ -4188,8 +4137,8 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
                 if ui
                     .add_sized(
                         [165.0, 26.0],
-                        egui::Button::new(RichText::new("⚠️ Timpa Tata Letak").font(semibold(11.0)).color(Color32::WHITE))
-                            .fill(Color32::from_rgb(220, 38, 38)),
+                        egui::Button::new(RichText::new("⚠️ Timpa Tata Letak").font(semibold(11.0)).color(t.caption_close_text))
+                            .fill(t.caption_close),
                     )
                     .on_hover_text("Ganti dokumen aktif dengan kompilasi segar dari sumber data")
                     .clicked()

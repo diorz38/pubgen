@@ -444,6 +444,34 @@ status bar (§6 Step 8 — the status-bar decision is still pending).
 - Also repaired a broken import left by in-flight work: `workspace.rs` called `super::load_card2_csv`
   (private import) → `super::csv::load_card2_csv`; without it the crate did not compile.
 
-Not done yet: full F2 sweep (profile-card accents, generate/publish fills, stepper blue, mode-pill literals),
-F3–F13. Visual verification in Light theme is still owed — `pubgen-studio` has no control channel, so it
-needs a themed screenshot once the in-flight edits in `workspace.rs` land.
+**2026-11-07 — F2 sweep done (chrome colours tokenised).** Branch `studio`, uncommitted (F1 above was
+swallowed into commit `4707294b` by in-flight DDA work; F2 continues on top).
+
+- `workspace.rs`: every remaining *chrome* `from_rgb` now reads Tokens — hero block → `t.accent_strong`;
+  profile-card accents DDA `#3b82f6`→`t.accent`, BRS `#f59e0b`→`t.live_corner`, General `#9ca3af`→`t.text_dim`;
+  both `btn_fill = #2563eb` sites (margin stepper, add-page/object) → `t.accent_strong`; cyan links
+  (`View Latest PDF`, `Click to edit`) → `t.accent`; Generate `#0e7490` and Publish `#166534` fills →
+  `t.accent_strong`; destructive fills (`Yes, Delete`, guard `⚠️ Timpa Tata Letak`) → `t.caption_close` +
+  `t.caption_close_text`; `Save & Close` and guard `💾 Simpan Versi Baru` → `t.accent_strong`. The only
+  `from_rgb` left in `workspace.rs` are content previews (sample-document mockups `:1318-1357`,
+  `paint_card_thumbnail` `:2357-2458`, visual live preview `:2812-2861`) — sanctioned by §7.1.
+- `pubgen_bar.rs`: mode pills tokenised — `mode_tab_button` now `(ui, label, active, tip)`; active pill =
+  `t.row_selected` fill + 1 px `t.accent` rim + `t.text_strong` (one treatment for both modes; ponytail: add
+  a token per mode if they ever need distinct identities); inactive `t.text_dim`/hover `t.hover` unchanged;
+  added `widget_info(Role::Button)` (screen-reader name); label `"Designcraft"` → `"DesignCraft"` (F10).
+- Test fix: `pubgen_bar_keeps_the_host_menus_and_adds_the_pubgen_ones` now matches menu names by *last*
+  occurrence — the renamed pill shares its text with the later "DesignCraft" menu and pills render first.
+- Verified: `cargo test -p designcraft-ui-egui --features pubgen --lib` → **1338 passed, 0 failed**;
+  `cargo fmt` + `cargo clippy -p designcraft-ui-egui --features pubgen --all-targets` clean.
+  Screenshot `.ui-shots/worksheet-after-f2.png` (MediumDark, sample BRS package) confirms no layout
+  regression: pills/steppers/links/CTAs now token blue, status dots `t.success`, dock strip unchanged.
+  Light-theme screenshot still owed (no control channel; theme needs a UI click).
+- Hygiene note: the ui-egui test run rewrites three committed zip assets
+  (`assets/templates/{data_tables,dividers,front_matter}/001_*.designcraft`) nondeterministically — restored
+  with `git checkout`; worth a separate fix (tests must not dirty tracked binaries).
+
+Not done yet: F3 (app-bar centre title says "DesignCraft" in Orchestrator), F4 (emoji vs icon font),
+F5 (type/radius scale), F6 (three tab treatments), F7 (accessibility widget_info sweep), F8 (i18n EN/ID
+completeness), F9 (menu rows bypass `Item::Cmd`), F10 rest, F11 (dead chrome modules), F12 (status-bar
+semantics), F13 (card footer clipping — still visible in the new screenshot), F14 (fixed 320 px dock),
+F15/F16 (`Source::` doubled colon — still visible; blank status bar).

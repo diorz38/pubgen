@@ -89,7 +89,8 @@ fn clipped_submenu<'a, R>(
 
 /// The menu bar contents (inside the app bar; macOS uses the native menu instead).
 pub fn menu_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
-    // PubGen (fork): studio mode switcher ("Designcraft" | "Orchestrator") with distinct active backgrounds.
+    // PubGen (fork): studio mode switcher ("DesignCraft" | "Orchestrator"); the active pill uses the
+    // theme's selection colours (see `pubgen_bar::mode_tab_button`).
     #[cfg(feature = "pubgen")]
     super::pubgen_bar::render_mode_switch(app, ui);
 
