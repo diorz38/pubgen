@@ -8,12 +8,12 @@
 //! Both the left and right panels follow the exact visual styling and design tokens of DesignCraft's left panel.
 
 use egui::{
-    Align, Align2, Color32, CornerRadius, FontId, Layout, Margin, Rect, Response, RichText, ScrollArea, Sense, Stroke, StrokeKind, Ui, pos2, vec2,
+    pos2, vec2, Align, Align2, Color32, CornerRadius, FontId, Layout, Margin, Rect, Response, RichText, ScrollArea, Sense, Stroke, StrokeKind, Ui,
 };
 use serde::{Deserialize, Serialize};
 
+use crate::theme::{semibold, Tokens};
 use crate::DesignApp;
-use crate::theme::{Tokens, semibold};
 
 const WORKSPACE_STATE_ID: &str = "pubgen_orchestrator_workspace_state";
 
@@ -765,8 +765,12 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
         state.meta_release_no.clear();
         state.meta_release_date.clear();
         state.meta_release_month.clear();
-        if let Some(agency) =
-            report.metadata.extra.get("agency").or_else(|| report.metadata.extra.get("pub_office")).or_else(|| report.metadata.extra.get("officename"))
+        if let Some(agency) = report
+            .metadata
+            .extra
+            .get("agency")
+            .or_else(|| report.metadata.extra.get("pub_office"))
+            .or_else(|| report.metadata.extra.get("officename"))
         {
             state.meta_agency = agency.clone();
         }
@@ -785,8 +789,12 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
         if let Some(month) = report.metadata.extra.get("release_month").or_else(|| report.metadata.extra.get("month")) {
             state.meta_release_month = month.clone();
         }
-        if let Some(agency) =
-            report.metadata.extra.get("agency").or_else(|| report.metadata.extra.get("pub_office")).or_else(|| report.metadata.extra.get("officename"))
+        if let Some(agency) = report
+            .metadata
+            .extra
+            .get("agency")
+            .or_else(|| report.metadata.extra.get("pub_office"))
+            .or_else(|| report.metadata.extra.get("officename"))
         {
             state.meta_agency = agency.clone();
         }
@@ -801,7 +809,11 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
     // sources at it, so a new prefix would orphan those sources.
     let norm = |prefix: &str, name: &str| {
         let n = name.replace('\\', "/");
-        if n.starts_with(prefix) || n.contains('/') { n } else { format!("{prefix}/{n}") }
+        if n.starts_with(prefix) || n.contains('/') {
+            n
+        } else {
+            format!("{prefix}/{n}")
+        }
     };
 
     // Narratives are RTF; a package written before that change still carries Markdown, whose
@@ -1508,6 +1520,20 @@ fn render_recent_documents(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, 
     }
 }
 
+fn pgs_orchestrator_home_logo_texture(ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    let key = egui::Id::unique("pgs_orchestrator_home_logo");
+    if let Some(tex) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(key)) {
+        return Some(tex);
+    }
+    let bytes: &[u8] = include_bytes!("../../../../../assets/app-icon/pgs_icon.png");
+    let pm = designcraft_render::decode_pixmap_page(bytes, 0)?;
+    let ci = egui::ColorImage::from_rgba_premultiplied([pm.width() as usize, pm.height() as usize], pm.data_as_u8_slice());
+    let fitted = crate::widgets::fit_texture(ci, 128);
+    let tex = ctx.load_texture("pgs_orchestrator_home_logo", fitted, egui::TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(key, tex.clone()));
+    Some(tex)
+}
+
 pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, lang: &str) {
     let r = ui.available_rect_before_wrap();
     ui.painter().rect_filled(r, 0.0, t.panel_darker);
@@ -1521,8 +1547,12 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                 // HERO
                 ui.horizontal(|ui| {
                     let (icon_r, _) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::hover());
-                    ui.painter().rect_filled(icon_r, HOME_TILE_RADIUS, t.accent_strong);
-                    crate::icons::paint(ui.painter(), icon_r.shrink(11.0), "panel-pages", Color32::WHITE);
+                    if let Some(tex) = pgs_orchestrator_home_logo_texture(ui.ctx()) {
+                        ui.painter().image(tex.id(), icon_r, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+                    } else {
+                        ui.painter().rect_filled(icon_r, HOME_TILE_RADIUS, t.accent_strong);
+                        crate::icons::paint(ui.painter(), icon_r.shrink(11.0), "panel-pages", Color32::WHITE);
+                    }
                     ui.add_space(14.0);
                     ui.vertical(|ui| {
                         ui.label(
@@ -2779,7 +2809,11 @@ fn render_facing_card(
         });
     });
 
-    if clicked_edit { Some(idx) } else { None }
+    if clicked_edit {
+        Some(idx)
+    } else {
+        None
+    }
 }
 
 fn render_card_action_bar(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, lang: &str) {
@@ -4092,7 +4126,11 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
             event_theme: card.settings.get("event_theme").cloned().unwrap_or_default(),
             palette: card.cover_ai_palette.clone(),
             release_no: if state.selected_profile == "bps_brs" {
-                if !card.cover_release_no.trim().is_empty() { card.cover_release_no.clone() } else { state.meta_release_no.clone() }
+                if !card.cover_release_no.trim().is_empty() {
+                    card.cover_release_no.clone()
+                } else {
+                    state.meta_release_no.clone()
+                }
             } else {
                 String::new()
             },
@@ -4131,13 +4169,15 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         let typ = match card.kind {
             CardKind::Narrative => {
                 let id_upper = card.chapter_id.to_ascii_uppercase();
-                let is_rxx = id_upper.starts_with('R')
-                    && id_upper.len() > 1
-                    && id_upper[1..].chars().all(|c| c.is_ascii_digit() || c == '_');
+                let is_rxx = id_upper.starts_with('R') && id_upper.len() > 1 && id_upper[1..].chars().all(|c| c.is_ascii_digit() || c == '_');
                 let title_upper = card.title.trim().to_ascii_uppercase();
                 let title_starts_bab = title_upper.starts_with("BAB ") || title_upper.starts_with("CHAPTER ");
                 if is_rxx || title_starts_bab {
-                    if file.is_empty() { "Note" } else { "Ulasan" }
+                    if file.is_empty() {
+                        "Note"
+                    } else {
+                        "Ulasan"
+                    }
                 } else {
                     "Note"
                 }
@@ -4288,7 +4328,11 @@ fn execute_compile(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orchest
 fn sanitize_file_stem(title: &str) -> String {
     let stem: String = title.trim().chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == ' ' { c } else { ' ' }).collect();
     let stem = stem.split_whitespace().collect::<Vec<_>>().join("_");
-    if stem.is_empty() { "publikasi".into() } else { stem }
+    if stem.is_empty() {
+        "publikasi".into()
+    } else {
+        stem
+    }
 }
 
 /// Renders the Re-compilation Safety Guard Dialog (3-way modal: Overwrite / Save v2 / Cancel).
@@ -4707,6 +4751,17 @@ mod tests {
         // Back to home
         state.view = OrchestratorView::Home;
         assert_eq!(state.view, OrchestratorView::Home);
+    }
+
+    /// Regression (diorz38/pubgen#2): the Orchestrator Home hero must use the professional PGS
+    /// icon asset, not the generic placeholder glyph.
+    #[test]
+    fn orchestrator_home_hero_uses_pgs_icon_asset() {
+        let src = include_str!("workspace.rs");
+        assert!(src.contains("pgs_orchestrator_home_logo_texture"), "Orchestrator Home hero should load the PGS logo texture");
+        assert!(src.contains("assets/app-icon/pgs_icon.png"), "Orchestrator Home hero should reference assets/app-icon/pgs_icon.png");
+        let bytes: &[u8] = include_bytes!("../../../../../assets/app-icon/pgs_icon.png");
+        assert!(designcraft_render::decode_pixmap_page(bytes, 0).is_some(), "pgs_icon.png must decode as an image");
     }
 
     #[test]
