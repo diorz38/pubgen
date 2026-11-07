@@ -242,6 +242,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Single Lang", "Bahasa Tunggal"),
     ("Single Page (Non-Facing)", "Single Page (Non-Facing)"),
     ("Slug", "Slug"),
+    ("Source", "Sumber"),
     ("Source:", "Sumber:"),
     ("Sources & Content", "Sumber & Konten"),
     ("Spread", "Bentang"),

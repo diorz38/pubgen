@@ -2543,17 +2543,20 @@ fn card_details_width(card_w: f32) -> f32 {
 
 /// Height a page card needs so every text line stays visible: pill row +
 /// wrapped title + wrapped source + footer, with the card's inner padding.
+/// Rows rendered with `Ui::horizontal` are never shorter than the style's
+/// `interact_size.y` (18 px by default), so the same minimum applies here —
+/// assuming text height alone under-measured and clipped card footers.
 fn measured_card_height(painter: &egui::Painter, card: &PublicationCard, details_w: f32, lang: &str) -> f32 {
     // Only metrics matter here (nothing is painted): PLACEHOLDER keeps the layout independent of the
     // theme's text colour.
     let title = painter.layout(card.title.clone(), semibold(12.0), Color32::PLACEHOLDER, details_w);
-    let src = format!("{}: {}", crate::i18n::tr(lang, "Source:"), card.source);
+    let src = format!("{}: {}", crate::i18n::tr(lang, "Source"), card.source);
     let source = painter.layout(src, FontId::proportional(11.0), Color32::PLACEHOLDER, details_w);
-    const PILL_H: f32 = 16.0;
-    const FOOTER_H: f32 = 16.0;
+    let row_min = painter.ctx().global_style().spacing.interact_size.y;
     const LINE_GAP: f32 = 2.0;
     const PAD_Y: f32 = 12.0; // 6px top + 6px bottom inner padding
-    PAD_Y + PILL_H + LINE_GAP + title.size().y.max(16.0) + LINE_GAP + source.size().y.max(15.0) + LINE_GAP + FOOTER_H
+    let rows = [row_min, title.size().y.max(row_min), source.size().y.max(row_min), row_min];
+    PAD_Y + LINE_GAP * (rows.len() - 1) as f32 + rows.iter().sum::<f32>()
 }
 
 /// Uniform row height: the tallest card in the row, never below the legacy 84px.
@@ -2634,7 +2637,7 @@ fn render_facing_card(
         }
 
         // Line 3: Source
-        let src_label = format!("{}: {}", crate::i18n::tr(lang, "Source:"), card.source);
+        let src_label = format!("{}: {}", crate::i18n::tr(lang, "Source"), card.source);
         child_ui.add(egui::Label::new(RichText::new(src_label).font(FontId::proportional(11.0)).color(t.text_dim)));
 
         // Line 4: Footer
@@ -4225,6 +4228,38 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Card rows contain `Ui::horizontal` rows (pills, footer) that are never shorter than the
+    /// style's `interact_size.y` (18 px by default). The measurement must budget those minimums or
+    /// wrapped titles push the footer past the card edge (clipped "Pg. N — Click to edit").
+    #[test]
+    fn measured_card_height_budgets_row_minimums_and_wrapped_titles() {
+        let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx, "en");
+        let mut out = ctx.run_ui(Default::default(), |_| {}); // fonts only bind inside a run
+        out.textures_delta.clear();
+        let painter = ctx.debug_painter();
+
+        let short = PublicationCard::new_with(CardKind::Chart, "NTP", "Grafik", "csv/ntp.csv", 1, true);
+        let long = PublicationCard::new_with(
+            CardKind::Chart,
+            "Grafik Perkembangan Nilai Tukar Petani Menurut Komoditas Tahun 2026",
+            "Grafik",
+            "csv/ntp.csv",
+            2,
+            true,
+        );
+        let det_w = 120.0; // narrow enough that `long` wraps to several lines
+
+        let h_short = measured_card_height(&painter, &short, det_w, "en");
+        let h_long = measured_card_height(&painter, &long, det_w, "en");
+
+        let interact = ctx.global_style().spacing.interact_size.y;
+        // PAD_Y (12) + three LINE_GAPs (2) + four rows at the interactive minimum.
+        assert!(h_short >= 12.0 + 3.0 * 2.0 + 4.0 * interact, "h_short={h_short}, interact={interact}");
+        // Wrapped extra title lines must grow the budget.
+        assert!(h_long >= h_short + 24.0, "h_long={h_long}, h_short={h_short}");
+    }
 
     #[test]
     fn test_orchestrator_workspace_right_dock_state() {

@@ -473,5 +473,20 @@ swallowed into commit `4707294b` by in-flight DDA work; F2 continues on top).
 Not done yet: F3 (app-bar centre title says "DesignCraft" in Orchestrator), F4 (emoji vs icon font),
 F5 (type/radius scale), F6 (three tab treatments), F7 (accessibility widget_info sweep), F8 (i18n EN/ID
 completeness), F9 (menu rows bypass `Item::Cmd`), F10 rest, F11 (dead chrome modules), F12 (status-bar
-semantics), F13 (card footer clipping — still visible in the new screenshot), F14 (fixed 320 px dock),
-F15/F16 (`Source::` doubled colon — still visible; blank status bar).
+semantics), F14 (fixed 320 px dock), F15 (blank status bar).
+
+**2026-11-07 — F13 + F16 fixed (card footer clipping, `Source::`).** Branch `studio`.
+
+- `workspace.rs` `measured_card_height`: the budget assumed bare text heights (15/16 px rows), but the pill
+  and footer rows are `Ui::horizontal` layouts whose minimum is the style's `interact_size.y` (18 px by
+  default) — every card was under-measured by ~10-25 px and wrapped titles pushed the footer past the card
+  edge. The measurement now takes `row_min = ctx.global_style().spacing.interact_size.y` and budgets
+  `PAD_Y + 3 gaps + max(galley, row_min)` for each of the four rows. Regression test
+  `measured_card_height_budgets_row_minimums_and_wrapped_titles` asserts the floor (≥ 12 + 3×2 + 4×18) and
+  that a wrapped 3-line title grows the budget.
+- `Source:: csv/COV.csv` doubled colon: the i18n key itself was `"Source:"` while the format string added
+  `": "` again. Added a colon-less key `("Source", "Sumber")` in `i18n/id.rs` and switched the two formatted
+  sites to `tr(lang, "Source")`; the standalone caption sites keep the `"Source:"` key.
+- Verified: `cargo test -p designcraft-ui-egui --features pubgen --lib` → **1339 passed, 0 failed**; clippy
+  clean; screenshot `.ui-shots/worksheet-after-f13.png` shows every card footer ("Pg. N ✎ Click to edit")
+  fully inside its card and single-colon `Source:` lines.
