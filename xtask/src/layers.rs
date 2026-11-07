@@ -59,7 +59,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("cli", Class::Exempt),
     ("web", Class::Exempt),
     ("pubgen-cli", Class::Exempt),
-    ("pubgen-studio", Class::Exempt),
+    ("pgs", Class::Exempt),
     ("xtask", Class::Exempt),
 ];
 

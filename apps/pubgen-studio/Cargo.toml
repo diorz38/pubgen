@@ -1,11 +1,15 @@
 [package]
-name = "pubgen-studio"
+name = "pgs"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
-default-run = "pubgen-studio"
+default-run = "pgs"
+
+[[bin]]
+name = "pgs"
+path = "src/main.rs"
 
 [lints]
 workspace = true

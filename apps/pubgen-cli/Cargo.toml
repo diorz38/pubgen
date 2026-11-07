@@ -10,11 +10,11 @@ publish = false
 workspace = true
 
 [[bin]]
-name = "pubgen-cli"
+name = "pgs-cli"
 path = "src/main.rs"
 
 [[bin]]
-name = "pubgen-export"
+name = "pgs-export"
 path = "src/export.rs"
 
 [dependencies]
