@@ -1119,6 +1119,14 @@ const ORCH_TAB_PAD: f32 = 44.0;
 const DOCK_TAB_H: f32 = 27.0;
 const DOCK_TAB_LABEL: f32 = 12.0;
 const DOCK_TAB_PAD: f32 = 10.0;
+/// Home screen scale — the same sizes `chrome::start_screen` uses for DesignCraft's own welcome
+/// page, so both entry screens read as one product. (F5)
+const HOME_TITLE: f32 = 24.0;
+const HOME_SECTION: f32 = 15.0;
+const HOME_BODY: f32 = 15.0;
+const HOME_BUTTON: f32 = 14.0;
+const HOME_TILE_RADIUS: f32 = 10.0;
+const HOME_PILL_RADIUS: f32 = 16.0;
 
 /// The width the expanded right dock opens at, and the range the divider may drag it to.
 fn default_right_dock_w() -> f32 {
@@ -1399,7 +1407,7 @@ fn render_profile_card(ui: &mut Ui, t: &Tokens, kind: ProfileCardKind, title: &s
     }
 
     // Texts
-    ui.painter().text(pos2(rect.center().x, rect.min.y + 90.0), Align2::CENTER_CENTER, title, semibold(13.5), t.text_strong);
+    ui.painter().text(pos2(rect.center().x, rect.min.y + 90.0), Align2::CENTER_CENTER, title, semibold(12.0), t.text_strong);
     ui.painter().text(pos2(rect.center().x, rect.min.y + 112.0), Align2::CENTER_CENTER, subtitle, FontId::proportional(11.5), t.text_dim);
     ui.painter().text(pos2(rect.center().x, rect.min.y + 134.0), Align2::CENTER_CENTER, spec, semibold(11.0), accent);
 
@@ -1425,8 +1433,8 @@ fn render_recent_documents(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, 
                 Stroke::new(1.0, if hov { t.accent_strong } else { t.divider }),
                 egui::StrokeKind::Inside,
             );
-            ui.painter().text(pos2(rect.min.x + 14.0, rect.min.y + 14.0), Align2::LEFT_CENTER, &filename, semibold(12.5), t.text_strong);
-            ui.painter().text(pos2(rect.min.x + 14.0, rect.min.y + 30.0), Align2::LEFT_CENTER, path, FontId::proportional(10.5), t.text_dim);
+            ui.painter().text(pos2(rect.min.x + 14.0, rect.min.y + 14.0), Align2::LEFT_CENTER, &filename, semibold(12.0), t.text_strong);
+            ui.painter().text(pos2(rect.min.x + 14.0, rect.min.y + 30.0), Align2::LEFT_CENTER, path, FontId::proportional(11.0), t.text_dim);
             if resp.clicked() {
                 clicked_doc = Some(path.clone());
             }
@@ -1460,15 +1468,17 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                 // HERO
                 ui.horizontal(|ui| {
                     let (icon_r, _) = ui.allocate_exact_size(vec2(44.0, 44.0), Sense::hover());
-                    ui.painter().rect_filled(icon_r, 10.0, t.accent_strong);
+                    ui.painter().rect_filled(icon_r, HOME_TILE_RADIUS, t.accent_strong);
                     crate::icons::paint(ui.painter(), icon_r.shrink(11.0), "panel-pages", Color32::WHITE);
                     ui.add_space(14.0);
                     ui.vertical(|ui| {
                         ui.label(
-                            RichText::new(crate::i18n::tr(lang, "Welcome to Publication Orchestrator")).font(semibold(24.0)).color(t.text_strong),
+                            RichText::new(crate::i18n::tr(lang, "Welcome to Publication Orchestrator"))
+                                .font(semibold(HOME_TITLE))
+                                .color(t.text_strong),
                         );
                         let subtitle = crate::i18n::tr(lang, "Page layout for print and screen — fast, open and scriptable.");
-                        ui.label(RichText::new(subtitle).size(13.5).color(t.text_dim));
+                        ui.label(RichText::new(subtitle).size(HOME_BODY).color(t.text_dim));
                     });
                 });
 
@@ -1480,9 +1490,9 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                     let open_label = crate::i18n::tr(lang, "Open file (.pubgen)");
                     if ui
                         .add(
-                            egui::Button::new(RichText::new(open_label).size(13.0).color(Color32::WHITE))
+                            egui::Button::new(RichText::new(open_label).size(HOME_BUTTON).color(Color32::WHITE))
                                 .fill(t.accent_strong)
-                                .corner_radius(16.0)
+                                .corner_radius(HOME_PILL_RADIUS)
                                 .min_size(vec2(0.0, 32.0)),
                         )
                         .clicked()
@@ -1491,12 +1501,22 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                     }
 
                     let import_label = if lang.starts_with("id") { "Impor Manifest (XLSX)" } else { "Import Manifest (XLSX)" };
-                    if ui.add(egui::Button::new(RichText::new(import_label).size(13.0)).corner_radius(16.0).min_size(vec2(0.0, 32.0))).clicked() {
+                    if ui
+                        .add(
+                            egui::Button::new(RichText::new(import_label).size(HOME_BUTTON))
+                                .corner_radius(HOME_PILL_RADIUS)
+                                .min_size(vec2(0.0, 32.0)),
+                        )
+                        .clicked()
+                    {
                         trigger_host_tab_action(ui.ctx(), HostTabAction::Import);
                     }
 
                     let brs_label = if lang.starts_with("id") { "Sampel BRS" } else { "Sample BRS" };
-                    if ui.add(egui::Button::new(RichText::new(brs_label).size(13.0)).corner_radius(16.0).min_size(vec2(0.0, 32.0))).clicked() {
+                    if ui
+                        .add(egui::Button::new(RichText::new(brs_label).size(HOME_BUTTON)).corner_radius(HOME_PILL_RADIUS).min_size(vec2(0.0, 32.0)))
+                        .clicked()
+                    {
                         let sample = std::path::Path::new("plan/pubgen/samples/brs/ntp202610.xlsx");
                         if sample.is_file() {
                             trigger_host_tab_action(ui.ctx(), HostTabAction::ImportPath(sample.to_path_buf()));
@@ -1508,7 +1528,10 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                     }
 
                     let dda_label = if lang.starts_with("id") { "Sampel DDA" } else { "Sample DDA" };
-                    if ui.add(egui::Button::new(RichText::new(dda_label).size(13.0)).corner_radius(16.0).min_size(vec2(0.0, 32.0))).clicked() {
+                    if ui
+                        .add(egui::Button::new(RichText::new(dda_label).size(HOME_BUTTON)).corner_radius(HOME_PILL_RADIUS).min_size(vec2(0.0, 32.0)))
+                        .clicked()
+                    {
                         let sample = std::path::Path::new("plan/pubgen/samples/SINGLE_LANG/BAB_02_2025.xlsx");
                         if sample.is_file() {
                             trigger_host_tab_action(ui.ctx(), HostTabAction::ImportPath(sample.to_path_buf()));
@@ -1522,8 +1545,8 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                         let studio_label = crate::i18n::tr(lang, "Open Active Studio");
                         if ui
                             .add(
-                                egui::Button::new(RichText::new(studio_label).size(13.0).color(t.success))
-                                    .corner_radius(16.0)
+                                egui::Button::new(RichText::new(studio_label).size(HOME_BUTTON).color(t.success))
+                                    .corner_radius(HOME_PILL_RADIUS)
                                     .min_size(vec2(0.0, 32.0)),
                             )
                             .clicked()
@@ -1537,7 +1560,7 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
 
                 // SECTION: PUBLICATION PROFILES
                 let sec_prof = if lang.starts_with("id") { "Profil Publikasi" } else { "Publication Profiles" };
-                ui.label(RichText::new(sec_prof).font(semibold(15.0)).color(t.text_strong));
+                ui.label(RichText::new(sec_prof).font(semibold(HOME_SECTION)).color(t.text_strong));
                 ui.add_space(10.0);
 
                 ui.horizontal(|ui| {
@@ -1582,7 +1605,7 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
 
                 // SECTION: RECENT OPENED DOCUMENTS
                 let sec_rec = if lang.starts_with("id") { "Dokumen Terakhir Dibuka (*.pubgen)" } else { "Recent Opened Documents (*.pubgen)" };
-                ui.label(RichText::new(sec_rec).font(semibold(15.0)).color(t.text_strong));
+                ui.label(RichText::new(sec_rec).font(semibold(HOME_SECTION)).color(t.text_strong));
                 ui.add_space(10.0);
 
                 render_recent_documents(ui, state, t, lang);
@@ -1695,7 +1718,7 @@ fn render_collapsed_dock(
     let expand_btn = ui
         .add_sized(
             [width, tab_bar_height],
-            egui::Button::new(RichText::new("«").font(semibold(13.0)).color(t.text_strong)).fill(t.tab_strip).frame(false),
+            egui::Button::new(RichText::new("«").font(semibold(12.0)).color(t.text_strong)).fill(t.tab_strip).frame(false),
         )
         .on_hover_text(format!("{} (Expand Panels)", crate::i18n::tr(lang, "Expand Panels")));
     expand_btn.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr(lang, "Expand Panels")));
@@ -1872,13 +1895,13 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
 
     if !state.content_files.is_empty() {
         let source_label = state.recent_documents.first().map(String::as_str).unwrap_or("Workspace source");
-        ui.label(RichText::new(format!("Source: {source_label}")).font(FontId::proportional(10.5)).color(t.text_dim));
-        ui.label(RichText::new(format!("{} embedded content file(s)", state.content_files.len())).font(FontId::proportional(10.5)).color(t.text_dim));
+        ui.label(RichText::new(format!("Source: {source_label}")).font(FontId::proportional(11.0)).color(t.text_dim));
+        ui.label(RichText::new(format!("{} embedded content file(s)", state.content_files.len())).font(FontId::proportional(11.0)).color(t.text_dim));
     }
 
     // Header row
     ui.horizontal(|ui| {
-        ui.label(RichText::new(crate::i18n::tr(lang, "Sources & Content")).font(semibold(13.5)).color(t.text_strong));
+        ui.label(RichText::new(crate::i18n::tr(lang, "Sources & Content")).font(semibold(12.0)).color(t.text_strong));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             // Home button
             let home_btn = crate::icons::button(ui, "home", 22.0, false, &crate::i18n::tr(lang, "Home"));
@@ -1905,9 +1928,9 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
             .add_sized(
                 [btn_w, 22.0],
                 egui::Button::new(
-                    RichText::new(format!("+ {}", crate::i18n::tr(lang, "Import Source"))).font(FontId::proportional(10.5)).color(t.text),
+                    RichText::new(format!("+ {}", crate::i18n::tr(lang, "Import Source"))).font(FontId::proportional(11.0)).color(t.text),
                 )
-                .corner_radius(CornerRadius::same(3)),
+                .corner_radius(CornerRadius::same(t.radius)),
             )
             .on_hover_text(crate::i18n::tr(lang, "Import Source"))
             .clicked()
@@ -1963,8 +1986,8 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         if ui
             .add_sized(
                 [btn_w, 22.0],
-                egui::Button::new(RichText::new(crate::i18n::tr(lang, "Import Excel")).font(FontId::proportional(10.5)).color(t.text))
-                    .corner_radius(CornerRadius::same(3)),
+                egui::Button::new(RichText::new(crate::i18n::tr(lang, "Import Excel")).font(FontId::proportional(11.0)).color(t.text))
+                    .corner_radius(CornerRadius::same(t.radius)),
             )
             .on_hover_text(crate::i18n::tr(lang, "Import Excel"))
             .clicked()
@@ -1991,8 +2014,8 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         if ui
             .add_sized(
                 [btn_w, 22.0],
-                egui::Button::new(RichText::new(crate::i18n::tr(lang, "Import Metadata")).font(FontId::proportional(10.5)).color(t.text))
-                    .corner_radius(CornerRadius::same(3)),
+                egui::Button::new(RichText::new(crate::i18n::tr(lang, "Import Metadata")).font(FontId::proportional(11.0)).color(t.text))
+                    .corner_radius(CornerRadius::same(t.radius)),
             )
             .on_hover_text(crate::i18n::tr(lang, "Import Metadata"))
             .clicked()
@@ -2015,7 +2038,7 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         egui::Frame::NONE
             .fill(t.panel_darker)
             .stroke(Stroke::new(1.0, t.field_border))
-            .corner_radius(CornerRadius::same(4))
+            .corner_radius(CornerRadius::same(t.radius))
             .inner_margin(Margin::same(8))
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing = vec2(4.0, 5.0);
@@ -2024,11 +2047,11 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                 let facing_label = crate::i18n::tr(lang, "Double Page (Facing)");
                 let single_label = crate::i18n::tr(lang, "Single Page (Non-Facing)");
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(crate::i18n::tr(lang, "Page Layout:")).font(FontId::proportional(10.5)).color(t.text_dim));
+                    ui.label(RichText::new(crate::i18n::tr(lang, "Page Layout:")).font(FontId::proportional(11.0)).color(t.text_dim));
                     let combo_w = (ui.available_width() - 4.0).max(120.0);
                     craft_ui::ComboBox::from_id_salt("meta_page_layout_combo")
                         .selected_text(
-                            RichText::new(if state.page_layout_facing { facing_label } else { single_label }).font(FontId::proportional(10.5)),
+                            RichText::new(if state.page_layout_facing { facing_label } else { single_label }).font(FontId::proportional(11.0)),
                         )
                         .width(combo_w)
                         .show_ui(ui, |ui| {
@@ -2041,10 +2064,10 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                 let indonesian_label = crate::i18n::tr(lang, "Indonesian");
                 let english_label = crate::i18n::tr(lang, "English");
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(crate::i18n::tr(lang, "Document Language:")).font(FontId::proportional(10.5)).color(t.text_dim));
+                    ui.label(RichText::new(crate::i18n::tr(lang, "Document Language:")).font(FontId::proportional(11.0)).color(t.text_dim));
                     let combo_w = (ui.available_width() - 4.0).max(120.0);
                     craft_ui::ComboBox::from_id_salt("meta_doc_lang_combo")
-                        .selected_text(RichText::new(crate::i18n::tr(lang, &state.doc_language)).font(FontId::proportional(10.5)))
+                        .selected_text(RichText::new(crate::i18n::tr(lang, &state.doc_language)).font(FontId::proportional(11.0)))
                         .width(combo_w)
                         .show_ui(ui, |ui| {
                             ui.selectable_value(&mut state.doc_language, "Indonesian".into(), indonesian_label);
@@ -2055,10 +2078,10 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
 
                 // 3. Ukuran Kertas
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(crate::i18n::tr(lang, "Paper Size:")).font(FontId::proportional(10.5)).color(t.text_dim));
+                    ui.label(RichText::new(crate::i18n::tr(lang, "Paper Size:")).font(FontId::proportional(11.0)).color(t.text_dim));
                     let combo_w = (ui.available_width() - 4.0).max(120.0);
                     craft_ui::ComboBox::from_id_salt("meta_paper_size_combo")
-                        .selected_text(RichText::new(&state.paper_size).font(FontId::proportional(10.5)))
+                        .selected_text(RichText::new(&state.paper_size).font(FontId::proportional(11.0)))
                         .width(combo_w)
                         .show_ui(ui, |ui| {
                             ui.selectable_value(&mut state.paper_size, "A4 (210 x 297 mm)".into(), "A4 (210 x 297 mm)");
@@ -2069,7 +2092,7 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
 
                 // 4. Margin (mm) with +/- steppers
                 ui.add_space(2.0);
-                ui.label(RichText::new(crate::i18n::tr(lang, "Margins (mm):")).font(FontId::proportional(10.5)).color(t.text_dim));
+                ui.label(RichText::new(crate::i18n::tr(lang, "Margins (mm):")).font(FontId::proportional(11.0)).color(t.text_dim));
 
                 let col_w = (ui.available_width() / 2.0).max(85.0);
                 // Row 1: T and R
@@ -2110,27 +2133,27 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
             egui::Frame::NONE
                 .fill(t.panel_darker)
                 .stroke(Stroke::new(1.0, t.field_border))
-                .corner_radius(CornerRadius::same(4))
+                .corner_radius(CornerRadius::same(t.radius))
                 .inner_margin(Margin::same(8))
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing = vec2(3.0, 4.0);
 
-                    ui.label(RichText::new(crate::i18n::tr(lang, "Publication Title")).font(FontId::proportional(10.5)).color(t.text_dim));
+                    ui.label(RichText::new(crate::i18n::tr(lang, "Publication Title")).font(FontId::proportional(11.0)).color(t.text_dim));
                     ui.add_sized([ui.available_width(), 22.0], egui::TextEdit::singleline(&mut state.meta_title));
 
-                    ui.label(RichText::new(crate::i18n::tr(lang, "Subtitle")).font(FontId::proportional(10.5)).color(t.text_dim));
+                    ui.label(RichText::new(crate::i18n::tr(lang, "Subtitle")).font(FontId::proportional(11.0)).color(t.text_dim));
                     ui.add_sized([ui.available_width(), 22.0], egui::TextEdit::singleline(&mut state.meta_subtitle));
 
-                    ui.label(RichText::new(crate::i18n::tr(lang, "Release / Catalogue No.")).font(FontId::proportional(10.5)).color(t.text_dim));
+                    ui.label(RichText::new(crate::i18n::tr(lang, "Release / Catalogue No.")).font(FontId::proportional(11.0)).color(t.text_dim));
                     ui.add_sized([ui.available_width(), 22.0], egui::TextEdit::singleline(&mut state.meta_release_no));
 
-                    ui.label(RichText::new(crate::i18n::tr(lang, "Release Date")).font(FontId::proportional(10.5)).color(t.text_dim));
+                    ui.label(RichText::new(crate::i18n::tr(lang, "Release Date")).font(FontId::proportional(11.0)).color(t.text_dim));
                     ui.add_sized([ui.available_width(), 22.0], egui::TextEdit::singleline(&mut state.meta_release_date));
 
-                    ui.label(RichText::new(crate::i18n::tr(lang, "Release Month")).font(FontId::proportional(10.5)).color(t.text_dim));
+                    ui.label(RichText::new(crate::i18n::tr(lang, "Release Month")).font(FontId::proportional(11.0)).color(t.text_dim));
                     ui.add_sized([ui.available_width(), 22.0], egui::TextEdit::singleline(&mut state.meta_release_month));
 
-                    ui.label(RichText::new(crate::i18n::tr(lang, "Publishing Agency")).font(FontId::proportional(10.5)).color(t.text_dim));
+                    ui.label(RichText::new(crate::i18n::tr(lang, "Publishing Agency")).font(FontId::proportional(11.0)).color(t.text_dim));
                     ui.add_sized([ui.available_width(), 22.0], egui::TextEdit::singleline(&mut state.meta_agency));
                 });
         }
@@ -2178,9 +2201,9 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                     ui.indent("csv_indent", |ui| {
                         for item in csv_files {
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(format!("• {}", item.path)).font(FontId::proportional(10.5)).color(t.text));
+                                ui.label(RichText::new(format!("• {}", item.path)).font(FontId::proportional(11.0)).color(t.text));
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    ui.label(RichText::new(format!("{} B", item.size_bytes)).font(FontId::proportional(9.5)).color(t.text_dim));
+                                    ui.label(RichText::new(format!("{} B", item.size_bytes)).font(FontId::proportional(11.0)).color(t.text_dim));
                                 });
                             });
                         }
@@ -2207,9 +2230,9 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                     ui.indent("md_indent", |ui| {
                         for item in text_files {
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(format!("• {}", item.path)).font(FontId::proportional(10.5)).color(t.text));
+                                ui.label(RichText::new(format!("• {}", item.path)).font(FontId::proportional(11.0)).color(t.text));
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    ui.label(RichText::new(format!("{} B", item.size_bytes)).font(FontId::proportional(9.5)).color(t.text_dim));
+                                    ui.label(RichText::new(format!("{} B", item.size_bytes)).font(FontId::proportional(11.0)).color(t.text_dim));
                                 });
                             });
                         }
@@ -2223,12 +2246,14 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
 fn render_margin_stepper(ui: &mut Ui, label: &str, val: &mut u32, t: &Tokens, lang: &str) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = vec2(3.0, 0.0);
-        ui.label(RichText::new(format!("{label}: {val}mm")).font(FontId::proportional(10.5)).color(t.text));
+        ui.label(RichText::new(format!("{label}: {val}mm")).font(FontId::proportional(11.0)).color(t.text));
         let btn_size = vec2(17.0, 18.0);
         let btn_fill = t.accent_strong;
         let minus = ui.add_sized(
             btn_size,
-            egui::Button::new(RichText::new("-").font(semibold(11.0)).color(Color32::WHITE)).fill(btn_fill).corner_radius(CornerRadius::same(2)),
+            egui::Button::new(RichText::new("-").font(semibold(11.0)).color(Color32::WHITE))
+                .fill(btn_fill)
+                .corner_radius(CornerRadius::same(t.radius)),
         );
         minus
             .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr(lang, "Decrease {label}").replace("{label}", label)));
@@ -2237,7 +2262,9 @@ fn render_margin_stepper(ui: &mut Ui, label: &str, val: &mut u32, t: &Tokens, la
         }
         let plus = ui.add_sized(
             btn_size,
-            egui::Button::new(RichText::new("+").font(semibold(11.0)).color(Color32::WHITE)).fill(btn_fill).corner_radius(CornerRadius::same(2)),
+            egui::Button::new(RichText::new("+").font(semibold(11.0)).color(Color32::WHITE))
+                .fill(btn_fill)
+                .corner_radius(CornerRadius::same(t.radius)),
         );
         plus.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr(lang, "Increase {label}").replace("{label}", label)));
         if plus.clicked() {
@@ -2255,14 +2282,14 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
 
     // Section title & QA Preflight Row (clean, compact, no huge header/footer preview block)
     ui.horizontal(|ui| {
-        ui.label(RichText::new(crate::i18n::tr(lang, "Execution & Verification")).font(semibold(13.5)).color(t.text_strong));
+        ui.label(RichText::new(crate::i18n::tr(lang, "Execution & Verification")).font(semibold(12.0)).color(t.text_strong));
         ui.add_space(16.0);
         ui.label(RichText::new(crate::i18n::tr(lang, "QA Preflight Checklist")).font(semibold(11.0)).color(t.text_strong));
 
         if ui
             .add(
-                egui::Button::new(RichText::new(crate::i18n::tr(lang, "Run QA Audit")).font(FontId::proportional(10.5)).color(t.text))
-                    .corner_radius(CornerRadius::same(3)),
+                egui::Button::new(RichText::new(crate::i18n::tr(lang, "Run QA Audit")).font(FontId::proportional(11.0)).color(t.text))
+                    .corner_radius(CornerRadius::same(t.radius)),
             )
             .on_hover_text(crate::i18n::tr(lang, "Run QA Audit"))
             .clicked()
@@ -2276,8 +2303,8 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
         if let Some(pdf) = &state.last_output_pdf {
             if ui
                 .add(
-                    egui::Button::new(RichText::new(crate::i18n::tr(lang, "View Latest PDF")).font(FontId::proportional(10.5)).color(t.accent))
-                        .corner_radius(CornerRadius::same(3)),
+                    egui::Button::new(RichText::new(crate::i18n::tr(lang, "View Latest PDF")).font(FontId::proportional(11.0)).color(t.accent))
+                        .corner_radius(CornerRadius::same(t.radius)),
                 )
                 .on_hover_text(crate::i18n::tr(lang, "Open {path}").replace("{path}", pdf))
                 .clicked()
@@ -2290,9 +2317,9 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if state.last_qa_clean {
-                ui.label(RichText::new(format!("● {}", crate::i18n::tr(lang, "Clean (QA Fit 100%)"))).font(semibold(10.5)).color(t.success));
+                ui.label(RichText::new(format!("● {}", crate::i18n::tr(lang, "Clean (QA Fit 100%)"))).font(semibold(11.0)).color(t.success));
             } else {
-                ui.label(RichText::new(format!("● {}", crate::i18n::tr(lang, "Issues Detected"))).font(semibold(10.5)).color(t.danger));
+                ui.label(RichText::new(format!("● {}", crate::i18n::tr(lang, "Issues Detected"))).font(semibold(11.0)).color(t.danger));
             }
         });
     });
@@ -2732,7 +2759,7 @@ fn render_card_action_bar(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t
             .add(
                 egui::Button::new(RichText::new(format!("+ {}", crate::i18n::tr(lang, "Add New Page"))).font(semibold(11.0)).color(Color32::WHITE))
                     .fill(btn_fill)
-                    .corner_radius(CornerRadius::same(3)),
+                    .corner_radius(CornerRadius::same(t.radius)),
             )
             .on_hover_text(crate::i18n::tr(lang, "Add New Page"))
             .clicked()
@@ -2764,7 +2791,7 @@ fn render_card_action_bar(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t
             .add(
                 egui::Button::new(RichText::new(format!("+ {}", crate::i18n::tr(lang, "Add New Object"))).font(semibold(11.0)).color(Color32::WHITE))
                     .fill(btn_fill)
-                    .corner_radius(CornerRadius::same(3)),
+                    .corner_radius(CornerRadius::same(t.radius)),
             )
             .on_hover_text(crate::i18n::tr(lang, "Add New Object"))
             .clicked()
@@ -2795,7 +2822,7 @@ fn render_card_action_bar(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t
 }
 
 fn render_tag_pill(ui: &mut Ui, label: &str, t: &Tokens) {
-    let font = FontId::proportional(10.0);
+    let font = FontId::proportional(11.0);
     let galley = ui.painter().layout_no_wrap(label.to_string(), font, t.text);
     let size = vec2(galley.size().x + 8.0, 16.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
@@ -2819,7 +2846,7 @@ fn render_visual_live_preview(_app: &mut DesignApp, ui: &mut Ui, state: &mut Orc
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.label(
                     RichText::new(crate::i18n::tr(lang, "Total: {n} pages").replace("{n}", &state.cards.len().to_string()))
-                        .font(FontId::proportional(10.5))
+                        .font(FontId::proportional(11.0))
                         .color(t.text_dim),
                 );
             });
@@ -2851,7 +2878,7 @@ fn render_visual_live_preview(_app: &mut DesignApp, ui: &mut Ui, state: &mut Orc
             margin_rect.left_top() + vec2(2.0, 8.0),
             Align2::LEFT_CENTER,
             &state.meta_release_no,
-            FontId::proportional(9.0),
+            FontId::proportional(11.0),
             Color32::from_rgb(80, 80, 80),
         );
 
@@ -2887,7 +2914,7 @@ fn render_visual_live_preview(_app: &mut DesignApp, ui: &mut Ui, state: &mut Orc
                     chart_rect.center(),
                     Align2::CENTER_CENTER,
                     "Grafik Statistik Komparatif",
-                    FontId::proportional(10.0),
+                    FontId::proportional(11.0),
                     Color32::from_rgb(100, 100, 100),
                 );
             }
@@ -2902,7 +2929,7 @@ fn render_log_eksekusi(_app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrat
         egui::Frame::NONE
             .fill(t.panel_darker)
             .stroke(Stroke::new(1.0, t.field_border))
-            .corner_radius(CornerRadius::same(4))
+            .corner_radius(CornerRadius::same(t.radius))
             .inner_margin(Margin::same(8))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -2930,12 +2957,15 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
     ui.spacing_mut().item_spacing = vec2(6.0, 8.0);
 
     // Section title
-    ui.label(RichText::new(crate::i18n::tr(lang, "Profile & Execution")).font(semibold(13.5)).color(t.text_strong));
+    ui.label(RichText::new(crate::i18n::tr(lang, "Profile & Execution")).font(semibold(12.0)).color(t.text_strong));
 
     // 1. Profil Publikasi Box
-    egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(
-        ui,
-        |ui| {
+    egui::Frame::NONE
+        .fill(t.panel)
+        .stroke(Stroke::new(1.0, t.field_border))
+        .corner_radius(CornerRadius::same(t.radius))
+        .inner_margin(Margin::same(8))
+        .show(ui, |ui| {
             ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
 
             ui.label(RichText::new(crate::i18n::tr(lang, "Publication Profile:")).font(semibold(11.0)).color(t.text_strong));
@@ -2955,9 +2985,8 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
                     }
                 });
 
-            ui.label(RichText::new("Margins: T:20.2 B:20.0 L:19.0 R:15.0 mm | Spreads: Tidak").font(FontId::proportional(10.0)).color(t.text_dim));
-        },
-    );
+            ui.label(RichText::new("Margins: T:20.2 B:20.0 L:19.0 R:15.0 mm | Spreads: Tidak").font(FontId::proportional(11.0)).color(t.text_dim));
+        });
 
     // 2. Action Buttons: Generate & Generate and Publish
     let btn_h = 28.0f32;
@@ -2968,7 +2997,7 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
             [ui.available_width(), btn_h],
             egui::Button::new(RichText::new(crate::i18n::tr(lang, "Generate Publication")).font(semibold(12.0)).color(Color32::WHITE))
                 .fill(t.accent_strong)
-                .corner_radius(CornerRadius::same(4)),
+                .corner_radius(CornerRadius::same(t.radius)),
         )
         .on_hover_text(crate::i18n::tr(lang, "Generate Publication"))
         .clicked()
@@ -2988,7 +3017,7 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
             [ui.available_width(), btn_h],
             egui::Button::new(RichText::new(crate::i18n::tr(lang, "Generate & Publish PDF")).font(semibold(12.0)).color(Color32::WHITE))
                 .fill(t.accent_strong)
-                .corner_radius(CornerRadius::same(4)),
+                .corner_radius(CornerRadius::same(t.radius)),
         )
         .on_hover_text(crate::i18n::tr(lang, "Generate & Publish PDF"))
         .clicked()
@@ -3008,12 +3037,12 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
     egui::Frame::NONE
         .fill(t.panel_darker)
         .stroke(Stroke::new(1.0, t.field_border))
-        .corner_radius(CornerRadius::same(3))
+        .corner_radius(CornerRadius::same(t.radius))
         .inner_margin(Margin::symmetric(8, 6))
         .show(ui, |ui| {
-            ui.label(RichText::new(crate::i18n::tr(lang, "Layout Engine")).font(semibold(10.5)).color(t.text_dim));
+            ui.label(RichText::new(crate::i18n::tr(lang, "Layout Engine")).font(semibold(11.0)).color(t.text_dim));
             ui.horizontal(|ui| {
-                ui.label(RichText::new(crate::i18n::tr(lang, "● Integrated (DesignCraft Native OK)")).font(semibold(10.5)).color(t.success));
+                ui.label(RichText::new(crate::i18n::tr(lang, "● Integrated (DesignCraft Native OK)")).font(semibold(11.0)).color(t.success));
             });
         });
 
@@ -3028,7 +3057,7 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
         if state.slots.is_empty() {
             ui.label(
                 RichText::new(crate::i18n::tr(lang, "No slots detected yet. Open a .designcraft template first."))
-                    .font(FontId::proportional(10.5))
+                    .font(FontId::proportional(11.0))
                     .color(t.text_dim),
             );
         } else {
@@ -3037,30 +3066,30 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
                     egui::Frame::NONE
                         .fill(t.panel_darker)
                         .stroke(Stroke::new(1.0, t.field_border))
-                        .corner_radius(CornerRadius::same(3))
+                        .corner_radius(CornerRadius::same(t.radius))
                         .inner_margin(Margin::same(6))
                         .show(ui, |ui| {
                             let row_w = ui.available_width();
                             ui.allocate_ui_with_layout(vec2(row_w, 18.0), Layout::left_to_right(Align::Center), |ui| {
-                                ui.label(RichText::new(&slot.name).font(semibold(10.5)).color(t.text_strong));
+                                ui.label(RichText::new(&slot.name).font(semibold(11.0)).color(t.text_strong));
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     let char_count = slot.text.chars().count();
                                     if let Some(budget) = slot.budget {
                                         let is_ok = char_count <= budget;
-                                        ui.label(RichText::new(if is_ok { "● OK" } else { "● Over" }).font(semibold(10.0)).color(if is_ok {
+                                        ui.label(RichText::new(if is_ok { "● OK" } else { "● Over" }).font(semibold(11.0)).color(if is_ok {
                                             t.success
                                         } else {
                                             t.danger
                                         }));
-                                        ui.label(RichText::new(format!("{char_count}/{budget}")).font(FontId::proportional(10.0)).color(t.text_dim));
+                                        ui.label(RichText::new(format!("{char_count}/{budget}")).font(FontId::proportional(11.0)).color(t.text_dim));
                                     } else {
-                                        ui.label(RichText::new(format!("{char_count} chars")).font(FontId::proportional(10.0)).color(t.text_dim));
+                                        ui.label(RichText::new(format!("{char_count} chars")).font(FontId::proportional(11.0)).color(t.text_dim));
                                     }
                                 });
                             });
 
                             let preview: String = slot.text.chars().take(40).collect();
-                            ui.label(RichText::new(format!("{preview}…")).font(FontId::proportional(9.5)).color(t.text_dim));
+                            ui.label(RichText::new(format!("{preview}…")).font(FontId::proportional(11.0)).color(t.text_dim));
                         });
                 });
             }
@@ -3169,7 +3198,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                                     },
                                 ),
                         )
-                        .font(FontId::proportional(10.0))
+                        .font(FontId::proportional(11.0))
                         .color(t.text_dim),
                     );
                 });
@@ -3190,7 +3219,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                     ui.set_width(content_w);
                     ui.set_max_width(content_w);
                 // Section 1: Cakupan & Jenis Konten (Scope & Content Type)
-                egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(crate::i18n::tr(lang, "Scope:")).font(semibold(11.0)).color(t.text_strong));
                         let is_np = card.scope_new_page;
@@ -3231,7 +3260,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
 
                 // Section 2: Identitas & Sumber Data (Identity & Binding)
                 if card.kind != CardKind::Cover {
-                    egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                    egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
                         ui.label(RichText::new(crate::i18n::tr(lang, "Publication Title")).font(semibold(11.0)).color(t.text_strong));
                         ui.add_sized([ui.available_width(), 22.0], egui::TextEdit::singleline(&mut card.title));
 
@@ -3270,7 +3299,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                 // Section 3: Rule-Based Form Sections per CardKind
                 match card.kind {
                     CardKind::Cover => {
-                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(crate::i18n::tr(lang, "Source:")).font(semibold(11.0)).color(t.text_strong));
                                 craft_ui::ComboBox::from_id_salt("cover_source_select_box")
@@ -3386,8 +3415,8 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                                 ui.add_space(4.0);
                                 egui::ScrollArea::vertical().id_salt("cov_kv_scroll").max_height(280.0).show(ui, |ui| {
                                     egui::Grid::new("cov_kv_grid").striped(true).num_columns(2).spacing(vec2(12.0, 4.0)).show(ui, |ui| {
-                                        ui.label(RichText::new("Kunci (Key)").font(semibold(10.5)).color(t.text_dim));
-                                        ui.label(RichText::new("Nilai (Value)").font(semibold(10.5)).color(t.text_dim));
+                                        ui.label(RichText::new("Kunci (Key)").font(semibold(11.0)).color(t.text_dim));
+                                        ui.label(RichText::new("Nilai (Value)").font(semibold(11.0)).color(t.text_dim));
                                         ui.end_row();
 
                                         let mut keys_to_update: Vec<(String, String)> = Vec::new();
@@ -3408,7 +3437,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                         });
                     }
                     CardKind::Table => {
-                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
                             ui.label(RichText::new("Aturan Ingest & Format Tabel (Table Rules):").font(semibold(11.0)).color(t.text_strong));
                             ui.checkbox(&mut card.table_first_row_header, crate::i18n::tr(lang, "First row as table header"));
                             ui.checkbox(&mut card.table_col_numbers, crate::i18n::tr(lang, "Show column numbers (1)(2)..."));
@@ -3464,7 +3493,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                         });
                     }
                     CardKind::Chart => {
-                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
                             ui.label(RichText::new(crate::i18n::tr(lang, "Chart Visualisation Settings:")).font(semibold(11.0)).color(t.text_strong));
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(crate::i18n::tr(lang, "Chart Type:")).font(semibold(11.0)));
@@ -3482,7 +3511,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                         });
                     }
                     CardKind::MapChart => {
-                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
                             ui.label(RichText::new(crate::i18n::tr(lang, "Thematic Map Settings (Choropleth & Spatial Map):")).font(semibold(11.0)).color(t.text_strong));
 
                             // Pilihan GeoJSON (Stock vs Custom)
@@ -3635,7 +3664,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                         });
                     }
                     CardKind::Image => {
-                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
                             ui.label(RichText::new(crate::i18n::tr(lang, "Image & Illustration Settings:")).font(semibold(11.0)).color(t.text_strong));
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(crate::i18n::tr(lang, "Placement Area:")).font(semibold(11.0)));
@@ -3653,7 +3682,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                         });
                     }
                     CardKind::Toc => {
-                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
                             ui.label(RichText::new(crate::i18n::tr(lang, "Table of Contents (TOC) Settings:")).font(semibold(11.0)).color(t.text_strong));
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(crate::i18n::tr(lang, "TOC Style:")).font(semibold(11.0)));
@@ -3685,22 +3714,22 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                         });
                     }
                     CardKind::Narrative => {
-                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
                             ui.label(RichText::new(crate::i18n::tr(lang, "Text & Paragraph Format Settings:")).font(semibold(11.0)).color(t.text_strong));
-                            ui.label(RichText::new("Teks narasi di-parse secara otomatis dari dokumen RTF yang terhubung. Perataan paragraf, indentasi, heading, dan quote dipertahankan sesuai stylesheet BPS.").font(FontId::proportional(10.5)).color(t.text_dim));
+                            ui.label(RichText::new("Teks narasi di-parse secara otomatis dari dokumen RTF yang terhubung. Perataan paragraf, indentasi, heading, dan quote dipertahankan sesuai stylesheet BPS.").font(FontId::proportional(11.0)).color(t.text_dim));
                         });
                     }
                     CardKind::Divider => {
-                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
                             ui.label(RichText::new(crate::i18n::tr(lang, "Chapter Divider Settings:")).font(semibold(11.0)).color(t.text_strong));
-                            ui.label(RichText::new("Pembatas bab A4 full bleed dengan judul dwibahasa, ornamen grafis batik atau minimalis, dan penomoran bab otomatis.").font(FontId::proportional(10.5)).color(t.text_dim));
+                            ui.label(RichText::new("Pembatas bab A4 full bleed dengan judul dwibahasa, ornamen grafis batik atau minimalis, dan penomoran bab otomatis.").font(FontId::proportional(11.0)).color(t.text_dim));
                         });
                     }
                 }
 
                 // Section 4: Penomoran Halaman & Seksi (Halaman Baru)
                 if card.scope_new_page {
-                    egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                    egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
                         ui.label(
                             RichText::new(crate::i18n::tr(lang, "Page & Section Numbering Options:"))
                                 .font(semibold(11.0))
@@ -3720,9 +3749,9 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                                 }
                             });
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr(lang, "Section Prefix:")).font(semibold(10.5)));
+                                ui.label(RichText::new(crate::i18n::tr(lang, "Section Prefix:")).font(semibold(11.0)));
                                 ui.add(egui::TextEdit::singleline(&mut card.section_prefix).desired_width(80.0));
-                                ui.label(RichText::new(crate::i18n::tr(lang, "Numbering Style:")).font(semibold(10.5)));
+                                ui.label(RichText::new(crate::i18n::tr(lang, "Numbering Style:")).font(semibold(11.0)));
                                 craft_ui::ComboBox::from_id_salt("num_style_select")
                                     .selected_text(&card.numbering_style)
                                     .width(100.0)
@@ -3744,7 +3773,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                     egui::Frame::NONE
                         .fill(t.panel)
                         .stroke(Stroke::new(1.0, t.field_border))
-                        .corner_radius(CornerRadius::same(4))
+                        .corner_radius(CornerRadius::same(t.radius))
                         .inner_margin(Margin::same(8))
                         .show(ui, |ui| {
                             ui.label(RichText::new(crate::i18n::tr(lang, "Header & Footer Settings:")).font(semibold(11.0)).color(t.text_strong));
@@ -3753,7 +3782,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                             let ctx = ui.ctx().clone();
                             super::with_state(&ctx, |pubgen_st| {
                                 ui.horizontal(|ui| {
-                                    ui.label(RichText::new(crate::i18n::tr(lang, "Apply Option:")).font(semibold(10.5)).color(t.text_strong));
+                                    ui.label(RichText::new(crate::i18n::tr(lang, "Apply Option:")).font(semibold(11.0)).color(t.text_strong));
                                     let is_forward = card.hf_scope_forward;
                                     if ui.selectable_label(!is_forward, crate::i18n::tr(lang, "Apply for this page only")).clicked() {
                                         card.hf_scope_forward = false;
@@ -3805,7 +3834,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
             ui.horizontal(|ui| {
                 // Delete button with confirmation
                 if state.card_delete_confirm {
-                    ui.label(RichText::new(crate::i18n::tr(lang, "Confirm Delete?")).font(semibold(10.5)).color(t.danger));
+                    ui.label(RichText::new(crate::i18n::tr(lang, "Confirm Delete?")).font(semibold(11.0)).color(t.danger));
                     if ui.add(egui::Button::new(RichText::new(crate::i18n::tr(lang, "Yes, Delete")).color(t.caption_close_text)).fill(t.caption_close)).clicked() {
                         delete_card = true;
                     }
@@ -4172,7 +4201,7 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
 
             ui.label(
                 RichText::new(crate::i18n::tr(lang, "The active layout already has pages and manual edits."))
-                    .font(semibold(12.5))
+                    .font(semibold(12.0))
                     .color(t.text_strong),
             );
 
@@ -4310,6 +4339,26 @@ mod tests {
         assert_eq!(dock_width(1440.0, true, 5000.0).0, 1440.0 * RIGHT_DOCK_MAX_SHARE);
         assert_eq!(dock_width(300.0, true, 5000.0).0, RIGHT_DOCK_MIN_W);
         assert_eq!(dock_width(1440.0, false, 320.0), (RIGHT_DOCK_COLLAPSED_W, 0.0));
+    }
+
+    /// Chrome type comes from one small scale: DesignCraft's `LABEL_SIZE` (11 px), the 11.5 px section
+    /// band, the 12 px panel title, and the [`HOME_*`] start-screen sizes. Nothing in this file may dip
+    /// back to the 9–10.5 px sizes that made the Orchestrator's labels smaller than every panel in
+    /// DesignCraft (F5). The needles are assembled at run time so this test's own source cannot match.
+    #[test]
+    fn chrome_type_scale_never_dips_below_the_label_size() {
+        let src = include_str!("workspace.rs");
+        let prefixes = ["semibold(", "proportional(", ".size("];
+        let banned = ["9.", "10."];
+        for p in prefixes {
+            for b in banned {
+                let needle = format!("{p}{b}");
+                if let Some(at) = src.find(&needle) {
+                    let rest: String = src[at..].chars().take(40).collect();
+                    panic!("chrome text below 11 px: {rest}");
+                }
+            }
+        }
     }
 
     /// Card rows contain `Ui::horizontal` rows (pills, footer) that are never shorter than the

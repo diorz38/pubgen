@@ -498,8 +498,7 @@ success-colour heuristic now matches both languages (`berhasil`/`finished`/`QA a
 residuals (data, not chrome): persisted `card.tag1/tag2` values, the default seed log line, and the
 never-rendered `status_message` writes keep their original language. 1339 tests pass; clippy clean.
 
-Not done yet: F5 (type/radius scale),
-F9 (menu rows bypass `Item::Cmd`).
+Not done yet: F9 (menu rows bypass `Item::Cmd`).
 
 **2026-11-07 — F13 + F16 fixed (card footer clipping, `Source::`).** Branch `studio`.
 
@@ -603,3 +602,21 @@ which the icon font has no artwork (the same carve-out §7.1 gives the card thum
 its own artwork task). Verified: 1340 tests pass, clippy clean, `cargo build -p pubgen-studio`; captures
 `.ui-shots/home-after-f4.png` (hero block now draws white icon strokes on the accent square, measured 86
 light pixels inside its 40×40 interior) and `.ui-shots/worksheet-after-f4.png`.
+**2026-11-07 — F5 fixed (one type scale, token radii).** The Orchestrator had 19 distinct text sizes
+(`semibold` 10.0/10.5/11.0/11.5/12.0/12.5/13.0/13.5/15.0/24.0 and `proportional` 9.0/9.5/10.0/10.5/11.0/
+11.5/12.0/14.0/16.0/22.0) against a design system whose documented sizes are `widgets::LABEL_SIZE = 11.0`,
+the 11.5 px `selection_band`/`section` band, 12 px dock panel titles, and `chrome::start_screen`'s
+28/15/14/24-ish welcome scale. Eight workbench sizes below or between those steps were folded away:
+`proportional(9.0|9.5|10.0|10.5)` and `semibold(10.0|10.5)` → 11.0; `semibold(12.5|13.0|13.5)` → 12.0
+(the panel-title step). What is left is seven sizes — 11.0 (112 uses), 11.5, 12.0, 14.0, 16.0 (cover-art
+preview only) and the two Home constants — and the Home screen now reads from named constants that mirror
+`chrome::start_screen`: `HOME_TITLE 24.0`, `HOME_SECTION 15.0`, `HOME_BODY 15.0`, `HOME_BUTTON 14.0`,
+`HOME_TILE_RADIUS 10.0`, `HOME_PILL_RADIUS 16.0` (the 16 px pill radius was never drift — DesignCraft's own
+welcome buttons use `.corner_radius(16.0)` and `.min_size(vec2(0.0, 32.0))`; the 10 px hero tile matches its
+start-screen card frames). Radii: the 29 chrome sites that had `corner_radius(CornerRadius::same(2|3|4))` now
+use `CornerRadius::same(t.radius)` (the token, 1), so buttons, frames and fields share DesignCraft's square
+InDesign corners; only the content-preview artwork (`paint_card_thumbnail`, the live-preview mock, 22 sites at
+radius 0/1/2) keeps its own radii, per §7.1. A regression test,
+`chrome_type_scale_never_dips_below_the_label_size`, reads this module's own source and fails if any
+`semibold`/`proportional`/`.size` call goes back below 11 px. Verified: 1341 tests pass, clippy clean,
+`cargo build -p pubgen-studio`; captures `.ui-shots/home-after-f5.png` and `.ui-shots/worksheet-after-f5.png`.
