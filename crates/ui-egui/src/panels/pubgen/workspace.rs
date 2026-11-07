@@ -993,12 +993,29 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
                         };
                     }
                 }
+                if pc.title_en.is_empty() {
+                    if let Some(ten) = pc.settings.get("title_en").or_else(|| pc.settings.get("title2")) {
+                        pc.title_en = ten.clone();
+                    } else if !subtitle.is_empty() {
+                        pc.title_en = subtitle.to_string();
+                    }
+                }
                 // Older packages titled image/chart cards with the key that pointed at the file
                 // ("file"), which then showed up as the placed image's title.
                 if matches!(pc.kind, CardKind::Image | CardKind::Chart | CardKind::MapChart) {
                     let low = pc.title.trim().to_lowercase();
-                    if low.is_empty() || matches!(low.as_str(), "file" | "image" | "berkas" | "gambar") {
-                        pc.title = format!("Gambar / Infografis {}", pc.chapter_id);
+                    if low.is_empty() || matches!(low.as_str(), "file" | "image" | "berkas" | "gambar" | "map" | "peta" | "geojson") {
+                        if pc.kind == CardKind::MapChart {
+                            if let Some(t) = pc.settings.get("title").or_else(|| pc.settings.get("judul")) {
+                                pc.title = t.clone();
+                            } else if let Some(stk) = card.settings.get("map_stock_name").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                                pc.title = format!("Peta Tematik {stk}");
+                            } else {
+                                pc.title = format!("Peta Tematik {}", pc.chapter_id);
+                            }
+                        } else {
+                            pc.title = format!("Gambar / Infografis {}", pc.chapter_id);
+                        }
                     }
                 }
                 if pc.kind == CardKind::Chart {
@@ -3981,6 +3998,18 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         st.bilingual_output = false;
     }
 
+    if state.margin_top_mm > 0 {
+        let mut prof = st.active_profile();
+        prof.geometry.margins_mm = super::profiles::MarginsMm {
+            top: state.margin_top_mm as f64,
+            bottom: state.margin_bottom_mm as f64,
+            inside: state.margin_left_mm as f64,
+            outside: state.margin_right_mm as f64,
+        };
+        st.profile_custom = Some(prof.clone());
+        st.apply_profile(prof, false);
+    }
+
     // Stage the cached content into a temp folder so the file-based generators can read it. The
     // folder is unique per call: two generations can run at once in one process (a second tab, or
     // parallel tests), and a shared folder let one wipe the other's staged files mid-run.
@@ -4115,14 +4144,24 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
             }
             CardKind::Table => "Tabel",
             CardKind::Divider => "Divider",
-            CardKind::Chart | CardKind::MapChart => {
-                // Raster chart: place the bound image; vector spec: the data CSV.
+            CardKind::Chart => {
                 if let Some(img) = staged(&card.chart_image) {
                     file = img;
                     "Image"
                 } else {
                     "Gambar"
                 }
+            }
+            CardKind::MapChart => {
+                let staged_csv = staged(&format!("csv/{}.csv", card.chapter_id));
+                if let Some(c) = staged_csv {
+                    file = c;
+                } else if let Some(c) = staged(&card.map_data_csv) {
+                    file = c;
+                } else {
+                    file = card.chapter_id.clone();
+                }
+                "Peta"
             }
             _ => "Image",
         };
@@ -4136,6 +4175,18 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
                 .unwrap_or_else(|| "01".to_string())
         } else {
             super::excel::extract_dotted_number(&card.title)
+                .or_else(|| {
+                    let norm_title = card.title.replace(',', ".");
+                    super::excel::extract_dotted_number(&norm_title)
+                })
+                .or_else(|| {
+                    let stripped = card.chapter_id.trim_start_matches(|c: char| c.is_alphabetic() || c == '_');
+                    if !stripped.is_empty() && stripped.contains('_') {
+                        Some(stripped.replace('_', "."))
+                    } else {
+                        None
+                    }
+                })
                 .or_else(|| card.title.split_whitespace().find(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_digit())).map(str::to_string))
                 .unwrap_or_default()
         };
@@ -4783,6 +4834,12 @@ mod tests {
             assert_eq!(b01.kind, CardKind::Narrative);
             assert_eq!(b01.tag1, "Paragraf");
 
+            // Verify MapChart card (M03_02)
+            let m03 = state.cards.iter().find(|c| c.chapter_id == "M03_02").expect("M03_02 card exists");
+            assert_eq!(m03.kind, CardKind::MapChart);
+            assert!(m03.title.contains("Perbandingan Jumlah Penduduk"), "M03_02 title: {}", m03.title);
+            assert!(m03.title_en.contains("Comparison of Population Size"), "M03_02 title_en: {}", m03.title_en);
+
             // Verify Divider cards exist immediately before RXX cards
             let div_r01 = state.cards.iter().find(|c| c.chapter_id == "DIV_R01").expect("DIV_R01 card exists");
             assert_eq!(div_r01.kind, CardKind::Divider);
@@ -4817,9 +4874,21 @@ mod tests {
                 "Document must contain Indonesian narrative from R01.rtf in dual-language mode!"
             );
 
+            // Verify Map Chart titles are present in the document
+            assert!(
+                doc.stories.values().any(|s| s.text.contains("Perbandingan Jumlah Penduduk")),
+                "Map title must be present in document stories!"
+            );
+            assert!(
+                doc.stories.values().any(|s| s.text.contains("Comparison of Population Size")),
+                "Map English title must be present in document stories!"
+            );
+
             // Verify DDA subtitle has no release date or multi-line agency text
             assert!(!state.meta_subtitle.contains("Oktober"), "DDA subtitle must not contain release date: {}", state.meta_subtitle);
             assert!(!state.meta_subtitle.contains('\n'), "DDA subtitle must not contain newlines: {}", state.meta_subtitle);
+
+
 
             // Verify Bookmark debris is completely absent
             for s in doc.stories.values() {

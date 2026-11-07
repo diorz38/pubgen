@@ -492,8 +492,15 @@ fn process_map_chart_sheet(
         Some(format!("{name}.geojson"))
     };
 
-    if card_title == *name {
-        if let Some(map) = map_val {
+    if let Some(ten) = kv.get("title_en").or_else(|| kv.get("judul_en")) {
+        card_settings.insert("title_en".to_string(), serde_json::Value::String(ten.clone()));
+    }
+
+    let lower = card_title.trim().to_ascii_lowercase();
+    if card_title.trim().is_empty() || card_title == *name || ["map", "peta", "geojson", "file", "data"].contains(&lower.as_str()) {
+        if let Some(t) = kv.get("title").or_else(|| kv.get("judul")) {
+            card_title = t.clone();
+        } else if let Some(map) = map_val {
             card_title = format!("Peta Tematik {name} ({map})");
         } else {
             card_title = format!("Peta Tematik {name}");
@@ -1657,15 +1664,12 @@ mod tests {
         if path.is_file() {
             let report = ingest_workbook(path).expect("ingest BAB_01_2025_ai_translate.xlsx");
             assert_eq!(report.profile_id, "bps_dda");
-            println!("--- REPORT TEXT ENTRIES ---");
-            for (name, bytes) in &report.text {
-                println!("Text: {} ({} bytes)", name, bytes.len());
-            }
-            for card in &report.metadata.cards {
-                if card.id == "R01" || card.id == "A02" || card.id == "B01" || card.id == "G02" {
-                    println!("Card: id={} kind={:?} title={} source={:?} settings={:?}", card.id, card.kind, card.title, card.source, card.settings);
-                }
-            }
+            let m03 = report.metadata.cards.iter().find(|c| c.id == "M03_02").expect("M03_02 card");
+            assert_eq!(m03.title, "Grafik 03,01 Perbandingan Jumlah Penduduk antar Desa di Kecamatan Cilamaya Wetan");
+            assert_eq!(
+                m03.settings.get("title_en").and_then(|v| v.as_str()),
+                Some("Chart 03.01 Comparison of Population Size across Villages in Cilamaya Wetan District")
+            );
         }
     }
 

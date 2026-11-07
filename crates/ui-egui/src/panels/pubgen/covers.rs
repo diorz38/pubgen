@@ -697,7 +697,14 @@ fn ensure_back_cover_on_left(app: &mut DesignApp) -> Result<(), String> {
 fn keeps_on_back_cover(it: &designcraft_doc::Item) -> bool {
     let lbl = it.label.to_lowercase();
     let nm = it.name.to_lowercase();
-    if lbl.contains("logo") || nm.contains("logo") {
+    if lbl.contains("logo")
+        || nm.contains("logo")
+        || lbl.contains("map")
+        || nm.contains("map")
+        || lbl.contains("peta")
+        || nm.contains("peta")
+        || lbl.contains("#slot:cover:map")
+    {
         return false;
     }
     match &it.content {
@@ -943,6 +950,15 @@ pub fn execute_generate_back_cover(app: &mut DesignApp, st: &PubgenState) -> Res
     ) -> bool {
         let lbl = it.label.to_lowercase();
         let nm = it.name.to_lowercase();
+
+        if lbl.contains("map")
+            || nm.contains("map")
+            || lbl.contains("peta")
+            || nm.contains("peta")
+            || lbl.contains("#slot:cover:map")
+        {
+            return false;
+        }
 
         if dx.abs() > 0.001 {
             it.xf = designcraft_geom::Affine::translate((dx, 0.0)) * it.xf;
@@ -2149,8 +2165,9 @@ pub fn apply_cover_map_overlay(app: &mut DesignApp, st: &PubgenState) -> Result<
             let mut non_map_items = Vec::new();
             let mut map_items = Vec::new();
 
-            for it in sp.items.drain(..) {
+            for mut it in sp.items.drain(..) {
                 if map_item_ids.contains(&it.id.0) {
+                    std::sync::Arc::make_mut(&mut it).label = "cover:map".to_string();
                     map_items.push(it);
                 } else {
                     non_map_items.push(it);
@@ -3552,6 +3569,38 @@ pub(crate) mod tests {
         let sp0 = &active.doc.spreads[0];
         // Must emit polygon items on spread 0
         assert!(!sp0.items.is_empty(), "Expected map item/group to be emitted on cover spread");
+    }
+
+    #[test]
+    fn test_back_cover_excludes_map_object_from_main_cover() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+
+        let st = PubgenState {
+            cover_add_map: true,
+            cover_map_stock_idx: 0,
+            cover_map_style: 1,
+            cover_color_primary: "#0072BC".into(),
+            cover_color_accent: "#F5871F".into(),
+            cover_include_inside_back: true,
+            ..Default::default()
+        };
+
+        let res_map = apply_cover_map_overlay(&mut app, &st);
+        assert!(res_map.is_ok());
+
+        let res_back = execute_generate_back_cover(&mut app, &st);
+        assert!(res_back.is_ok(), "execute_generate_back_cover must succeed: {res_back:?}");
+
+        let active = app.session.active().unwrap();
+        let last_sp = active.doc.spreads.last().unwrap();
+
+        let has_map = last_sp.items.iter().any(|it| {
+            let lbl = it.label.to_lowercase();
+            let nm = it.name.to_lowercase();
+            lbl.contains("map") || nm.contains("map") || lbl.contains("peta") || nm.contains("peta")
+        });
+        assert!(!has_map, "Back cover must exclude map objects from front cover");
     }
 
     #[test]

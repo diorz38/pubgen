@@ -740,7 +740,29 @@ pub fn is_table_note_or_source_row(row: &[impl AsRef<str>]) -> bool {
 
 pub fn parse_table_note_row(row: &[impl AsRef<str>]) -> Option<TableNoteItem> {
     let col1 = row.first()?.as_ref().trim();
-    if col1.is_empty() || !matches_table_note_keyword(col1) {
+    if col1.is_empty() {
+        return None;
+    }
+
+    if let Some((lbl_part, after_colon)) = col1.split_once(':') {
+        let label = lbl_part.trim().to_string();
+        if !matches_table_note_keyword(&label) {
+            return None;
+        }
+        let mut parts = Vec::new();
+        if !after_colon.trim().is_empty() {
+            parts.push(after_colon.trim());
+        }
+        parts.extend(row.iter().skip(1).map(|s| s.as_ref().trim()).filter(|s| !s.is_empty()));
+        let content = parts.join(" ");
+        let is_italic = {
+            let l = label.to_lowercase();
+            l.starts_with("note") || l.starts_with("source")
+        };
+        return Some(TableNoteItem { label, colon: ":".to_string(), content, is_italic });
+    }
+
+    if !matches_table_note_keyword(col1) {
         return None;
     }
 
@@ -762,6 +784,21 @@ pub fn parse_table_note_row(row: &[impl AsRef<str>]) -> Option<TableNoteItem> {
     }
 
     None
+}
+
+/// Checks whether a row is a continuation of a preceding table note/source (e.g. "2. Kementerian Agama...").
+pub fn is_table_note_continuation_row(row: &[impl AsRef<str>]) -> bool {
+    let non_empty: Vec<&str> = row.iter().map(|s| s.as_ref().trim()).filter(|s| !s.is_empty()).collect();
+    if non_empty.is_empty() {
+        return false;
+    }
+    let first = non_empty[0];
+    let starts_with_marker = (first.len() >= 2 && first.chars().next().is_some_and(|c| c.is_ascii_digit()) && first.chars().nth(1).is_some_and(|c| c == '.' || c == ')'))
+        || (first.starts_with('(') && first.len() >= 3 && first.chars().nth(1).is_some_and(|c| c.is_ascii_digit()))
+        || first.starts_with('-')
+        || first.starts_with('*');
+    let rest_empty = row.len() > 1 && row.iter().skip(1).all(|s| s.as_ref().trim().is_empty());
+    starts_with_marker || rest_empty
 }
 
 /// Lenient field extraction for title/file rows with fallback.
@@ -3703,10 +3740,14 @@ pub fn generate_publication_pages(app: &mut DesignApp, st: &mut PubgenState) -> 
     // Letter default would leave `settings` (and every spread created with it) on Letter while the
     // template pages are A4, which puts the header/footer parent tens of points off.
     const BPS_PAGE: (f64, f64) = (595.2755905511812, 841.8897637795277);
+    let m = &st.active_profile().geometry.margins_mm;
+    let top_pt = m.top * 72.0 / 25.4;
+    let bottom_pt = m.bottom * 72.0 / 25.4;
+    let inside_pt = m.inside * 72.0 / 25.4;
+    let outside_pt = m.outside * 72.0 / 25.4;
+
     if app.session.active().is_none() {
-        if is_brs {
-            let _ = app.run("file.new", json!({"width": BPS_PAGE.0, "height": BPS_PAGE.1, "facingPages": true}));
-        } else if is_dda {
+        if is_brs || is_dda {
             let _ = app.run(
                 "file.new",
                 json!({
@@ -3714,17 +3755,17 @@ pub fn generate_publication_pages(app: &mut DesignApp, st: &mut PubgenState) -> 
                     "height": BPS_PAGE.1,
                     "facingPages": true,
                     "margins": {
-                        "top": 20.2 * 72.0 / 25.4,
-                        "bottom": 20.0 * 72.0 / 25.4,
-                        "inside": 19.0 * 72.0 / 25.4,
-                        "outside": 15.0 * 72.0 / 25.4
+                        "top": top_pt,
+                        "bottom": bottom_pt,
+                        "inside": inside_pt,
+                        "outside": outside_pt
                     }
                 }),
             );
         } else {
             let _ = app.run("file.new", json!({}));
         }
-    } else if is_dda {
+    } else if is_dda || is_brs {
         let _ = app.run(
             "layout.documentSetup",
             json!({
@@ -3732,10 +3773,10 @@ pub fn generate_publication_pages(app: &mut DesignApp, st: &mut PubgenState) -> 
                 "height": BPS_PAGE.1,
                 "facingPages": true,
                 "margins": {
-                    "top": 20.2 * 72.0 / 25.4,
-                    "bottom": 20.0 * 72.0 / 25.4,
-                    "inside": 19.0 * 72.0 / 25.4,
-                    "outside": 15.0 * 72.0 / 25.4
+                    "top": top_pt,
+                    "bottom": bottom_pt,
+                    "inside": inside_pt,
+                    "outside": outside_pt
                 }
             }),
         );

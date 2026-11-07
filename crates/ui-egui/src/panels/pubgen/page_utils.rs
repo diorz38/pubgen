@@ -24,7 +24,7 @@ pub fn detect_document_margins(doc: &designcraft_doc::Document) -> designcraft_d
         return m;
     }
 
-    // 2. Look for parents with non-default margins
+    // 2. Look for parents with non-zero margins
     if let Some(m) = doc
         .parents
         .iter()
@@ -35,7 +35,18 @@ pub fn detect_document_margins(doc: &designcraft_doc::Document) -> designcraft_d
         return m;
     }
 
-    // 3. Fallback: Standard BPS custom margins (Top 20.20 mm, Bottom 20 mm, Inside 19 mm, Outside 15 mm)
+    // 3. Look for any parent page with valid margins
+    if let Some(m) = doc
+        .parents
+        .iter()
+        .flat_map(|sp| &sp.pages)
+        .find(|pg| pg.margins.top > 0.0 && pg.margins.bottom > 0.0)
+        .map(|pg| pg.margins)
+    {
+        return m;
+    }
+
+    // 4. Fallback: Standard BPS custom margins (Top 20.20 mm, Bottom 20 mm, Inside 19 mm, Outside 15 mm)
     bps_margins
 }
 

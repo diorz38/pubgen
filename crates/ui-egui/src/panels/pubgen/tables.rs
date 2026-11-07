@@ -94,6 +94,15 @@ pub(crate) fn execute_insert_table_matrix_info(
         if let Some(item) = excel::parse_table_note_row(row) {
             table_notes.push(item);
             false
+        } else if !table_notes.is_empty() && excel::is_table_note_continuation_row(row) {
+            if let Some(last_note) = table_notes.last_mut() {
+                let non_empty: Vec<&str> = row.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+                if !non_empty.is_empty() {
+                    last_note.content.push('\n');
+                    last_note.content.push_str(&non_empty.join(" "));
+                }
+            }
+            false
         } else {
             true
         }
@@ -907,19 +916,34 @@ pub(crate) fn execute_insert_table_matrix_info(
 
         let mut note_lines: Vec<(String, bool)> = Vec::new();
         for item in &table_notes {
-            let id_text = if item.content.is_empty() {
-                format!("{}\t{}", item.label, item.colon)
+            let sub_lines: Vec<&str> = item.content.lines().map(str::trim).filter(|s| !s.is_empty()).collect();
+            if sub_lines.is_empty() {
+                note_lines.push((format!("{}\t{}", item.label, item.colon), item.is_italic));
             } else {
-                format!("{}\t{}\t{}", item.label, item.colon, item.content)
-            };
-            note_lines.push((id_text, item.is_italic));
+                for (li, sl) in sub_lines.iter().enumerate() {
+                    if li == 0 {
+                        note_lines.push((format!("{}\t{}\t{}", item.label, item.colon, sl), item.is_italic));
+                    } else {
+                        note_lines.push((format!("\t\t{}", sl), item.is_italic));
+                    }
+                }
+            }
 
             if st.bilingual_output {
                 let (label_en, colon_en, content_en) =
                     ai::translate_note_item(&item.label, &item.colon, &item.content, &st.translations, &st.glossary);
-                let en_text =
-                    if content_en.is_empty() { format!("{}\t{}", label_en, colon_en) } else { format!("{}\t{}\t{}", label_en, colon_en, content_en) };
-                note_lines.push((en_text, true));
+                let en_sub_lines: Vec<&str> = content_en.lines().map(str::trim).filter(|s| !s.is_empty()).collect();
+                if en_sub_lines.is_empty() {
+                    note_lines.push((format!("{}\t{}", label_en, colon_en), true));
+                } else {
+                    for (li, sl) in en_sub_lines.iter().enumerate() {
+                        if li == 0 {
+                            note_lines.push((format!("{}\t{}\t{}", label_en, colon_en, sl), true));
+                        } else {
+                            note_lines.push((format!("\t\t{}", sl), true));
+                        }
+                    }
+                }
             }
         }
 
@@ -960,13 +984,17 @@ pub(crate) fn execute_insert_table_matrix_info(
                             p.para.tabs = Some(vec![tab_stop_colon.clone(), tab_stop_text.clone()]);
                             p.para.space_after = Some(2.0);
                         }
+                        // Enforce consistent font size 8 across all note paragraphs
+                        story.format_chars(0..story.text.len(), |f| {
+                            f.over.size = Some(8.0);
+                        });
                         let ranges = story.para_ranges();
                         for (idx, (_, is_italic)) in note_lines.iter().enumerate() {
                             if let Some(r) = ranges.get(idx) {
                                 let end = if idx + 1 < ranges.len() { ranges[idx + 1].start } else { r.end };
                                 if r.start < end {
                                     story.format_chars(r.start..end, |f| {
-                                        f.over.size = Some(8.5);
+                                        f.over.size = Some(8.0);
                                         f.over.font_style = Some(if *is_italic { "Italic".to_string() } else { "Regular".to_string() });
                                     });
                                 }
@@ -1004,7 +1032,7 @@ pub(crate) fn execute_insert_table_matrix_info(
             }
         }
     } else if let (Some(fn_str), Some((target_spread, fn_rect))) = (footnote_text.as_ref(), actual_fn_target) {
-        let _ = app.run(
+        if let Ok(res) = app.run(
             "frame.create",
             json!({
                 "spread": target_spread,
@@ -1013,7 +1041,19 @@ pub(crate) fn execute_insert_table_matrix_info(
                 "text": fn_str,
                 "caret": false
             }),
-        );
+        ) {
+            if let Some(fn_sid) = res.get("story").and_then(Value::as_u64) {
+                let _ = app.session.edit(|doc, _| {
+                    if let Some(story) = doc.story_mut(designcraft_doc::StoryId(fn_sid)) {
+                        story.format_chars(0..story.text.len(), |f| {
+                            f.over.size = Some(8.0);
+                        });
+                        story.rev += 1;
+                    }
+                    Ok(serde_json::Value::Null)
+                });
+            }
+        }
         below_table_y = Some(fn_rect[3] + 6.0);
     }
 
