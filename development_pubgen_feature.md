@@ -167,6 +167,16 @@ This workflow packages a self-contained, portable Windows x64 demonstration buil
 - **Pure GUI Subsystem**: `designcraft.exe` is linked with PE subsystem 2 (Windows GUI), so no console window flashes or stays open when launched.
 - **Embedded Icon & Version Metadata**: Icons and version information are compiled directly into the binary.
 
+### Packaging Rules (Permanent)
+
+> [!IMPORTANT]
+> These rules apply to **all** portable distributions going forward:
+
+1. **No loose GeoJSON map files**: Stock administrative maps (`assets/pubgen/maps/`) are compile-time embedded in the binary via `crates/ui-egui/build.rs` → `generate_embedded_maps()`. They must **never** be distributed as loose asset files in the portable zip.
+2. **Exclude `book_cover/` samples**: The `plan/pubgen/samples/book_cover/` folder is excluded from all portable distributions.
+3. **Executables**: Include all 5 binaries: `pubgen-studio.exe`, `designcraft.exe`, `designcraft-cli.exe`, `pubgen-cli.exe`, `pubgen-export.exe`.
+4. **Samples**: Copy from `plan/pubgen/samples/*` excluding `book_cover/`.
+
 ---
 
 ### Step-by-Step Packaging Procedure
