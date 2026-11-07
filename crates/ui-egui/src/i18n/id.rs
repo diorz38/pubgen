@@ -98,6 +98,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Float panel", "Apungkan panel"),
     ("General", "Umum"),
     ("General Settings (BRS BPS Profile)", "Pengaturan Umum (Profil BRS BPS)"),
+    ("General Settings (DDA BPS Profile)", "Pengaturan Umum (Profil DDA BPS)"),
     ("Generate & Publish PDF", "Generate & Rilis PDF"),
     ("Generate All Tables", "Buat Semua Tabel"),
     ("Generate Cover", "Buat Sampul"),

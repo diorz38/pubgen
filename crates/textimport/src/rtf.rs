@@ -724,6 +724,17 @@ Caf\'e9 \u8364? price\tab tab\line next\par
         assert_eq!(i.story.text, "\u{201C}Hi");
     }
 
+    #[test]
+    fn bookmark_destination_is_skipped() {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let sample = manifest.parent().unwrap().parent().unwrap().join("plan/pubgen/samples/SINGLE_LANG/G02.rtf");
+        assert!(sample.is_file());
+        let bytes = std::fs::read(sample).unwrap();
+        let imp = crate::import("G02.rtf", &bytes).unwrap();
+        eprintln!("SINGLE_LANG G02 imported text starts with: {:?}", &imp.story.text.chars().take(200).collect::<String>());
+        assert!(!imp.story.text.contains("Toc234493584"), "G02 should not contain Toc234493584 bookmark debris!");
+    }
+
     /// Characters past U+FFFF are written as two `\uN` words, a UTF-16 surrogate pair (the form
     /// our own exporter and Word write). Each half was converted alone and dropped.
     #[test]

@@ -30,7 +30,7 @@ pub struct PubgenManifest {
 }
 
 fn default_profile() -> String {
-    "bps_brs".to_string()
+    "bps_dda".to_string()
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

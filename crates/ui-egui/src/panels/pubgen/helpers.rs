@@ -555,9 +555,19 @@ pub(crate) fn frame_with_centered_arial(app: &mut DesignApp, spread_idx: usize, 
 /// (so paths copied from another machine still resolve).
 pub(crate) fn resolve_catalog_related_file(catalog_path: &str, file_str: &str, extension: &str) -> Option<std::path::PathBuf> {
     let dir = std::path::Path::new(catalog_path).parent().unwrap_or_else(|| std::path::Path::new("."));
-    let mut candidates = vec![dir.join(file_str), std::path::PathBuf::from(file_str), dir.join(format!("{file_str}.{extension}"))];
+    let mut candidates = vec![
+        dir.join(file_str),
+        std::path::PathBuf::from(file_str),
+        dir.join(format!("{file_str}.{extension}")),
+        dir.join("rtf").join(file_str),
+        dir.join("rtf").join(format!("{file_str}.{extension}")),
+        dir.join("images").join(file_str),
+        dir.join("images").join(format!("{file_str}.{extension}")),
+    ];
     if let Some(name) = std::path::Path::new(file_str).file_name() {
         candidates.push(dir.join(name));
+        candidates.push(dir.join("rtf").join(name));
+        candidates.push(dir.join("images").join(name));
     }
     candidates.into_iter().find(|p| p.is_file())
 }

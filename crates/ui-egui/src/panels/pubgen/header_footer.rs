@@ -73,15 +73,23 @@ pub fn resolve_dda_footer_lines(st: &PubgenState) -> (String, String) {
         (st.cover_title.as_str(), st.cover_title2.as_str(), st.cover_title_en.as_str(), st.cover_year.as_str(), "", "")
     };
 
-    let title1 = raw_title.trim();
-    let title2 = raw_title2.trim();
-    let title_en = raw_title_en.trim();
+    let clean_single_line = |s: &str| -> String {
+        s.lines().next().unwrap_or("").trim().to_string()
+    };
+
+    let title1 = clean_single_line(raw_title);
+    let title2 = if raw_title2.contains('\n') || raw_title2.to_lowercase().contains("statistik") {
+        String::new()
+    } else {
+        clean_single_line(raw_title2)
+    };
+    let title_en = clean_single_line(raw_title_en);
 
     // Line 1: Indonesian Title
     let line1 = if !title1.is_empty() {
-        if !title2.is_empty() && title2 != title_en && title_en.is_empty() { format!("{title1} {title2}") } else { title1.to_string() }
+        if !title2.is_empty() && title2 != title_en && title_en.is_empty() { format!("{title1} {title2}") } else { title1 }
     } else if !title2.is_empty() && title2 != title_en {
-        title2.to_string()
+        title2.clone()
     } else {
         "Kabupaten Dalam Angka".to_string()
     };
@@ -89,10 +97,10 @@ pub fn resolve_dda_footer_lines(st: &PubgenState) -> (String, String) {
     // Line 2: English Title and Year
     let en = if !title_en.is_empty() {
         title_en
-    } else if !title2.is_empty() && title2 != title1 {
+    } else if !title2.is_empty() && title2 != line1 {
         title2
     } else {
-        ""
+        String::new()
     };
 
     let mut year = raw_year.trim().to_string();
@@ -108,7 +116,7 @@ pub fn resolve_dda_footer_lines(st: &PubgenState) -> (String, String) {
     let line2 = if !en.is_empty() && !year.is_empty() {
         format!("{en}\u{e006}{year}")
     } else if !en.is_empty() {
-        en.to_string()
+        en
     } else if !year.is_empty() {
         format!("\u{e006}{year}")
     } else {

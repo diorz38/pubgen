@@ -38,7 +38,9 @@ impl OrchestratorProject {
     }
     pub fn save(&mut self, path: &Path) -> Result<(), String> {
         let draft = self.draft.as_ref().ok_or_else(|| "No workspace loaded".to_string())?;
-        let content = ProjectContent { csv: draft.csv.clone(), text: self.text.clone(), assets: self.assets.clone(), ..ProjectContent::default() };
+        let text = if !draft.text.is_empty() { draft.text.clone() } else { self.text.clone() };
+        let assets = if !draft.assets.is_empty() { draft.assets.clone() } else { self.assets.clone() };
+        let content = ProjectContent { csv: draft.csv.clone(), text, assets, ..ProjectContent::default() };
         save_pubgen(path, &draft.manifest, &draft.metadata, &draft.glossary, &content).map_err(|error| error.to_string())?;
         self.path = Some(path.to_path_buf());
         self.dirty = false;
@@ -53,13 +55,15 @@ impl OrchestratorProject {
     }
     pub fn sync_ui(&mut self, ctx: &egui::Context) {
         if let Some(draft) = &self.draft {
+            let text = if !draft.text.is_empty() { &draft.text } else { &self.text };
+            let assets = if !draft.assets.is_empty() { &draft.assets } else { &self.assets };
             workspace::sync_external_workspace(
                 ctx,
                 self.path.as_ref().and_then(|path| path.to_str()).unwrap_or("Workbook"),
                 &draft.metadata,
                 &draft.csv,
-                &self.text,
-                &self.assets,
+                text,
+                assets,
             );
             self.ui_synced = true;
         }
@@ -135,11 +139,15 @@ impl OrchestratorTabs {
         let name = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("publication").to_owned();
         let draft = WorkspaceDraft::from_ingest(name, report);
         self.snapshot_active(ctx);
+        let text = draft.text.clone();
+        let assets = draft.assets.clone();
         let project = OrchestratorProject {
             draft: Some(draft),
             path: Some(path.to_path_buf()),
             status: "Workbook imported".into(),
             dirty: true,
+            text,
+            assets,
             ..OrchestratorProject::default()
         };
         self.tabs.push(WorkspaceTab { project, ui_state: None, dirty: true });
@@ -221,6 +229,9 @@ impl OrchestratorTabs {
             if let Some(tab) = self.tabs.get_mut(self.active) {
                 tab.project.path = Some(PathBuf::from(path));
             }
+            return;
+        }
+        if !self.tabs.is_empty() {
             return;
         }
         let mut project = OrchestratorProject::default();

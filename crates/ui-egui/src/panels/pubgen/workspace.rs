@@ -523,14 +523,14 @@ impl Default for OrchestratorWorkspaceState {
         Self {
             view: OrchestratorView::Home,
             is_dirty: false,
-            recent_documents: vec!["pubgen/samples/brs/BRS_NTO_202610.pubgen".into(), "pubgen/samples/brs/ntp202610.xlsx".into()],
+            recent_documents: Vec::new(),
             center_tab: OrchestratorTab::StrukturHalaman,
-            selected_profile: "bps_brs".into(),
+            selected_profile: "bps_dda".into(),
             right_dock_tab: OrchestratorRightTab::SumberKonten,
             right_dock_expanded: true,
             right_dock_w: default_right_dock_w(),
             page_layout_facing: true,
-            doc_language: "Indonesian".into(),
+            doc_language: "Indonesian-English".into(),
             paper_size: "A4 (210 x 297 mm)".into(),
             margin_top_mm: 18,
             margin_bottom_mm: 18,
@@ -761,26 +761,38 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
     }
     .into();
 
-    if state.selected_profile == "bps_brs" {
-        if let Some(no) = report.metadata.extra.get("release_no").or_else(|| report.metadata.extra.get("no")) {
-            state.meta_release_no = no.clone();
-        }
-    } else {
+    if state.selected_profile == "bps_dda" {
         state.meta_release_no.clear();
-    }
-    if let Some(date) = report.metadata.extra.get("release_date").or_else(|| report.metadata.extra.get("date")) {
-        state.meta_release_date = date.clone();
-    }
-    if let Some(month) = report.metadata.extra.get("release_month").or_else(|| report.metadata.extra.get("month")) {
-        state.meta_release_month = month.clone();
-    }
-    if let Some(agency) =
-        report.metadata.extra.get("agency").or_else(|| report.metadata.extra.get("pub_office")).or_else(|| report.metadata.extra.get("officename"))
-    {
-        state.meta_agency = agency.clone();
-    }
-    if state.meta_subtitle.is_empty() && (!state.meta_release_date.is_empty() || !state.meta_agency.is_empty()) {
-        state.meta_subtitle = format!("{} · {}", state.meta_release_date, state.meta_agency);
+        state.meta_release_date.clear();
+        state.meta_release_month.clear();
+        if let Some(agency) =
+            report.metadata.extra.get("agency").or_else(|| report.metadata.extra.get("pub_office")).or_else(|| report.metadata.extra.get("officename"))
+        {
+            state.meta_agency = agency.clone();
+        }
+        state.meta_subtitle = report.metadata.title_en.clone().unwrap_or_default();
+    } else {
+        if state.selected_profile == "bps_brs" {
+            if let Some(no) = report.metadata.extra.get("release_no").or_else(|| report.metadata.extra.get("no")) {
+                state.meta_release_no = no.clone();
+            }
+        } else {
+            state.meta_release_no.clear();
+        }
+        if let Some(date) = report.metadata.extra.get("release_date").or_else(|| report.metadata.extra.get("date")) {
+            state.meta_release_date = date.clone();
+        }
+        if let Some(month) = report.metadata.extra.get("release_month").or_else(|| report.metadata.extra.get("month")) {
+            state.meta_release_month = month.clone();
+        }
+        if let Some(agency) =
+            report.metadata.extra.get("agency").or_else(|| report.metadata.extra.get("pub_office")).or_else(|| report.metadata.extra.get("officename"))
+        {
+            state.meta_agency = agency.clone();
+        }
+        if state.meta_subtitle.is_empty() && (!state.meta_release_date.is_empty() || !state.meta_agency.is_empty()) {
+            state.meta_subtitle = format!("{} · {}", state.meta_release_date, state.meta_agency);
+        }
     }
 
     // A name that already carries a folder is ready to use; a bare one gets its bucket prefix so it
@@ -788,7 +800,8 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
     // the historical `md/` bucket name: older packages store them under it and point their card
     // sources at it, so a new prefix would orphan those sources.
     let norm = |prefix: &str, name: &str| {
-        if name.starts_with(prefix) || name.contains('/') { name.to_owned() } else { format!("{prefix}/{name}") }
+        let n = name.replace('\\', "/");
+        if n.starts_with(prefix) || n.contains('/') { n } else { format!("{prefix}/{n}") }
     };
 
     // Narratives are RTF; a package written before that change still carries Markdown, whose
@@ -806,11 +819,22 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
         })
         .collect();
 
+    let norm_text = |name: &str| {
+        let n = name.replace('\\', "/");
+        if n.starts_with("rtf/") || n.starts_with("md/") || n.contains('/') {
+            n
+        } else if n.ends_with(".rtf") {
+            format!("rtf/{n}")
+        } else {
+            format!("md/{n}")
+        }
+    };
+
     state.content_files = report
         .csv
         .iter()
         .map(|(name, bytes)| ContentItem { path: norm("csv", name), size_bytes: bytes.len() })
-        .chain(text_entries.iter().map(|(name, bytes)| ContentItem { path: norm("md", name), size_bytes: bytes.len() }))
+        .chain(text_entries.iter().map(|(name, bytes)| ContentItem { path: norm_text(name), size_bytes: bytes.len() }))
         .chain(report.assets.iter().map(|(name, bytes)| ContentItem { path: norm("assets", name), size_bytes: bytes.len() }))
         .collect();
 
@@ -819,10 +843,20 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
         state.cached_content.insert(norm("csv", name), bytes.clone());
     }
     for (name, bytes) in &text_entries {
-        state.cached_content.insert(norm("md", name), bytes.clone());
+        let key = norm_text(name);
+        state.cached_content.insert(key.clone(), bytes.clone());
+        let bare = name.replace('\\', "/");
+        if bare != key {
+            state.cached_content.insert(bare, bytes.clone());
+        }
     }
     for (name, bytes) in &report.assets {
-        state.cached_content.insert(norm("assets", name), bytes.clone());
+        let key = norm("assets", name);
+        state.cached_content.insert(key.clone(), bytes.clone());
+        let bare = name.replace('\\', "/");
+        if bare != key {
+            state.cached_content.insert(bare, bytes.clone());
+        }
     }
 
     if !report.metadata.cards.is_empty() {
@@ -833,6 +867,8 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
             .enumerate()
             .map(|(index, card)| {
                 let subtitle = card.settings.get("title_en").and_then(|v| v.as_str()).unwrap_or("");
+                let clean_title = pubgen_core::excel::strip_toc_bookmarks(&card.title);
+                let clean_subtitle = pubgen_core::excel::strip_toc_bookmarks(subtitle);
                 let mut pc = PublicationCard::new_with(
                     match card.kind {
                         pubgen_core::CardKind::Cover => CardKind::Cover,
@@ -844,8 +880,8 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
                         pubgen_core::CardKind::Image => CardKind::Image,
                         pubgen_core::CardKind::Divider => CardKind::Divider,
                     },
-                    &card.title,
-                    subtitle,
+                    &clean_title,
+                    &clean_subtitle,
                     card.source.as_deref().unwrap_or("Tanpa sumber"),
                     index + 1,
                     matches!(card.scope, pubgen_core::CardScope::NewPage),
@@ -2032,8 +2068,13 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
     ScrollArea::vertical().id_salt("pubgen_sumber_konten_scroll").auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(4.0, 6.0);
 
-        // Section 1: Pengaturan Umum Publikasi (Profil BRS BPS - Image 3)
-        ui.label(RichText::new(crate::i18n::tr(lang, "General Settings (BRS BPS Profile)")).font(semibold(12.0)).color(t.text_strong));
+        // Section 1: Pengaturan Umum Publikasi
+        let profile_label = if state.selected_profile == "bps_dda" {
+            crate::i18n::tr(lang, "General Settings (DDA BPS Profile)")
+        } else {
+            crate::i18n::tr(lang, "General Settings (BRS BPS Profile)")
+        };
+        ui.label(RichText::new(profile_label).font(semibold(12.0)).color(t.text_strong));
 
         egui::Frame::NONE
             .fill(t.panel_darker)
@@ -3109,7 +3150,11 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
         return;
     }
 
-    let is_bilingual = state.doc_language.to_lowercase().contains("bilingual") || state.doc_language.to_lowercase().contains("dwibahasa");
+    let is_bilingual = state.doc_language.to_lowercase().contains("bilingual")
+        || state.doc_language.to_lowercase().contains("dwibahasa")
+        || state.doc_language.eq_ignore_ascii_case("indonesian-english")
+        || state.doc_language.eq_ignore_ascii_case("indo-english")
+        || (state.doc_language.to_lowercase().contains("indonesia") && state.doc_language.to_lowercase().contains("english"));
     let is_english = state.doc_language.to_lowercase().contains("english") || state.doc_language.to_lowercase().contains("inggris");
     let show_title_en = is_bilingual || is_english;
 
@@ -3925,7 +3970,12 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
     // (`excel::execute_excel_to_csvs`), otherwise BRS loses its table style,
     // theme and header/footer preset (`state::apply_profile`, `state.rs:787`).
     st.apply_profile(super::profiles::ProfileManager::get_profile(&state.selected_profile), false);
-    if state.selected_profile == "bps_dda" || state.doc_language == "Indonesian-English" {
+    let is_bilingual = state.doc_language.to_lowercase().contains("bilingual")
+        || state.doc_language.to_lowercase().contains("dwibahasa")
+        || state.doc_language.eq_ignore_ascii_case("indonesian-english")
+        || state.doc_language.eq_ignore_ascii_case("indo-english")
+        || (state.doc_language.to_lowercase().contains("indonesia") && state.doc_language.to_lowercase().contains("english"));
+    if is_bilingual || state.selected_profile == "bps_dda" {
         st.bilingual_output = true;
     } else if state.selected_profile == "bps_brs" {
         st.bilingual_output = false;
@@ -4051,10 +4101,16 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         let mut file = staged(&card.source).unwrap_or_default();
         let typ = match card.kind {
             CardKind::Narrative => {
-                if file.is_empty() {
-                    "Note"
+                let id_upper = card.chapter_id.to_ascii_uppercase();
+                let is_rxx = id_upper.starts_with('R')
+                    && id_upper.len() > 1
+                    && id_upper[1..].chars().all(|c| c.is_ascii_digit() || c == '_');
+                let title_upper = card.title.trim().to_ascii_uppercase();
+                let title_starts_bab = title_upper.starts_with("BAB ") || title_upper.starts_with("CHAPTER ");
+                if is_rxx || title_starts_bab {
+                    if file.is_empty() { "Note" } else { "Ulasan" }
                 } else {
-                    "Ulasan"
+                    "Note"
                 }
             }
             CardKind::Table => "Tabel",
@@ -4706,6 +4762,82 @@ mod tests {
             let doc = &app.session.active().unwrap().doc;
             assert!(doc.settings.facing_pages, "DDA document must use facing pages");
             assert!(doc.page_count() >= 6, "DDA sample should produce several pages, got {}", doc.page_count());
+        }
+    }
+
+    #[test]
+    fn test_dda_bab01_dual_lang_full_generation() {
+        let mut state = OrchestratorWorkspaceState::default();
+        let sample = std::path::Path::new("../../plan/pubgen/samples/DUAL_LANG/BAB_01_2025_ai_translate.xlsx");
+        if sample.is_file() {
+            let report = pubgen_core::excel::ingest_workbook(sample).expect("ingest DDA BAB_01 sample");
+            apply_ingest_report_to_state(&mut state, "BAB_01_2025_ai_translate.xlsx", &report);
+            assert_eq!(state.selected_profile, "bps_dda");
+
+            // Verify Paragraph cards (A02, G00, B01, G01, G02)
+            let a02 = state.cards.iter().find(|c| c.chapter_id == "A02").expect("A02 card exists");
+            assert_eq!(a02.kind, CardKind::Narrative);
+            assert_eq!(a02.tag1, "Paragraf");
+
+            let b01 = state.cards.iter().find(|c| c.chapter_id == "B01").expect("B01 card exists");
+            assert_eq!(b01.kind, CardKind::Narrative);
+            assert_eq!(b01.tag1, "Paragraf");
+
+            // Verify Divider cards exist immediately before RXX cards
+            let div_r01 = state.cards.iter().find(|c| c.chapter_id == "DIV_R01").expect("DIV_R01 card exists");
+            assert_eq!(div_r01.kind, CardKind::Divider);
+            assert_eq!(div_r01.tag1, "Pembatas");
+
+            let div_idx = state.cards.iter().position(|c| c.chapter_id == "DIV_R01").unwrap();
+            let r01_idx = state.cards.iter().position(|c| c.chapter_id == "R01").unwrap();
+            assert_eq!(div_idx + 1, r01_idx, "DIV_R01 must precede R01 immediately");
+
+            // Verify Cover options
+            if let Some(cover_card) = state.cards.iter_mut().find(|c| c.kind == CardKind::Cover) {
+                cover_card.cover_inside_back = true;
+            }
+
+            // Run end-to-end generation
+            let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+            app.run("file.new", serde_json::json!({})).unwrap();
+            let res = generate_from_workspace(&mut app, &state);
+            assert!(res.is_ok(), "generate_from_workspace on DDA dual lang should succeed: {res:?}");
+
+            let doc = &app.session.active().unwrap().doc;
+            assert!(doc.settings.facing_pages, "DDA document must use facing pages");
+            assert!(doc.page_count() >= 10, "Document should have at least 10 pages, got {}", doc.page_count());
+
+            // Verify Dual Language content for R01: both Indonesian and English text present in stories!
+            assert!(
+                doc.stories.values().any(|s| s.text.contains("East Karawang District")),
+                "Document must contain English narrative from R01_en.rtf in dual-language mode!"
+            );
+            assert!(
+                doc.stories.values().any(|s| s.text.contains("Kecamatan Karawang Timur merupakan")),
+                "Document must contain Indonesian narrative from R01.rtf in dual-language mode!"
+            );
+
+            // Verify DDA subtitle has no release date or multi-line agency text
+            assert!(!state.meta_subtitle.contains("Oktober"), "DDA subtitle must not contain release date: {}", state.meta_subtitle);
+            assert!(!state.meta_subtitle.contains('\n'), "DDA subtitle must not contain newlines: {}", state.meta_subtitle);
+
+            // Verify Bookmark debris is completely absent
+            for s in doc.stories.values() {
+                assert!(!s.text.contains("Toc234493584"), "Stories must not contain bookmark debris Toc234493584");
+            }
+            let last_page_idx = doc.page_count() - 1;
+            let (last_si, last_pi) = doc.page_loc(last_page_idx).expect("back cover page location");
+            let last_spread = &doc.spreads[last_si];
+            assert_eq!(last_spread.pages.len(), 1, "Back cover spread must be a lone spread at end");
+            assert_eq!(last_spread.pages[last_pi].side, designcraft_doc::PageSide::Left, "Back cover must be a left page");
+
+            // Last body spread (before back cover) must NOT have back cover labels
+            if last_si > 0 {
+                let prev_spread = &doc.spreads[last_si - 1];
+                for it in &prev_spread.items {
+                    assert!(!it.label.contains("back_cover"), "Previous spread items must not contain back_cover: {}", it.label);
+                }
+            }
         }
     }
 

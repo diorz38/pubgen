@@ -425,8 +425,6 @@ pub fn find_back_cover_page(doc: &designcraft_doc::Document) -> Option<usize> {
             || it.name.contains("back_cover")
             || it.label.contains("_back")
             || it.name.contains("_back")
-            || it.label.contains("theme2")
-            || it.label.contains("pic_name")
         {
             return true;
         }
@@ -659,7 +657,14 @@ pub fn resolve_agency_swatch(doc: &mut designcraft_doc::Document, color_spec: &s
 /// when the parity blank page is inserted afterwards. One blank page first makes the copy land on a
 /// lone left page of its own from the start, so every copied shape stays on the back cover.
 fn ensure_back_cover_slot(app: &mut DesignApp) -> Result<(), String> {
-    let needs_blank = app.session.active().is_some_and(|s| s.doc.settings.facing_pages && s.doc.page_count() % 2 == 0);
+    let needs_blank = app.session.active().is_some_and(|s| {
+        s.doc.settings.facing_pages
+            && s.doc
+                .spreads
+                .last()
+                .and_then(|sp| sp.pages.last())
+                .is_some_and(|p| p.side == designcraft_doc::PageSide::Left)
+    });
     if !needs_blank {
         return Ok(());
     }
@@ -864,8 +869,8 @@ pub fn execute_generate_back_cover(app: &mut DesignApp, st: &PubgenState) -> Res
         active.doc.spreads.first().is_some_and(|sp| sp.items.iter().any(|it| keeps_on_back_cover(it)))
     };
 
-    // 0. Reserve the back cover's own page before copying (facing documents with an even page
-    // count would otherwise place the copy on the last body spread).
+    // 0. Reserve the back cover's own page before copying (facing documents whose last spread
+    // ends on a left page would otherwise place the copy on the last body spread).
     ensure_back_cover_slot(app)?;
 
     // 1. Copy all shapes from main cover by duplicating spread 0 at the end of document
@@ -931,7 +936,11 @@ pub fn execute_generate_back_cover(app: &mut DesignApp, st: &PubgenState) -> Res
         Ok(Some(fid))
     };
 
-    fn transform_back_cover_item(it: &mut designcraft_doc::Item, dx: f64) -> bool {
+    fn transform_back_cover_item(
+        it: &mut designcraft_doc::Item,
+        dx: f64,
+        graphics: &mut Vec<(designcraft_doc::ItemId, designcraft_doc::AssetId, bool)>,
+    ) -> bool {
         let lbl = it.label.to_lowercase();
         let nm = it.name.to_lowercase();
 
@@ -957,45 +966,44 @@ pub fn execute_generate_back_cover(app: &mut DesignApp, st: &PubgenState) -> Res
                         if let Some(xf) = g.fitted(bounds, designcraft_doc::Fitting::FillProportionally) {
                             g.xf = xf;
                         }
-                        it.locked = true;
-                        true
-                    } else {
-                        // "all shape that have image backgroud change to white color fill"
-                        it.content = designcraft_doc::Content::Unassigned;
-                        it.fill = designcraft_doc::Fill::swatch("[Paper]");
-                        it.stroke = designcraft_doc::Stroke::none();
-                        it.locked = true;
-                        true
                     }
+                    graphics.push((it.id, g.asset, is_ai_bg));
+                    it.locked = true;
+                    true
                 }
             }
             designcraft_doc::Content::Group { items } => {
                 it.locked = true;
                 items.retain_mut(|sub| {
                     let sub_item = std::sync::Arc::make_mut(sub);
-                    transform_back_cover_item(sub_item, dx)
+                    transform_back_cover_item(sub_item, dx, graphics)
                 });
                 true
             }
             _ => {
                 let is_logo = lbl.contains("logo") || nm.contains("logo");
                 let is_image_slot = lbl.contains("hero") || lbl.contains("photo") || lbl.contains("landscape") || (lbl.contains("image") && !is_logo);
-                if is_image_slot {
-                    it.content = designcraft_doc::Content::Unassigned;
-                    it.fill = designcraft_doc::Fill::swatch("[Paper]");
-                    it.stroke = designcraft_doc::Stroke::none();
+                if is_logo {
+                    false
+                } else {
+                    if is_image_slot {
+                        it.content = designcraft_doc::Content::Unassigned;
+                        it.fill = designcraft_doc::Fill::swatch("[Paper]");
+                        it.stroke = designcraft_doc::Stroke::none();
+                    }
+                    it.locked = true;
+                    true
                 }
-                it.locked = true;
-                true
             }
         }
     }
 
     // 2. Filter copied items:
     // - Remove all text and old logo
-    // - Convert shapes with image backgrounds to white fill ([Paper])
+    // - Convert shapes with image backgrounds to gray spectrum color
     // - Keep all other background decorative shapes
     let _ = app.session.edit(|doc, _| {
+        let mut graphics = Vec::new();
         if let Some(sp) = doc.spreads.get_mut(back_si) {
             let sp = std::sync::Arc::make_mut(sp);
             sp.items.retain_mut(|arc_it| {
@@ -1003,10 +1011,20 @@ pub fn execute_generate_back_cover(app: &mut DesignApp, st: &PubgenState) -> Res
                     return true;
                 }
                 let it = std::sync::Arc::make_mut(arc_it);
-                transform_back_cover_item(it, page_x)
+                transform_back_cover_item(it, page_x, &mut graphics)
             });
             sp.relayout();
         }
+
+        for (item_id, old_aid, is_ai_bg) in graphics {
+            if let Some(new_aid) = convert_asset_id_to_grayscale_mode(doc, old_aid, is_ai_bg)
+                && let Some(item) = doc.item_mut(item_id)
+                && let designcraft_doc::Content::Graphic(g) = &mut item.content
+            {
+                g.asset = new_aid;
+            }
+        }
+
         Ok(Value::Null)
     });
 

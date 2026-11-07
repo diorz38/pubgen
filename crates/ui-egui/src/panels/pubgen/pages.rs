@@ -275,9 +275,11 @@ fn post_process_template_applied_page(
             }
         }
 
-        // A sheet with no title line puts the RTF at the top of the page, so the page's title is
+        // A sheet with no title line (or Paragraph card) puts the RTF at the top of the page, so the page's title is
         // the RTF's own heading: tag that paragraph for the paragraph table of contents.
-        if title_val.trim().is_empty() && (is_narrative_row || type_val.eq_ignore_ascii_case("Note")) {
+        if (title_val.trim().is_empty() || type_val.eq_ignore_ascii_case("Paragraph"))
+            && (is_narrative_row || type_val.eq_ignore_ascii_case("Note") || type_val.eq_ignore_ascii_case("Paragraph"))
+        {
             for sid in body_story_ids {
                 tag_page_title(app, sid, TOC_NARRATIVE_STYLE);
             }
@@ -479,7 +481,7 @@ fn row_template_slots(
             image.insert("photo".into(), json!(img_file.to_string_lossy()));
             images_resolved = 1;
         }
-    } else if type_val.eq_ignore_ascii_case("Note") || type_val.eq_ignore_ascii_case("G") {
+    } else if type_val.eq_ignore_ascii_case("Note") || type_val.eq_ignore_ascii_case("G") || type_val.eq_ignore_ascii_case("Paragraph") {
         let note_title = title_val.trim();
         text.insert("title".into(), json!(note_title));
         text.insert("note_title".into(), json!(note_title));
@@ -1537,10 +1539,10 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
         let is_cover_or_div = is_div || type_val.eq_ignore_ascii_case("COVER");
         // The narrative sheets: `GXX` (the front matter) and `RXX` (the chapter reviews). Their
         // pages are the ones the paragraph table of contents lists.
-        let is_narrative_row = type_val.eq_ignore_ascii_case("Ulasan") || type_val.eq_ignore_ascii_case("G");
+        let is_narrative_row = type_val.eq_ignore_ascii_case("Ulasan") || type_val.eq_ignore_ascii_case("G") || type_val.eq_ignore_ascii_case("Paragraph");
 
         let is_cover = type_val.eq_ignore_ascii_case("COVER") || type_val.eq_ignore_ascii_case("SAMPUL");
-        let is_preface_row = is_preface || type_val.eq_ignore_ascii_case("G") || type_val.eq_ignore_ascii_case("PREFACE");
+        let is_preface_row = is_preface || type_val.eq_ignore_ascii_case("G") || type_val.eq_ignore_ascii_case("PREFACE") || type_val.eq_ignore_ascii_case("Paragraph");
         let row_chapter_id = if !is_cover && !is_preface_row { extract_catalog_chapter_id(num_val, type_val, file_val, title_val) } else { None };
 
         let row_tpl_spec = row.get(template_col).map(String::as_str).unwrap_or("").trim();
@@ -1593,7 +1595,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                 "assets/templates/dividers/002_batik_infographic.designcraft".to_string()
             } else if is_ulasan_type(type_val) {
                 "assets/templates/dividers/001_simple_chapter.designcraft".to_string()
-            } else if type_val.eq_ignore_ascii_case("Note") || type_val.eq_ignore_ascii_case("G") {
+            } else if type_val.eq_ignore_ascii_case("Note") || type_val.eq_ignore_ascii_case("G") || type_val.eq_ignore_ascii_case("Paragraph") {
                 "assets/templates/front_matter/001_publication_note.designcraft".to_string()
             } else {
                 "assets/templates/data_tables/001_single_table_standard.designcraft".to_string()
@@ -1936,13 +1938,33 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
             // Ulasan / Editorial Chapter layout:
             // Split title "BAB 01 Pemerintahan" into "BAB 01" and "Pemerintahan"
             let (ch_line, title_line) = split_chapter_title(clean_id_title, num_val);
-            let resolved_en_rtf = if st.bilingual_output && !file_en_val.is_empty() && !is_preface {
+            let mut resolved_en_rtf = if st.bilingual_output && !file_en_val.is_empty() && !is_preface {
                 resolve_catalog_related_file(&st.card1_path, file_en_val, "rtf")
-            } else if st.bilingual_output && st.translate_with_ai && !file_val.is_empty() && !is_preface {
-                ai::translated_body_rtf(st, file_val)
             } else {
                 None
             };
+            if st.bilingual_output && !is_preface {
+                let same_as_id = resolved_en_rtf.is_none()
+                    || resolved_en_rtf.as_ref().map(|p| p.to_string_lossy().to_string())
+                        == resolve_catalog_related_file(&st.card1_path, file_val, "rtf").as_ref().map(|p| p.to_string_lossy().to_string());
+                if same_as_id {
+                    let p = std::path::Path::new(file_val);
+                    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                    if !stem.is_empty() && !stem.ends_with("_en") {
+                        let fallback_en = if let Some(parent) = p.parent().filter(|p| !p.as_os_str().is_empty()) {
+                            format!("{}/{stem}_en.rtf", parent.to_string_lossy().replace('\\', "/"))
+                        } else {
+                            format!("{stem}_en.rtf")
+                        };
+                        if let Some(en_p) = resolve_catalog_related_file(&st.card1_path, &fallback_en, "rtf") {
+                            resolved_en_rtf = Some(en_p);
+                        }
+                    }
+                }
+                if resolved_en_rtf.is_none() && st.translate_with_ai && !file_val.is_empty() {
+                    resolved_en_rtf = ai::translated_body_rtf(st, file_val);
+                }
+            }
 
             if st.bilingual_output
                 && has_chapter_prefix
@@ -1953,17 +1975,19 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                 // Line 1: "BAB 01" (Arial Black, 24.0)
                 // Line 2: "Geografi" (Arial Black, 20.0, tagged with TOC style)
                 // Line 3: "Chapter 01 Geography" (Arial Bold Italic, 15.0)
+                let mut header_y = margin.y0;
                 if !ch_line.is_empty() {
                     frame_with_font_full(
                         app,
                         spread_idx,
-                        [margin.x0, margin.y0, margin.x1, margin.y0 + 36.0],
+                        [margin.x0, header_y, margin.x1, header_y + 36.0],
                         &ch_line,
                         "Arial Black",
                         None,
                         24.0,
                         None,
                     );
+                    header_y += 40.0;
                 }
                 // 2nd Textbox: "Pemerintahan" (font Arial Black, size 20.0) -> second row
                 // Tag with the narrative style so the paragraph table of contents lists this
@@ -1972,13 +1996,14 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                     frame_with_font_full(
                         app,
                         spread_idx,
-                        [margin.x0, margin.y0 + 40.0, margin.x1, margin.y0 + 72.0],
+                        [margin.x0, header_y, margin.x1, header_y + 32.0],
                         &title_line,
                         "Arial Black",
                         None,
                         20.0,
                         Some(TOC_NARRATIVE_STYLE),
                     );
+                    header_y += 36.0;
                 }
                 let en_header_text = if !clean_en_title.is_empty() {
                     let t = clean_en_title.trim();
@@ -2008,16 +2033,17 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                     frame_with_font_full(
                         app,
                         spread_idx,
-                        [margin.x0, margin.y0 + 76.0, margin.x1, margin.y0 + 104.0],
+                        [margin.x0, header_y, margin.x1, header_y + 28.0],
                         &en_header_text,
                         "Arial",
                         Some("Bold Italic"),
                         15.0,
                         None,
                     );
+                    header_y += 38.0;
                 }
 
-                let header_h = 114.0;
+                let header_h = if header_y > margin.y0 { header_y - margin.y0 } else { 0.0 };
                 let gutter = 14.17; // 5 mm
                 let total_w = (margin.x1 - margin.x0).max(40.0);
                 let col_w = ((total_w - gutter) / 2.0).max(10.0);
@@ -2873,11 +2899,12 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                     }
                 }
             }
-        } else if type_val.eq_ignore_ascii_case("Note") || type_val.eq_ignore_ascii_case("G") {
-            // Publication note (A02) or narrative RTF sheet (G):
-            // When title is provided, add centred Arial title box header and place RTF below it.
-            // When sheet only had 1 row (file) with no title, don't add Page Header, just add RTF to page.
-            let has_header = !title_val.trim().is_empty();
+        } else if type_val.eq_ignore_ascii_case("Note") || type_val.eq_ignore_ascii_case("G") || type_val.eq_ignore_ascii_case("Paragraph") {
+            // Publication note (A02), front-matter narrative (Paragraph), or narrative RTF sheet (G):
+            // When title is provided on Note/G, add centred Arial title box header and place RTF below it.
+            // When Paragraph (or sheet had no explicit header), don't add Page Header, place RTF in full margin frame so RTF styles are followed.
+            let is_paragraph = type_val.eq_ignore_ascii_case("Paragraph");
+            let has_header = !is_paragraph && !title_val.trim().is_empty();
             if has_header {
                 let title_rect = [margin.x0, margin.y0, margin.x1, margin.y0 + 36.0];
                 // Tag the title with the narrative style so the paragraph table of contents names

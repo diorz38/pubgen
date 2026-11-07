@@ -39,7 +39,7 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
     let profile_id = detect_profile(&names);
     let mut metadata = PublicationMetadata {
         profile_id: profile_id.to_string(),
-        layout: if profile_id == "bps_brs" { PageLayout::Double } else { PageLayout::Single },
+        layout: if profile_id == "generic_report" { PageLayout::Single } else { PageLayout::Double },
         language: if profile_id == "bps_dda" { Language::IdEn } else { Language::Id },
         title: String::new(),
         title_en: None,
@@ -88,7 +88,8 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
             card_settings.insert("title_en".to_string(), serde_json::Value::String(ten.clone()));
         }
         if let Some(fen) = kv.get("file_en").or_else(|| kv.get("berkas_en")) {
-            card_settings.insert("file_en".to_string(), serde_json::Value::String(fen.clone()));
+            let norm_fen = fen.replace('\\', "/");
+            card_settings.insert("file_en".to_string(), serde_json::Value::String(norm_fen));
         }
         if let Some(tpl) = kv.get("template").or_else(|| kv.get("diivider")).or_else(|| kv.get("divider")) {
             card_settings.insert("template".to_string(), serde_json::Value::String(tpl.clone()));
@@ -98,9 +99,55 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
         }
 
         if kind == CardKind::Narrative {
-            let (t, s) = process_narrative_sheet(base_dir, name, &file_name, &rows, &kv, card_title, &mut texts);
+            let (t, s) = process_narrative_sheet(base_dir, name, &file_name, &rows, &kv, card_title, &mut card_settings, &mut texts);
             card_title = t;
             card_source = s;
+
+            // In BPS DDA, if an RXX review sheet specifies a divider (template or image_div),
+            // a Chapter Divider page must be added 1 page before Page RXX!
+            let upper_name = name.to_ascii_uppercase();
+            let is_rxx = upper_name.starts_with('R') && upper_name[1..].chars().all(|c| c.is_ascii_digit() || c == '_');
+            let div_tpl = kv.get("diivider").or_else(|| kv.get("divider")).or_else(|| kv.get("pembatas"));
+            let div_img = kv.get("image_div")
+                .or_else(|| kv.get("imagediv"))
+                .or_else(|| kv.get("image_divider"))
+                .or_else(|| kv.get("divider_image"))
+                .or_else(|| kv.get("gambar_div"))
+                .or_else(|| kv.get("gambar_pembatas"))
+                .or_else(|| kv.get("foto_div"));
+
+            if profile_id == "bps_dda" && is_rxx && (div_tpl.is_some() || div_img.is_some()) {
+                let mut div_settings = BTreeMap::new();
+                let chosen_tpl = div_tpl.cloned().unwrap_or_else(|| "Batik Infographic".to_string());
+                div_settings.insert("template".to_string(), serde_json::Value::String(chosen_tpl));
+                if let Some(ten) = kv.get("title_en").or_else(|| kv.get("judul_en")) {
+                    div_settings.insert("title_en".to_string(), serde_json::Value::String(ten.clone()));
+                }
+                let mut div_source = None;
+                if let Some(img_val) = div_img {
+                    let just_name = Path::new(img_val).file_name().and_then(|s| s.to_str()).unwrap_or(img_val).to_string();
+                    if let Some(bytes) = resolve_file(base_dir, img_val).and_then(|p| std::fs::read(&p).ok()) {
+                        let asset_path = format!("assets/{just_name}");
+                        if !assets.iter().any(|(p, _): &(String, Vec<u8>)| p == &asset_path) {
+                            assets.push((asset_path.clone(), bytes));
+                        }
+                        div_source = Some(asset_path.clone());
+                        div_settings.insert("image".to_string(), serde_json::Value::String(asset_path));
+                    }
+                }
+                let div_card = PublicationCard {
+                    id: format!("DIV_{name}"),
+                    kind: CardKind::Divider,
+                    scope: CardScope::NewPage,
+                    source: div_source,
+                    title: card_title.clone(),
+                    settings: div_settings,
+                };
+                metadata.cards.push(div_card);
+
+                // For the RXX narrative itself, remove divider template so it behaves purely as a narrative
+                card_settings.remove("template");
+            }
         } else if matches!(kind, CardKind::Image | CardKind::Divider) {
             let (t, s) = process_image_or_divider_sheet(base_dir, name, &kv, kind, card_title, &mut assets);
             card_title = t;
@@ -250,6 +297,7 @@ fn plain_text_rtf(text: &str) -> Vec<u8> {
     out.into_bytes()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn process_narrative_sheet(
     base_dir: &Path,
     name: &str,
@@ -257,6 +305,7 @@ fn process_narrative_sheet(
     rows: &[Vec<String>],
     kv: &BTreeMap<String, String>,
     mut card_title: String,
+    card_settings: &mut BTreeMap<String, serde_json::Value>,
     texts: &mut Vec<(String, Vec<u8>)>,
 ) -> (String, Option<String>) {
     let explicit_file = kv.get("file").or_else(|| kv.get("berkas")).cloned();
@@ -303,7 +352,24 @@ fn process_narrative_sheet(
         texts.push((rtf_path.clone(), rtf_bytes));
     }
 
-    if let Some(fen) = kv.get("file_en").or_else(|| kv.get("berkas_en"))
+    let fen_candidate = kv.get("file_en").or_else(|| kv.get("berkas_en")).map(|s| s.trim()).filter(|s| !s.is_empty());
+    let fen_fallback = format!("{stem}_en.rtf");
+    let fen_fallback_exists = base_dir.join(&fen_fallback).is_file() || base_dir.join("rtf").join(&fen_fallback).is_file();
+    let fen_choice: Option<String> = if let Some(fen) = fen_candidate {
+        let fen_stem = Path::new(fen).file_stem().and_then(|s| s.to_str()).unwrap_or(fen);
+        if (fen == candidate_name.as_str() || fen_stem == stem) && fen_fallback_exists {
+            Some(fen_fallback)
+        } else {
+            Some(fen.to_string())
+        }
+    } else if fen_fallback_exists {
+        Some(fen_fallback)
+    } else {
+        None
+    };
+
+    let mut actual_fen_path: Option<String> = None;
+    if let Some(ref fen) = fen_choice
         && let Some((path, bytes)) = resolve_narrative_file(base_dir, fen, name).and_then(|p| std::fs::read(&p).ok().map(|b| (p, b)))
     {
         let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
@@ -316,32 +382,24 @@ fn process_narrative_sheet(
         if let Some(b) = fen_rtf {
             let fen_path = format!("rtf/{fen_stem}.rtf");
             if !texts.iter().any(|(p, _): &(String, Vec<u8>)| p == &fen_path) {
-                texts.push((fen_path, b));
+                texts.push((fen_path.clone(), b));
             }
+            actual_fen_path = Some(fen_path);
         }
+    }
+
+    if let Some(fen) = actual_fen_path.or(fen_choice) {
+        card_settings.insert("file_en".to_string(), serde_json::Value::String(fen));
     }
 
     if name == "U1" {
         card_title = "Ulasan Indikator Utama (U1)".to_string();
     } else if name.starts_with('U') || name.starts_with('u') {
         card_title = format!("Ulasan Narasi {name} ({stem}.rtf)");
-    } else if card_title == *name {
-        let upper = name.to_ascii_uppercase();
-        if upper.starts_with('A') {
-            card_title = format!("Penjelasan Teknis ({name})");
-        } else if upper == "G00" {
-            card_title = "Daftar Isi (G00)".to_string();
-        } else if upper == "G01" {
-            card_title = "Daftar Gambar (G01)".to_string();
-        } else if upper == "G02" {
-            card_title = "Daftar Tabel (G02)".to_string();
-        } else if upper.starts_with('G') {
-            card_title = format!("Daftar Lampiran ({name})");
-        } else if upper.starts_with('R') {
-            card_title = format!("Ulasan Bab ({name})");
-        } else if upper.starts_with('B') {
-            card_title = format!("Kata Pengantar ({name})");
-        }
+    } else if card_title == *name || card_title.eq_ignore_ascii_case("file") || card_title.eq_ignore_ascii_case("berkas") {
+        // When sheet only had 1 row (file), title remains empty so no artificial page header is generated,
+        // matching 0.8.4 behavior.
+        card_title = String::new();
     }
 
     (card_title, Some(rtf_path))
@@ -446,21 +504,38 @@ fn process_map_chart_sheet(
 }
 
 fn detect_profile(names: &[String]) -> &'static str {
-    let upper: Vec<String> = names.iter().map(|n| n.to_ascii_uppercase()).collect();
-    if upper.iter().any(|n| n == "POINT" || n == "RINGKASAN" || (n.starts_with('U') && n.len() <= 4)) {
-        "bps_brs"
-    } else if upper.iter().any(|n| {
-        n.contains('.')
-            || n.starts_with("BAB")
-            || is_dda_table_sheet(n)
-            || is_dda_paragraph_sheet(n)
-            || is_dda_chart_or_image_sheet(n)
-            || is_dda_map_sheet(n)
-    }) {
-        "bps_dda"
-    } else {
-        "generic_report"
+    for name in names {
+        let lower = name.trim().to_lowercase();
+        if lower.starts_with("brs")
+            || lower.contains("ringkasan")
+            || lower.contains("utama")
+            || lower == "point"
+            || (lower == "cov"
+                && names.iter().any(|n| {
+                    let nl = n.trim().to_lowercase();
+                    nl == "point" || nl.starts_with('u') || nl.starts_with('t')
+                }))
+        {
+            return "bps_brs";
+        }
+        if lower.contains("balancesheet")
+            || lower.contains("income_statement")
+            || lower.contains("cashflow")
+            || lower.contains("financial")
+            || lower == "p&l"
+        {
+            return "corporate_annual";
+        }
+        if lower.contains("pendahuluan")
+            || lower.contains("metodologi")
+            || lower.contains("abstrak")
+            || lower.contains("pembahasan")
+            || lower.contains("kesimpulan")
+        {
+            return "academic_monograph";
+        }
     }
+    "bps_dda"
 }
 
 pub fn is_ignored_sheet(name: &str) -> bool {
@@ -825,6 +900,11 @@ fn resolve_file(base: &Path, name: &str) -> Option<PathBuf> {
     if direct_p.is_file() {
         return Some(direct_p.to_path_buf());
     }
+    let norm_name = name.replace('\\', "/");
+    let direct_rel = base.join(&norm_name);
+    if direct_rel.is_file() {
+        return Some(direct_rel);
+    }
     let just_name = direct_p.file_name().and_then(|s| s.to_str()).unwrap_or(name);
     let direct = base.join(just_name);
     if direct.is_file() {
@@ -855,6 +935,11 @@ fn resolve_narrative_file(base: &Path, file_name: &str, sheet_name: &str) -> Opt
     let direct_p = Path::new(file_name);
     if direct_p.is_file() {
         return Some(direct_p.to_path_buf());
+    }
+    let norm_name = file_name.replace('\\', "/");
+    let direct_rel = base.join(&norm_name);
+    if direct_rel.is_file() {
+        return Some(direct_rel);
     }
     let just_name = direct_p.file_name().and_then(|s| s.to_str()).unwrap_or(file_name);
     let candidates = [
@@ -913,7 +998,27 @@ fn is_debris_char(ch: char) -> bool {
 /// first 400 characters, and the paragraph tail only when a ZIP magic shows up, which lets legacy
 /// `.pubgen` packages heal on open without risking a rewrite of good text.
 pub fn sanitize_markdown(text: &str) -> String {
-    trim_embedded_package_dump(&strip_head_debris(text))
+    let cleaned = trim_embedded_package_dump(&strip_head_debris(text));
+    strip_toc_bookmarks(&cleaned)
+}
+
+pub fn strip_toc_bookmarks(text: &str) -> String {
+    let mut out = text.to_string();
+    while let Some(start) = out.find("Toc") {
+        let actual_start = if start > 0 && out.as_bytes()[start - 1] == b'_' { start - 1 } else { start };
+        let digits_start = start + 3;
+        let mut digits_end = digits_start;
+        while digits_end < out.len() && out.as_bytes()[digits_end].is_ascii_digit() {
+            digits_end += 1;
+        }
+        if digits_end > digits_start {
+            let actual_end = if digits_end < out.len() && out.as_bytes()[digits_end] == b'_' { digits_end + 1 } else { digits_end };
+            out.replace_range(actual_start..actual_end, "");
+        } else {
+            break;
+        }
+    }
+    out
 }
 
 /// Drop the hex dump of an embedded OOXML package that an old converter appended to a narrative.
@@ -1457,7 +1562,8 @@ mod tests {
         let mut kv = BTreeMap::new();
         kv.insert("file".to_string(), "U3.rtf".to_string());
         let mut texts: Vec<(String, Vec<u8>)> = Vec::new();
-        let (title, source) = process_narrative_sheet(dir.path(), "U3", "U3", &[], &kv, "Ulasan".to_string(), &mut texts);
+        let mut settings = BTreeMap::new();
+        let (title, source) = process_narrative_sheet(dir.path(), "U3", "U3", &[], &kv, "Ulasan".to_string(), &mut settings, &mut texts);
         assert_eq!(source.as_deref(), Some("rtf/U3.rtf"));
         assert!(title.contains("U3.rtf"), "{title}");
         assert_eq!(texts.len(), 1);
@@ -1477,7 +1583,8 @@ mod tests {
         let mut kv = BTreeMap::new();
         kv.insert("file".to_string(), "U5.docx".to_string());
         let mut texts: Vec<(String, Vec<u8>)> = Vec::new();
-        let (_title, source) = process_narrative_sheet(dir.path(), "U5", "U5", &[], &kv, "Ulasan".to_string(), &mut texts);
+        let mut settings = BTreeMap::new();
+        let (_title, source) = process_narrative_sheet(dir.path(), "U5", "U5", &[], &kv, "Ulasan".to_string(), &mut settings, &mut texts);
         assert_eq!(source.as_deref(), Some("rtf/U5.rtf"));
         let out = String::from_utf8_lossy(&texts[0].1).into_owned();
         assert!(out.starts_with("{\\rtf"), "{out}");
@@ -1542,6 +1649,24 @@ mod tests {
         kv_chart.insert("chart_type".into(), "bar".into());
         let (k_cht, _) = classify_sheet("C02_01", "bps_dda", &kv_chart);
         assert_eq!(k_cht, CardKind::Chart, "C02_01 with table & chart_type must be Chart");
+    }
+
+    #[test]
+    fn test_sample_dda_ingest_bab01_dual_lang() {
+        let path = Path::new("../../plan/pubgen/samples/DUAL_LANG/BAB_01_2025_ai_translate.xlsx");
+        if path.is_file() {
+            let report = ingest_workbook(path).expect("ingest BAB_01_2025_ai_translate.xlsx");
+            assert_eq!(report.profile_id, "bps_dda");
+            println!("--- REPORT TEXT ENTRIES ---");
+            for (name, bytes) in &report.text {
+                println!("Text: {} ({} bytes)", name, bytes.len());
+            }
+            for card in &report.metadata.cards {
+                if card.id == "R01" || card.id == "A02" || card.id == "B01" || card.id == "G02" {
+                    println!("Card: id={} kind={:?} title={} source={:?} settings={:?}", card.id, card.kind, card.title, card.source, card.settings);
+                }
+            }
+        }
     }
 
     #[test]
