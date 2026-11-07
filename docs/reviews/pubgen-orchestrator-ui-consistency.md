@@ -498,7 +498,7 @@ success-colour heuristic now matches both languages (`berhasil`/`finished`/`QA a
 residuals (data, not chrome): persisted `card.tag1/tag2` values, the default seed log line, and the
 never-rendered `status_message` writes keep their original language. 1339 tests pass; clippy clean.
 
-Not done yet: F4 (emoji vs icon font), F5 (type/radius scale), F6 (three tab treatments),
+Not done yet: F4 (emoji vs icon font), F5 (type/radius scale),
 F9 (menu rows bypass `Item::Cmd`), F10 (naming rest), F14 (fixed 320 px dock).
 
 **2026-11-07 — F13 + F16 fixed (card footer clipping, `Source::`).** Branch `studio`.
@@ -545,3 +545,17 @@ It uses the same 10.5 px proportional font, `t.text`/`t.text_strong`/`t.text_dim
 clippy clean; `PrintWindow` capture of the Worksheet now shows 161 distinct colours in that band instead of
 5 (`.ui-shots/worksheet-after-f12.png`). The QA `● Clean` fact stays in the centre header/its dock tab for
 now — its permanent home is the one open question (§7.6).
+
+**2026-11-07 — F6 fixed (one tab treatment instead of three).** The Orchestrator's dock tabs now use
+DesignCraft's docked-panel tab metrics (`panel_docking.rs` `dock_style`: 27 px strip, 1 px `t.border`,
+`t.text_strong`/`t.text_dim`, no accent line): a proportional 12 px label inset 10 px in the tab, active =
+`t.panel` with side borders, inactive = `t.tab_strip` with a hover fill. The 2 px `t.accent` top line the
+reference never draws is gone, and the tab strip's height/collapse width are named constants (`DOCK_TAB_H`,
+`DOCK_TAB_LABEL`, `DOCK_TAB_PAD`) instead of scattered literals. The centre `Page Structure / Visual Live
+Preview / Execution Log` control was a third style (24 px `t.well` chips, radius 3, semibold 11.5); it now
+goes through the same `tab_button` treatment, so the screen carries one tab look (host page tabs keep the
+`doc_tabs` band metrics they already matched). The collapsed-dock tooltip no longer appends "Click to edit"
+to a tab name, and the in-strip collapse control is 18 px wide to match the reference's narrow bar.
+Verified: 1339 tests pass, clippy clean, and a `PrintWindow` capture of the Worksheet has zero accent-blue
+pixels left in the right tab strip, with the centre control now painting `t.tab_strip`/`t.panel` instead of
+`t.well` chips (`.ui-shots/worksheet-after-f6.png`).

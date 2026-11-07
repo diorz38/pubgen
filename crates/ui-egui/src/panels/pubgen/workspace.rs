@@ -1110,6 +1110,12 @@ pub fn trigger_host_tab_action(ctx: &egui::Context, action: HostTabAction) {
 const ORCH_TAB_MAX_W: f32 = 260.0;
 const ORCH_TAB_PAD: f32 = 44.0;
 
+/// One dock tab: the metrics of DesignCraft's docked panel tabs (`panel_docking::dock_style`):
+/// 27 px strip, proportional 12 px label inset 10 px, 1 px borders and no accent line.
+const DOCK_TAB_H: f32 = 27.0;
+const DOCK_TAB_LABEL: f32 = 12.0;
+const DOCK_TAB_PAD: f32 = 10.0;
+
 /// Draws the workspace tab strip at the top of the Orchestrator panel, following Designcraft document tabs design.
 fn render_host_tabs(ui: &mut Ui, t: &Tokens, lang: &str) -> Option<HostTabAction> {
     let tabs: HostTabs = ui.ctx().data(|d| d.get_temp(host_tabs_id())).unwrap_or_default();
@@ -1645,7 +1651,7 @@ fn render_collapsed_dock(
     ui.set_width(width);
     ui.set_height(total_height);
 
-    let tab_bar_height = 27.0f32;
+    let tab_bar_height = DOCK_TAB_H;
 
     // Header strip with visible expand button
     let expand_btn = ui
@@ -1668,7 +1674,7 @@ fn render_collapsed_dock(
     // Icon 1: Sumber & Konten
     let is_tab1 = state.right_dock_tab == OrchestratorRightTab::SumberKonten;
     let (r1, resp1) = ui.allocate_exact_size(vec2(width, 36.0), Sense::click());
-    let resp1 = resp1.on_hover_text(format!("{}: {}", crate::i18n::tr(lang, "Sources & Content"), crate::i18n::tr(lang, "Click to edit")));
+    let resp1 = resp1.on_hover_text(crate::i18n::tr(lang, "Sources & Content"));
     resp1.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_tab1, crate::i18n::tr(lang, "Sources & Content")));
     let btn1 = Rect::from_center_size(r1.center(), vec2(30.0, 30.0));
     if resp1.hovered() || is_tab1 {
@@ -1689,7 +1695,7 @@ fn render_collapsed_dock(
     // Icon 2: Profil & Eksekusi
     let is_tab2 = state.right_dock_tab == OrchestratorRightTab::ProfilEksekusi;
     let (r2, resp2) = ui.allocate_exact_size(vec2(width, 36.0), Sense::click());
-    let resp2 = resp2.on_hover_text(format!("{}: {}", crate::i18n::tr(lang, "Profile & Execution"), crate::i18n::tr(lang, "Click to edit")));
+    let resp2 = resp2.on_hover_text(crate::i18n::tr(lang, "Profile & Execution"));
     resp2.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_tab2, crate::i18n::tr(lang, "Profile & Execution")));
     let btn2 = Rect::from_center_size(r2.center(), vec2(30.0, 30.0));
     if resp2.hovered() || is_tab2 {
@@ -1719,8 +1725,8 @@ fn render_expanded_dock(
     ui.set_width(width);
     ui.set_height(total_height);
 
-    let tab_bar_height = 27.0f32;
-    let collapse_btn_w = 26.0f32;
+    let tab_bar_height = DOCK_TAB_H;
+    let collapse_btn_w = 18.0f32;
     let remaining_w = (width - collapse_btn_w).max(100.0);
     let tab_w = (remaining_w / 2.0).floor();
 
@@ -1751,7 +1757,6 @@ fn render_expanded_dock(
     tab1_resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_tab1, crate::i18n::tr(lang, "Sources & Content")));
     if is_tab1 {
         ui.painter().rect_filled(tab1_rect, 0.0, t.panel);
-        ui.painter().line_segment([tab1_rect.left_top(), tab1_rect.right_top()], Stroke::new(2.0, t.accent));
         ui.painter().line_segment([tab1_rect.left_top(), tab1_rect.left_bottom()], Stroke::new(1.0, t.border));
         ui.painter().line_segment([tab1_rect.right_top(), tab1_rect.right_bottom()], Stroke::new(1.0, t.border));
     } else {
@@ -1761,10 +1766,10 @@ fn render_expanded_dock(
         ui.painter().line_segment([tab1_rect.left_bottom(), tab1_rect.right_bottom()], Stroke::new(1.0, t.border));
     }
     ui.painter().text(
-        tab1_rect.center(),
-        Align2::CENTER_CENTER,
+        tab1_rect.left_center() + vec2(DOCK_TAB_PAD, 0.0),
+        Align2::LEFT_CENTER,
         crate::i18n::tr(lang, "Sources & Content"),
-        if is_tab1 { semibold(11.0) } else { FontId::proportional(11.0) },
+        FontId::proportional(DOCK_TAB_LABEL),
         if is_tab1 { t.text_strong } else { t.text_dim },
     );
     if tab1_resp.clicked() {
@@ -1780,7 +1785,6 @@ fn render_expanded_dock(
     tab2_resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_tab2, crate::i18n::tr(lang, "Profile & Execution")));
     if is_tab2 {
         ui.painter().rect_filled(tab2_rect, 0.0, t.panel);
-        ui.painter().line_segment([tab2_rect.left_top(), tab2_rect.right_top()], Stroke::new(2.0, t.accent));
         ui.painter().line_segment([tab2_rect.left_top(), tab2_rect.left_bottom()], Stroke::new(1.0, t.border));
         ui.painter().line_segment([tab2_rect.right_top(), tab2_rect.right_bottom()], Stroke::new(1.0, t.border));
     } else {
@@ -1790,10 +1794,10 @@ fn render_expanded_dock(
         ui.painter().line_segment([tab2_rect.left_bottom(), tab2_rect.right_bottom()], Stroke::new(1.0, t.border));
     }
     ui.painter().text(
-        tab2_rect.center(),
-        Align2::CENTER_CENTER,
+        tab2_rect.left_center() + vec2(DOCK_TAB_PAD, 0.0),
+        Align2::LEFT_CENTER,
         crate::i18n::tr(lang, "Profile & Execution"),
-        if is_tab2 { semibold(11.0) } else { FontId::proportional(11.0) },
+        FontId::proportional(DOCK_TAB_LABEL),
         if is_tab2 { t.text_strong } else { t.text_dim },
     );
     if tab2_resp.clicked() {
@@ -2313,19 +2317,25 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
 }
 
 fn tab_button(ui: &mut Ui, label: &str, active: bool, t: &Tokens) -> Response {
-    let font = semibold(11.5);
+    let font = FontId::proportional(DOCK_TAB_LABEL);
     let galley = ui.painter().layout_no_wrap(label.to_string(), font, if active { t.text_strong } else { t.text_dim });
-    let size = vec2(galley.size().x + 20.0, 24.0);
+    let size = vec2(galley.size().x + DOCK_TAB_PAD * 2.0, DOCK_TAB_H);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, active, label));
 
     if active {
-        ui.painter().rect(rect, CornerRadius::same(3), t.well, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
-    } else if resp.hovered() {
-        ui.painter().rect_filled(rect, CornerRadius::same(3), t.hover);
+        ui.painter().rect_filled(rect, CornerRadius::ZERO, t.panel);
+        ui.painter().line_segment([rect.left_top(), rect.left_bottom()], Stroke::new(1.0, t.border));
+        ui.painter().line_segment([rect.right_top(), rect.right_bottom()], Stroke::new(1.0, t.border));
+    } else {
+        ui.painter().rect_filled(rect, CornerRadius::ZERO, t.tab_strip);
+        if resp.hovered() {
+            ui.painter().rect_filled(rect, CornerRadius::ZERO, t.hover);
+        }
+        ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, t.border));
     }
 
-    ui.painter().galley(rect.center() - galley.size() / 2.0, galley, Color32::PLACEHOLDER);
+    ui.painter().galley(pos2(rect.min.x + DOCK_TAB_PAD, rect.center().y - galley.size().y / 2.0), galley, Color32::PLACEHOLDER);
 
     resp
 }
