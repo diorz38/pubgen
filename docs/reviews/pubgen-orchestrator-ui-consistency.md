@@ -499,7 +499,7 @@ residuals (data, not chrome): persisted `card.tag1/tag2` values, the default see
 never-rendered `status_message` writes keep their original language. 1339 tests pass; clippy clean.
 
 Not done yet: F4 (emoji vs icon font), F5 (type/radius scale),
-F9 (menu rows bypass `Item::Cmd`), F10 (naming rest).
+F9 (menu rows bypass `Item::Cmd`).
 
 **2026-11-07 — F13 + F16 fixed (card footer clipping, `Source::`).** Branch `studio`.
 
@@ -572,3 +572,15 @@ splitter. The splitter is announced as `Role::Button` / "Resize panels" (new id.
 Verified: new unit test `dock_width_clamps_and_collapses` (default/min/max/collapsed), 1340 tests pass,
 clippy clean, and a `PrintWindow` capture shows the 5 px `#383838` splitter at x=1116-1120 with the dock
 still 320 px wide (`.ui-shots/worksheet-after-f14.png`).
+
+**2026-11-07 — F10 fixed (one product spelling).** The same product was written four ways: the window title
+said `Pubgen Studio`, the Orchestrator app-bar centre said `DesignCraft — <doc>` (F3), the mode enum carried
+its own emoji labels `📊 Orchestrator` / `🎨 DesignCraft Layout`, and the DesignCraft-mode menu bar carried a
+`Pubgen` menu while the dock panel and app bar said `PubGen`. Now the window title, the module docs and the
+menu label all read **PubGen Studio** / **PubGen**, `StudioMode` keeps no presentation strings at all (its
+`label()`/`description()` helpers had no call sites and were emoji-prefixed duplicates of the pills), and the
+mode names live only in `menus::pubgen_bar` ("DesignCraft" / "Orchestrator"). i18n row `("PubGen","PubGen")`
+and the menu-bar tests were updated with the label. Verified: 1340 tests pass, clippy clean,
+`cargo check -p pubgen-studio`. Internal Rust identifiers (`PubgenStudioApp`, `PubgenContainer`, module/file
+names, `.pubgen` extension) are deliberately unchanged: they are not user-visible and renaming them would
+churn every import for no UI gain.

@@ -1,4 +1,4 @@
-//! Pubgen Studio: Dual-Mode Publication Orchestrator & Layout Studio.
+﻿//! PubGen Studio: Dual-Mode Publication Orchestrator & Layout Studio.
 //!
 //! Usage: `pubgen-studio [project.pubgen | document.designcraft]`
 //!
@@ -56,7 +56,7 @@ fn main() -> eframe::Result<()> {
 
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Pubgen Studio")
+            .with_title("PubGen Studio")
             .with_inner_size([1440.0, 900.0])
             .with_min_inner_size([900.0, 560.0])
             .with_decorations(!cfg!(target_os = "windows"))
@@ -75,7 +75,7 @@ fn main() -> eframe::Result<()> {
     let has_cached_layout = container.as_ref().and_then(|c| c.cached_layout.as_ref()).is_some();
 
     eframe::run_native(
-        "Pubgen Studio",
+        "PubGen Studio",
         options,
         Box::new(move |cc| {
             let session = Session::new();

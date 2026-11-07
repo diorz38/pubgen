@@ -1,4 +1,4 @@
-//! The panels: their ids, names, icons and contents, and the windows of the float-only panels.
+﻿//! The panels: their ids, names, icons and contents, and the windows of the float-only panels.
 //! `panel_docking` places the others in the docking layout.
 
 use egui::{Sense, vec2};
@@ -416,11 +416,11 @@ mod pubgen_menu_tests {
             collect_texts(&clipped.shape, &mut texts);
         }
 
-        let pubgen_idx = texts.iter().position(|t| t == "Pubgen");
+        let pubgen_idx = texts.iter().position(|t| t == "PubGen");
         let help_idx = texts.iter().position(|t| t == "Help");
         assert!(texts.iter().any(|t| t == "File"), "File menu must be present in menu bar. Got: {texts:?}");
-        assert!(pubgen_idx.is_some(), "Pubgen menu must be present in menu bar. Got: {texts:?}");
+        assert!(pubgen_idx.is_some(), "PubGen menu must be present in menu bar. Got: {texts:?}");
         assert!(help_idx.is_some(), "Help menu must be present in menu bar. Got: {texts:?}");
-        assert!(pubgen_idx.unwrap() < help_idx.unwrap(), "Pubgen must appear before Help");
+        assert!(pubgen_idx.unwrap() < help_idx.unwrap(), "PubGen must appear before Help");
     }
 }

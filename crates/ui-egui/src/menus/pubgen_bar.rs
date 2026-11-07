@@ -1,4 +1,4 @@
-//! PubGen's own menu bar (fork addition).
+﻿//! PubGen's own menu bar (fork addition).
 //!
 //! Orchestrator Mode displays the 8 main menus matching the POS contract:
 //! 1. File
@@ -496,7 +496,7 @@ fn ai_translate(app: &mut DesignApp, ui: &mut egui::Ui, lang: &str, has_doc: boo
 pub fn pubgen_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
     let lang = app.ui.language.clone();
     let rtl = crate::i18n::is_rtl(&lang);
-    crate::menus::menu_button(ui, crate::rtl::widget(ui, "Pubgen"), |ui| {
+    crate::menus::menu_button(ui, crate::rtl::widget(ui, "PubGen"), |ui| {
         popup(ui, rtl, 260.0, |ui| {
             pipeline(app, ui);
             ui.separator();
@@ -633,7 +633,7 @@ mod tests {
 
         assert!(!texts.iter().any(|t| t == "Publication"), "PubGen's menus are gone: {texts:?}");
 
-        let pubgen = texts.iter().position(|t| t == "Pubgen").expect("the PubGen menu stays reachable");
+        let pubgen = texts.iter().position(|t| t == "PubGen").expect("the PubGen menu stays reachable");
 
         assert!(pubgen < texts.iter().position(|t| t == "Help").expect("Help"));
 
@@ -645,7 +645,7 @@ mod tests {
 
         assert!(!texts.iter().any(|t| t == "Edit"), "DesignCraft's Edit menu is replaced in Orchestrator mode: {texts:?}");
 
-        assert!(!texts.iter().any(|t| t == "Pubgen"), "the fallback Pubgen menu hides while its own bar shows: {texts:?}");
+        assert!(!texts.iter().any(|t| t == "PubGen"), "the fallback Pubgen menu hides while its own bar shows: {texts:?}");
     }
 
     #[test]
@@ -667,7 +667,7 @@ mod tests {
 
         let texts = collect_texts(&output.shapes);
 
-        assert!(texts.iter().any(|t| t == "Pubgen"), "the menu button is drawn: {texts:?}");
+        assert!(texts.iter().any(|t| t == "PubGen"), "the menu button is drawn: {texts:?}");
     }
 
     /// The Publication menu's rows, drawn like the popup draws them (the popup itself needs a

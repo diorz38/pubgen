@@ -1,4 +1,4 @@
-// Indonesian interface strings for DesignCraft & PubGen.
+﻿// Indonesian interface strings for DesignCraft & PubGen.
 pub(super) const TABLE: &[(&str, &str)] = &[
     ("AI Prompt Generator", "Generator Prompt AI"),
     ("AI Translation & Terminology", "Penerjemahan AI & Glosarium"),
@@ -193,7 +193,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Profile & Execution", "Profil & Eksekusi"),
     ("Prompt Copied!", "Prompt Disalin!"),
     ("Properties", "Properti"),
-    ("Pubgen", "Pubgen"),
+    ("PubGen", "PubGen"),
     ("Publication", "Publikasi"),
     ("Publication Content List ({count} items)", "Daftar Konten Publikasi ({count} item)"),
     ("Publication Cover", "Sampul Publikasi"),

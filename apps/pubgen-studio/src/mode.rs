@@ -1,4 +1,8 @@
-//! Studio perspective modes for Pubgen Studio.
+//! Studio perspective modes for PubGen Studio.
+//!
+//! The visible mode names live in one place, `menus::pubgen_bar` (the pills and the View menu), so this
+//! enum stays presentation-free: adding a label here would only create a second, emoji-prefixed spelling
+//! of "Orchestrator" / "DesignCraft" (UI consistency F4/F10).
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StudioMode {
@@ -7,20 +11,4 @@ pub enum StudioMode {
     Orchestrator,
     /// DesignCraft Layout: Full DTP canvas, typography, optical margins, swatches, and manual overrides.
     DesignCraft,
-}
-
-impl StudioMode {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Orchestrator => "📊 Orchestrator",
-            Self::DesignCraft => "🎨 DesignCraft Layout",
-        }
-    }
-
-    pub fn description(&self) -> &'static str {
-        match self {
-            Self::Orchestrator => "Publication data ingestion, profiles, metadata, and automated compiler",
-            Self::DesignCraft => "Interactive DTP layout canvas, typography, optical alignment, and export",
-        }
-    }
 }
