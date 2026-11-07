@@ -499,7 +499,7 @@ residuals (data, not chrome): persisted `card.tag1/tag2` values, the default see
 never-rendered `status_message` writes keep their original language. 1339 tests pass; clippy clean.
 
 Not done yet: F4 (emoji vs icon font), F5 (type/radius scale), F6 (three tab treatments),
-F7 (accessibility widget_info sweep), F9 (menu rows bypass `Item::Cmd`), F10 (naming rest),
+F9 (menu rows bypass `Item::Cmd`), F10 (naming rest),
 F12 (status-bar semantics), F14 (fixed 320 px dock), F15 (blank status bar).
 
 **2026-11-07 — F13 + F16 fixed (card footer clipping, `Source::`).** Branch `studio`.
@@ -517,3 +517,17 @@ F12 (status-bar semantics), F14 (fixed 320 px dock), F15 (blank status bar).
 - Verified: `cargo test -p designcraft-ui-egui --features pubgen --lib` → **1339 passed, 0 failed**; clippy
   clean; screenshot `.ui-shots/worksheet-after-f13.png` shows every card footer ("Pg. N ✎ Click to edit")
   fully inside its card and single-colon `Source:` lines.
+
+**2026-11-07 — F7 fixed (screen-reader labels on painted Orchestrator controls).** Every control the
+Orchestrator paints by hand now publishes an accesskit node, matching `widgets.rs` (`caption_w`, `section`,
+`icon_toggle`) and `chrome/status_bar.rs`: the collapsed-dock icon rows and the expanded-dock tabs report
+`Role::Tab` with their selected state, the expanded-dock collapse button and the collapsed-dock expand
+button report `Role::Button` with their action names, the centre segmented tabs (`tab_button`) report
+`Role::Tab`, the margin `-`/`+` steppers report `Role::Button` with "Decrease T"/"Increase T", the card hit
+area reports `Role::Button` with "title — Edit card (page)", the tag pills report `Role::Label` with the tag
+text, and the right-panel Home/Save glyph buttons report their action names instead of "⌂"/"💾". New i18n
+rows: `Edit card`, `Decrease {label}`, `Increase {label}`. Two chrome strings the first F8 sweep missed are
+translated too (`Total: {n} pages`, `Page & Section Numbering Options:`), and the fake-save status message
+reuses the translated log sentence instead of a hardcoded Indonesian one. Test
+`orchestrator_workspace_strings_are_bilingual` grew to cover the new keys (1339 tests pass; clippy clean; a
+`PrintWindow` capture of the Worksheet is pixel-identical outside the title-bar row, i.e. no visual change).

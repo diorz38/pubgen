@@ -1654,6 +1654,7 @@ fn render_collapsed_dock(
             egui::Button::new(RichText::new("«").font(semibold(13.0)).color(t.text_strong)).fill(t.tab_strip).frame(false),
         )
         .on_hover_text(format!("{} (Expand Panels)", crate::i18n::tr(lang, "Expand Panels")));
+    expand_btn.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr(lang, "Expand Panels")));
     if expand_btn.clicked() {
         state.right_dock_expanded = true;
     }
@@ -1668,6 +1669,7 @@ fn render_collapsed_dock(
     let is_tab1 = state.right_dock_tab == OrchestratorRightTab::SumberKonten;
     let (r1, resp1) = ui.allocate_exact_size(vec2(width, 36.0), Sense::click());
     let resp1 = resp1.on_hover_text(format!("{}: {}", crate::i18n::tr(lang, "Sources & Content"), crate::i18n::tr(lang, "Click to edit")));
+    resp1.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_tab1, crate::i18n::tr(lang, "Sources & Content")));
     let btn1 = Rect::from_center_size(r1.center(), vec2(30.0, 30.0));
     if resp1.hovered() || is_tab1 {
         ui.painter().rect_filled(btn1, 3.0, if is_tab1 { t.panel_darker } else { t.hover });
@@ -1688,6 +1690,7 @@ fn render_collapsed_dock(
     let is_tab2 = state.right_dock_tab == OrchestratorRightTab::ProfilEksekusi;
     let (r2, resp2) = ui.allocate_exact_size(vec2(width, 36.0), Sense::click());
     let resp2 = resp2.on_hover_text(format!("{}: {}", crate::i18n::tr(lang, "Profile & Execution"), crate::i18n::tr(lang, "Click to edit")));
+    resp2.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_tab2, crate::i18n::tr(lang, "Profile & Execution")));
     let btn2 = Rect::from_center_size(r2.center(), vec2(30.0, 30.0));
     if resp2.hovered() || is_tab2 {
         ui.painter().rect_filled(btn2, 3.0, if is_tab2 { t.panel_darker } else { t.hover });
@@ -1730,6 +1733,7 @@ fn render_expanded_dock(
     let collapse_resp = ui
         .interact(collapse_rect, ui.scope_id().with("dock_collapse_btn"), Sense::click())
         .on_hover_text(format!("{} (Collapse to Icons)", crate::i18n::tr(lang, "Collapse to Icons")));
+    collapse_resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr(lang, "Collapse to Icons")));
     if collapse_resp.hovered() {
         ui.painter().rect_filled(collapse_rect, 3.0, t.hover);
     }
@@ -1744,6 +1748,7 @@ fn render_expanded_dock(
     let is_tab1 = state.right_dock_tab == OrchestratorRightTab::SumberKonten;
     let tab1_resp =
         ui.interact(tab1_rect, ui.scope_id().with("dock_tab_1"), Sense::click()).on_hover_text(crate::i18n::tr(lang, "Sources & Content"));
+    tab1_resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_tab1, crate::i18n::tr(lang, "Sources & Content")));
     if is_tab1 {
         ui.painter().rect_filled(tab1_rect, 0.0, t.panel);
         ui.painter().line_segment([tab1_rect.left_top(), tab1_rect.right_top()], Stroke::new(2.0, t.accent));
@@ -1772,6 +1777,7 @@ fn render_expanded_dock(
     let is_tab2 = state.right_dock_tab == OrchestratorRightTab::ProfilEksekusi;
     let tab2_resp =
         ui.interact(tab2_rect, ui.scope_id().with("dock_tab_2"), Sense::click()).on_hover_text(crate::i18n::tr(lang, "Profile & Execution"));
+    tab2_resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_tab2, crate::i18n::tr(lang, "Profile & Execution")));
     if is_tab2 {
         ui.painter().rect_filled(tab2_rect, 0.0, t.panel);
         ui.painter().line_segment([tab2_rect.left_top(), tab2_rect.right_top()], Stroke::new(2.0, t.accent));
@@ -1833,24 +1839,24 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         ui.label(RichText::new(crate::i18n::tr(lang, "Sources & Content")).font(semibold(13.5)).color(t.text_strong));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             // Home button
-            if ui
+            let home_btn = ui
                 .add(egui::Button::new(RichText::new("⌂").font(semibold(12.0))).frame(true).corner_radius(CornerRadius::same(3)))
-                .on_hover_text(crate::i18n::tr(lang, "Home"))
-                .clicked()
-            {
+                .on_hover_text(crate::i18n::tr(lang, "Home"));
+            home_btn.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr(lang, "Home")));
+            if home_btn.clicked() {
                 state.view = OrchestratorView::Home;
             }
 
             // Save button
-            if ui
+            let save_btn = ui
                 .add(egui::Button::new(RichText::new("💾").font(semibold(12.0))).frame(true).corner_radius(CornerRadius::same(3)))
-                .on_hover_text(crate::i18n::tr(lang, "Save"))
-                .clicked()
-            {
+                .on_hover_text(crate::i18n::tr(lang, "Save"));
+            save_btn.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr(lang, "Save")));
+            if save_btn.clicked() {
                 let now = format_now();
                 state.is_dirty = false;
                 state.execution_log.push(format!("[{now}] {}", crate::i18n::tr(lang, "Publication project saved to cache.")));
-                state.status_message = Some(("Proyek disimpan".into(), true));
+                state.status_message = Some((crate::i18n::tr(lang, "Publication project saved to cache.").to_string(), true));
             }
         });
     });
@@ -2037,20 +2043,20 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                 // Row 1: T and R
                 ui.horizontal(|ui| {
                     ui.allocate_ui_with_layout(vec2(col_w, 22.0), Layout::left_to_right(Align::Center), |ui| {
-                        render_margin_stepper(ui, "T", &mut state.margin_top_mm, t);
+                        render_margin_stepper(ui, "T", &mut state.margin_top_mm, t, lang);
                     });
                     ui.allocate_ui_with_layout(vec2(col_w, 22.0), Layout::left_to_right(Align::Center), |ui| {
-                        render_margin_stepper(ui, "R", &mut state.margin_right_mm, t);
+                        render_margin_stepper(ui, "R", &mut state.margin_right_mm, t, lang);
                     });
                 });
 
                 // Row 2: B and L
                 ui.horizontal(|ui| {
                     ui.allocate_ui_with_layout(vec2(col_w, 22.0), Layout::left_to_right(Align::Center), |ui| {
-                        render_margin_stepper(ui, "B", &mut state.margin_bottom_mm, t);
+                        render_margin_stepper(ui, "B", &mut state.margin_bottom_mm, t, lang);
                     });
                     ui.allocate_ui_with_layout(vec2(col_w, 22.0), Layout::left_to_right(Align::Center), |ui| {
-                        render_margin_stepper(ui, "L", &mut state.margin_left_mm, t);
+                        render_margin_stepper(ui, "L", &mut state.margin_left_mm, t, lang);
                     });
                 });
             });
@@ -2182,28 +2188,27 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
     });
 }
 
-fn render_margin_stepper(ui: &mut Ui, label: &str, val: &mut u32, t: &Tokens) {
+fn render_margin_stepper(ui: &mut Ui, label: &str, val: &mut u32, t: &Tokens, lang: &str) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = vec2(3.0, 0.0);
         ui.label(RichText::new(format!("{label}: {val}mm")).font(FontId::proportional(10.5)).color(t.text));
         let btn_size = vec2(17.0, 18.0);
         let btn_fill = t.accent_strong;
-        if ui
-            .add_sized(
-                btn_size,
-                egui::Button::new(RichText::new("-").font(semibold(11.0)).color(Color32::WHITE)).fill(btn_fill).corner_radius(CornerRadius::same(2)),
-            )
-            .clicked()
-        {
+        let minus = ui.add_sized(
+            btn_size,
+            egui::Button::new(RichText::new("-").font(semibold(11.0)).color(Color32::WHITE)).fill(btn_fill).corner_radius(CornerRadius::same(2)),
+        );
+        minus
+            .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr(lang, "Decrease {label}").replace("{label}", label)));
+        if minus.clicked() {
             *val = val.saturating_sub(1).max(5);
         }
-        if ui
-            .add_sized(
-                btn_size,
-                egui::Button::new(RichText::new("+").font(semibold(11.0)).color(Color32::WHITE)).fill(btn_fill).corner_radius(CornerRadius::same(2)),
-            )
-            .clicked()
-        {
+        let plus = ui.add_sized(
+            btn_size,
+            egui::Button::new(RichText::new("+").font(semibold(11.0)).color(Color32::WHITE)).fill(btn_fill).corner_radius(CornerRadius::same(2)),
+        );
+        plus.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr(lang, "Increase {label}").replace("{label}", label)));
+        if plus.clicked() {
             *val = val.saturating_add(1).min(60);
         }
     });
@@ -2312,6 +2317,7 @@ fn tab_button(ui: &mut Ui, label: &str, active: bool, t: &Tokens) -> Response {
     let galley = ui.painter().layout_no_wrap(label.to_string(), font, if active { t.text_strong } else { t.text_dim });
     let size = vec2(galley.size().x + 20.0, 24.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, active, label));
 
     if active {
         ui.painter().rect(rect, CornerRadius::same(3), t.well, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
@@ -2576,6 +2582,10 @@ fn render_facing_card(
 
     ui.push_id(idx, |ui| {
         let (card_rect, card_resp) = ui.allocate_exact_size(vec2(card_w, card_h), Sense::click());
+        card_resp.widget_info(|| {
+            let label = format!("{} — {} ({})", card.title, crate::i18n::tr(lang, "Edit card"), card.page);
+            egui::WidgetInfo::labeled(egui::Role::Button, true, label)
+        });
         if card_resp.clicked() {
             clicked_edit = true;
         }
@@ -2754,7 +2764,8 @@ fn render_tag_pill(ui: &mut Ui, label: &str, t: &Tokens) {
     let font = FontId::proportional(10.0);
     let galley = ui.painter().layout_no_wrap(label.to_string(), font, t.text);
     let size = vec2(galley.size().x + 8.0, 16.0);
-    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, label));
 
     ui.painter().rect(rect, CornerRadius::same(2), t.well, Stroke::new(1.0, t.field_border), StrokeKind::Inside);
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, Color32::PLACEHOLDER);
@@ -2772,7 +2783,11 @@ fn render_visual_live_preview(_app: &mut DesignApp, ui: &mut Ui, state: &mut Orc
             ui.label(RichText::new(crate::i18n::tr(lang, "Page Layout Preview (Live Spread Document)")).font(semibold(11.5)).color(t.text_strong));
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.label(RichText::new(format!("Total: {} Halaman", state.cards.len())).font(FontId::proportional(10.5)).color(t.text_dim));
+                ui.label(
+                    RichText::new(crate::i18n::tr(lang, "Total: {n} pages").replace("{n}", &state.cards.len().to_string()))
+                        .font(FontId::proportional(10.5))
+                        .color(t.text_dim),
+                );
             });
         });
 
@@ -3656,7 +3671,11 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                 // Section 4: Penomoran Halaman & Seksi (Halaman Baru)
                 if card.scope_new_page {
                     egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(4)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                        ui.label(RichText::new("Opsi Penomoran Halaman & Seksi:").font(semibold(11.0)).color(t.text_strong));
+                        ui.label(
+                            RichText::new(crate::i18n::tr(lang, "Page & Section Numbering Options:"))
+                                .font(semibold(11.0))
+                                .color(t.text_strong),
+                        );
                         ui.checkbox(&mut card.section_start, crate::i18n::tr(lang, "Start Section"));
                         if card.section_start {
                             ui.horizontal(|ui| {
@@ -4366,6 +4385,11 @@ mod tests {
             ("Thematic Map Settings (Choropleth & Spatial Map):", "Pengaturan Peta Tematik (Choropleth & Spatial Map):"),
             ("Opening file {path}", "Membuka berkas {path}"),
             ("QA audit finished: 0 errors, 0 warnings. Print standard passed.", "Audit QA selesai: 0 error, 0 warning. Standar cetak lolos."),
+            ("Edit card", "Edit kartu"),
+            ("Decrease {label}", "Kurangi {label}"),
+            ("Increase {label}", "Tambah {label}"),
+            ("Total: {n} pages", "Total: {n} Halaman"),
+            ("Page & Section Numbering Options:", "Opsi Penomoran Halaman & Seksi:"),
         ] {
             assert_eq!(crate::i18n::tr("id", key), id, "missing ID row for {key:?}");
             assert_eq!(crate::i18n::tr("en", key), key, "EN must be the source key");

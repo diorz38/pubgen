@@ -354,4 +354,11 @@ pub(super) const TABLE: &[(&str, &str)] = &[
         "Generating {n} publication page structures from the active worksheet…",
         "Memulai generate struktur {n} halaman publikasi dari worksheet aktif…",
     ),
+    // Screen-reader labels for painted Orchestrator controls (UI consistency F7).
+    ("Edit card", "Edit kartu"),
+    ("Decrease {label}", "Kurangi {label}"),
+    ("Increase {label}", "Tambah {label}"),
+    // Chrome strings missed by the first F8 sweep.
+    ("Total: {n} pages", "Total: {n} Halaman"),
+    ("Page & Section Numbering Options:", "Opsi Penomoran Halaman & Seksi:"),
 ];
