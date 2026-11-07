@@ -478,9 +478,15 @@ Orchestrator mode is active the title is "PubGen Studio — {publication}" using
 "PubGen Studio — Perkembangan Nilai Tukar Petani"; 1339 tests pass; clippy clean with and without the
 `pubgen` feature.
 
+**2026-11-07 — F11 fixed (dead chrome deleted).** Deleted `apps/pubgen-studio/src/chrome/` (the unused
+44-line "PUBGEN STUDIO" top bar and its mod), `workspaces/designcraft/mod.rs` (unused
+`render_designcraft`), and the unused `render_orchestrator` from `workspaces/orchestrator/mod.rs` (with its
+mojibake-emoji heading). Kept: `render_close_dialog` (used by app.rs), `guard_dialog`, `project`. Verified:
+`cargo check`/`clippy -p pubgen-studio --all-targets` clean.
+
 Not done yet: F4 (emoji vs icon font), F5 (type/radius scale), F6 (three tab treatments), F7 (accessibility
-widget_info sweep), F8 (i18n EN/ID completeness), F9 (menu rows bypass `Item::Cmd`), F10 rest, F11 (dead
-chrome modules), F12 (status-bar semantics), F14 (fixed 320 px dock), F15 (blank status bar).
+widget_info sweep), F8 (i18n EN/ID completeness), F9 (menu rows bypass `Item::Cmd`), F10 (naming rest),
+F12 (status-bar semantics), F14 (fixed 320 px dock), F15 (blank status bar).
 
 **2026-11-07 — F13 + F16 fixed (card footer clipping, `Source::`).** Branch `studio`.
 

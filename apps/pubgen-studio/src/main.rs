@@ -9,7 +9,6 @@
 #![allow(dead_code, unused_variables, clippy::disallowed_types, clippy::collapsible_if)]
 
 mod app;
-mod chrome;
 mod domain;
 mod mode;
 mod project;
