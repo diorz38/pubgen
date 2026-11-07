@@ -1,4 +1,4 @@
-﻿// Indonesian interface strings for DesignCraft & PubGen.
+// Indonesian interface strings for DesignCraft & PubGen.
 pub(super) const TABLE: &[(&str, &str)] = &[
     ("AI Prompt Generator", "Generator Prompt AI"),
     ("AI Translation & Terminology", "Penerjemahan AI & Glosarium"),
@@ -301,6 +301,12 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Zoom Tool", "Alat Pembesar"),
     // Orchestrator workspace strings (UI consistency F8).
     ("Resize panels", "Ubah Ukuran Panel"),
+    ("Page & Layout Utilities", "Utilitas Halaman & Tata Letak"),
+    ("AI Translate", "Terjemahan AI"),
+    ("Manual Ingest & Tables", "Impor Manual & Tabel"),
+    ("Customize Active Profile…", "Sesuaikan Profil Aktif…"),
+    ("Apply Profile Margins", "Terapkan Margin Profil"),
+    ("Dual Language Mode", "Mode Dua Bahasa"),
     ("Open file (.pubgen)", "Buka Berkas (.pubgen)"),
     ("Open Active Studio", "Buka Studio Aktif"),
     (

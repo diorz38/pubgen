@@ -1,4 +1,4 @@
-﻿# GUI consistency review: Publication Orchestrator vs. DesignCraft
+# GUI consistency review: Publication Orchestrator vs. DesignCraft
 
 Status: open — F1 fixed (2026-11-07), see §8 · Scope: `apps/pubgen-studio` + `crates/ui-egui` Orchestrator surface · Reference: DesignCraft mode (same shell, same tokens) · Base: `studio` @ `34c4ac6f`
 
@@ -498,7 +498,7 @@ success-colour heuristic now matches both languages (`berhasil`/`finished`/`QA a
 residuals (data, not chrome): persisted `card.tag1/tag2` values, the default seed log line, and the
 never-rendered `status_message` writes keep their original language. 1339 tests pass; clippy clean.
 
-Not done yet: F9 (menu rows bypass `Item::Cmd`).
+
 
 **2026-11-07 — F13 + F16 fixed (card footer clipping, `Source::`).** Branch `studio`.
 
@@ -620,3 +620,24 @@ radius 0/1/2) keeps its own radii, per §7.1. A regression test,
 `chrome_type_scale_never_dips_below_the_label_size`, reads this module's own source and fails if any
 `semibold`/`proportional`/`.size` call goes back below 11 px. Verified: 1341 tests pass, clippy clean,
 `cargo build -p pubgen-studio`; captures `.ui-shots/home-after-f5.png` and `.ui-shots/worksheet-after-f5.png`.
+
+**2026-11-07 — F9 fixed (menu toggle rows render like the host's `Item::Cmd` rows).** The PubGen bar grew
+its own toggle vocabulary: View▸mode used `selectable_label` with a two-space "✓  " prefix, View▸Theme used
+`selectable_label` with a one-space "✓" prefix, View▸Language used bare `selectable_label`, and the profile
+submenu prefixed `ui.button` labels with `"✓ "`/`"   "`. The host renderer (`menus/tree.rs::menu_items`)
+draws a checked `Item::Cmd` row as `✓ {label}`, an unchecked one as `   {label}` (three spaces), inside a
+`Button` with `shortcut_text`, `menu_enabled()` and a disabled-reason tooltip. The bar now has one helper,
+`checked_item(ui, label, on)`, that reproduces exactly that row shape, and every one of those sites uses it —
+so the mode, theme, language and profile rows line up in the same check column as File▸Dual Language Mode and
+are buttons rather than selectable labels. Rows stay local closures instead of becoming `Item::Cmd`: the
+`Item::Cmd` path resolves through `menus::state::checked()` → `invoke::activate(app, id, params)`, which takes
+no `egui::Context` and `DesignApp` carries no ctx, so `window.workspace` / `view.language` / `view.brightness`
+rows cannot reach context-dependent commands without new activation plumbing — a separate refactor, noted as
+such rather than half-done. Visible menu labels that had no Indonesian row gained one (`Page & Layout
+Utilities`, `AI Translate`, `Manual Ingest & Tables`, `Customize Active Profile…`, `Apply Profile Margins`,
+`Dual Language Mode`). New test `checked_rows_use_the_host_check_column` asserts the rendered strings are
+exactly `✓ Publication Orchestrator` and `   DesignCraft Layout Studio` (one space checked, three unchecked).
+Verified: 1342 tests pass, clippy clean, `cargo fmt` applied.
+
+Not done yet: nothing — all findings F1–F16 are fixed. Still open as a product question, not a defect: where
+the QA verdict (`● Clean (QA Fit 100%)`) permanently lives (§7.6) — dock tab 2 today, possibly the status bar.

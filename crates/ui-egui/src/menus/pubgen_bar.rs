@@ -1,4 +1,4 @@
-﻿//! PubGen's own menu bar (fork addition).
+//! PubGen's own menu bar (fork addition).
 //!
 //! Orchestrator Mode displays the 8 main menus matching the POS contract:
 //! 1. File
@@ -251,11 +251,11 @@ fn view_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
     crate::menus::menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(&lang, "View")), |ui| {
         popup(ui, rtl, 240.0, |ui| {
             let orch = is_orchestrator_mode(ui.ctx());
-            if ui.selectable_label(orch, "✓  Publication Orchestrator").clicked() {
+            if checked_item(ui, &crate::i18n::tr(&lang, "Publication Orchestrator"), orch) {
                 set_orchestrator_mode(ui.ctx(), true);
                 ui.close();
             }
-            if ui.selectable_label(!orch, "    DesignCraft Layout Studio").clicked() {
+            if checked_item(ui, &crate::i18n::tr(&lang, "DesignCraft Layout Studio"), !orch) {
                 set_orchestrator_mode(ui.ctx(), false);
                 ui.close();
             }
@@ -268,11 +268,11 @@ fn view_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
             submenu(ui, &lang, rtl, "Language / Bahasa", 180.0, |ui| {
                 let is_id = app.ui.language == "id";
                 let is_en = app.ui.language.is_empty() || app.ui.language == "en";
-                if ui.selectable_label(is_id, "Bahasa Indonesia").clicked() {
+                if checked_item(ui, &crate::i18n::tr(&lang, "Bahasa Indonesia"), is_id) {
                     let _ = app.run("app.language", serde_json::json!({"lang": "id"}));
                     ui.close();
                 }
-                if ui.selectable_label(is_en, "English").clicked() {
+                if checked_item(ui, &crate::i18n::tr(&lang, "English"), is_en) {
                     let _ = app.run("app.language", serde_json::json!({"lang": ""}));
                     ui.close();
                 }
@@ -281,8 +281,8 @@ fn view_menu(app: &mut DesignApp, ui: &mut egui::Ui) {
             submenu(ui, &lang, rtl, "Theme / Tema", 180.0, |ui| {
                 for b in crate::theme::Brightness::ALL {
                     let is_active = app.ui.brightness == b;
-                    let label = format!("{} {}", if is_active { "✓" } else { "  " }, crate::i18n::tr(&lang, b.label()));
-                    if ui.selectable_label(is_active, label).clicked() {
+                    let label = crate::i18n::tr(&lang, b.label()).to_owned();
+                    if checked_item(ui, &label, is_active) {
                         let _ = app.run("window.brightness", serde_json::json!({"brightness": b.id()}));
                         ui.close();
                     }
@@ -352,6 +352,14 @@ fn item(ui: &mut egui::Ui, lang: &str, label: &str, enabled: bool) -> bool {
     resp.clicked()
 }
 
+/// A toggle row drawn exactly like the host menus' `Item::Cmd` rows: `✓ label` when on, three leading
+/// spaces when off, so every check column in the bar lines up and rows are buttons, not selectable
+/// labels (the audit's P1-3).
+fn checked_item(ui: &mut egui::Ui, label: &str, on: bool) -> bool {
+    let text = if on { format!("✓ {label}") } else { format!("   {label}") };
+    ui.add(egui::Button::new(crate::rtl::widget(ui, text))).clicked()
+}
+
 /// A submenu row that opens `contents`.
 fn submenu(ui: &mut egui::Ui, lang: &str, rtl: bool, label: &str, min_width: f32, contents: impl FnOnce(&mut egui::Ui)) {
     crate::menus::menu_button(ui, crate::rtl::widget(ui, crate::i18n::tr(lang, label)), |ui| popup(ui, rtl, min_width, contents));
@@ -416,9 +424,7 @@ fn profiles_submenu(app: &mut DesignApp, ui: &mut egui::Ui, lang: &str, has_doc:
     let (active_id, custom) = crate::dock::pubgen::with_state(ui.ctx(), |st| (st.active_profile_id.clone(), st.profile_custom.clone()));
     for p in crate::dock::pubgen::ProfileManager::builtin_profiles() {
         let is_active = active_id == p.id;
-        let prefix = if is_active { "✓ " } else { "   " };
-        let label = format!("{prefix}{}", p.name);
-        if ui.button(crate::rtl::widget(ui, &label)).clicked() {
+        if checked_item(ui, &p.name, is_active) {
             crate::dock::pubgen::with_state(ui.ctx(), |st| {
                 st.apply_profile(p.clone(), true);
             });
@@ -427,9 +433,7 @@ fn profiles_submenu(app: &mut DesignApp, ui: &mut egui::Ui, lang: &str, has_doc:
     }
     if let Some(cust) = custom {
         let is_active = active_id == "custom";
-        let prefix = if is_active { "✓ " } else { "   " };
-        let label = format!("{prefix}{}", cust.name);
-        if ui.button(crate::rtl::widget(ui, &label)).clicked() {
+        if checked_item(ui, &cust.name, is_active) {
             crate::dock::pubgen::with_state(ui.ctx(), |st| {
                 st.apply_profile(cust.clone(), true);
             });
@@ -703,6 +707,31 @@ mod tests {
         assert!(!rows.iter().any(|t| t.contains("Compile Wizard")), "the duplicate route is gone: {rows:?}");
 
         assert!(!rows.iter().any(|t| t.contains("About")), "About lives in Help: {rows:?}");
+    }
+
+    /// Toggle rows line up in the host menus' check column: "✓ label" when on, three leading spaces
+    /// when off — not the two-space "✓  " prefix the View menu used to hand-roll (the audit's P1-3).
+    #[test]
+    fn checked_rows_use_the_host_check_column() {
+        let ctx = egui::Context::default();
+
+        crate::theme::install_fonts(&ctx, "en");
+
+        let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))), ..Default::default() };
+
+        let mut output = ctx.run_ui(input, |ui| {
+            checked_item(ui, "Publication Orchestrator", true);
+
+            checked_item(ui, "DesignCraft Layout Studio", false);
+        });
+
+        output.textures_delta.clear();
+
+        let rows = collect_texts(&output.shapes);
+
+        assert!(rows.iter().any(|t| t == "✓ Publication Orchestrator"), "{rows:?}");
+
+        assert!(rows.iter().any(|t| t == "   DesignCraft Layout Studio"), "{rows:?}");
     }
 
     /// The File menu's rows, drawn like the popup draws them.
