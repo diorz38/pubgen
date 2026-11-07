@@ -499,7 +499,7 @@ residuals (data, not chrome): persisted `card.tag1/tag2` values, the default see
 never-rendered `status_message` writes keep their original language. 1339 tests pass; clippy clean.
 
 Not done yet: F4 (emoji vs icon font), F5 (type/radius scale),
-F9 (menu rows bypass `Item::Cmd`), F10 (naming rest), F14 (fixed 320 px dock).
+F9 (menu rows bypass `Item::Cmd`), F10 (naming rest).
 
 **2026-11-07 — F13 + F16 fixed (card footer clipping, `Source::`).** Branch `studio`.
 
@@ -559,3 +559,16 @@ to a tab name, and the in-strip collapse control is 18 px wide to match the refe
 Verified: 1339 tests pass, clippy clean, and a `PrintWindow` capture of the Worksheet has zero accent-blue
 pixels left in the right tab strip, with the centre control now painting `t.tab_strip`/`t.panel` instead of
 `t.well` chips (`.ui-shots/worksheet-after-f6.png`).
+
+**2026-11-07 — F14 fixed (the right dock resizes).** The dock was pinned at `320.min(35%).max(280)` px
+with no splitter, so a long source path or a wide settings table could only be read by scrolling inside a
+fixed column. It now opens at `default_right_dock_w()` (320 px), stores its width in
+`OrchestratorWorkspaceState::right_dock_w` (serde-defaulted, so old workspaces still load), and the centre
+and dock are separated by a 5 px splitter drawn `t.border` that turns `t.accent` on hover/drag with a
+`ResizeHorizontal` cursor — the same affordance DesignCraft's panel splitter gives. Dragging writes
+`right_dock_w` clamped by `dock_width()` to `RIGHT_DOCK_MIN_W` (240 px) and `RIGHT_DOCK_MAX_SHARE` (60% of
+the window, so the centre can never disappear); collapsing still yields the 38 px icon strip and no
+splitter. The splitter is announced as `Role::Button` / "Resize panels" (new id.rs row "Ubah Ukuran Panel").
+Verified: new unit test `dock_width_clamps_and_collapses` (default/min/max/collapsed), 1340 tests pass,
+clippy clean, and a `PrintWindow` capture shows the 5 px `#383838` splitter at x=1116-1120 with the dock
+still 320 px wide (`.ui-shots/worksheet-after-f14.png`).

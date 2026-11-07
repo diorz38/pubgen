@@ -331,6 +331,9 @@ pub struct OrchestratorWorkspaceState {
     // Right panel dock state
     pub right_dock_tab: OrchestratorRightTab,
     pub right_dock_expanded: bool,
+    /// Width of the expanded right dock in points, dragged by the divider (F14).
+    #[serde(default = "default_right_dock_w")]
+    pub right_dock_w: f32,
     // Publication General Settings (Profile BRS BPS - Image #1)
     pub page_layout_facing: bool,
     pub doc_language: String,
@@ -525,6 +528,7 @@ impl Default for OrchestratorWorkspaceState {
             selected_profile: "bps_brs".into(),
             right_dock_tab: OrchestratorRightTab::SumberKonten,
             right_dock_expanded: true,
+            right_dock_w: default_right_dock_w(),
             page_layout_facing: true,
             doc_language: "Indonesian".into(),
             paper_size: "A4 (210 x 297 mm)".into(),
@@ -1116,6 +1120,27 @@ const DOCK_TAB_H: f32 = 27.0;
 const DOCK_TAB_LABEL: f32 = 12.0;
 const DOCK_TAB_PAD: f32 = 10.0;
 
+/// The width the expanded right dock opens at, and the range the divider may drag it to.
+fn default_right_dock_w() -> f32 {
+    320.0
+}
+const RIGHT_DOCK_MIN_W: f32 = 240.0;
+const RIGHT_DOCK_MAX_SHARE: f32 = 0.6;
+/// Grab width of the divider between the centre column and the right dock.
+const DOCK_DIVIDER_W: f32 = 5.0;
+/// Width of the collapsed right dock's icon strip.
+const RIGHT_DOCK_COLLAPSED_W: f32 = 38.0;
+
+/// The dock width and divider width for the current screen: the stored width clamped to a share of the
+/// window, or the icon strip when the dock is collapsed.
+fn dock_width(total_width: f32, dock_expanded: bool, stored_w: f32) -> (f32, f32) {
+    if !dock_expanded {
+        return (RIGHT_DOCK_COLLAPSED_W, 0.0);
+    }
+    let dock_max = (total_width * RIGHT_DOCK_MAX_SHARE).max(RIGHT_DOCK_MIN_W);
+    (stored_w.clamp(RIGHT_DOCK_MIN_W, dock_max), DOCK_DIVIDER_W)
+}
+
 /// Draws the workspace tab strip at the top of the Orchestrator panel, following Designcraft document tabs design.
 fn render_host_tabs(ui: &mut Ui, t: &Tokens, lang: &str) -> Option<HostTabAction> {
     let tabs: HostTabs = ui.ctx().data(|d| d.get_temp(host_tabs_id())).unwrap_or_default();
@@ -1586,9 +1611,10 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
     let total_width = avail_rect.width();
     let total_height = avail_rect.height();
 
-    // 2-Section Layout: Center takes available space; Right dock is either expanded or collapsed
-    let right_w = if state.right_dock_expanded { 320.0f32.min(total_width * 0.35).max(280.0) } else { 38.0f32 };
-    let center_w = (total_width - right_w).max(100.0);
+    // 2-Section Layout: the centre takes what is left; the right dock is either expanded to a
+    // draggable width or collapsed to an icon strip.
+    let (right_w, divider_w) = dock_width(total_width, state.right_dock_expanded, state.right_dock_w);
+    let center_w = (total_width - right_w - divider_w).max(100.0);
 
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -1609,7 +1635,19 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
         });
 
         // 2. RIGHT DOCK PANEL: Tab 1 (Sumber & Konten) + Tab 2 (Profil, Slot & Eksekusi)
-        let right_pos = pos2(avail_rect.min.x + center_w, avail_rect.min.y);
+        let right_pos = pos2(avail_rect.min.x + center_w + divider_w, avail_rect.min.y);
+
+        // Divider: drag to resize the dock, like DesignCraft's panel splitter.
+        if state.right_dock_expanded && divider_w > 0.0 {
+            let (divider_rect, divider_resp) = ui.allocate_exact_size(vec2(divider_w, total_height), Sense::drag());
+            divider_resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, crate::i18n::tr(&lang, "Resize panels")));
+            let active = divider_resp.hovered() || divider_resp.dragged();
+            ui.painter().rect_filled(divider_rect, CornerRadius::ZERO, if active { t.accent } else { t.border });
+            if divider_resp.dragged() {
+                state.right_dock_w = dock_width(total_width, true, state.right_dock_w - divider_resp.drag_delta().x).0;
+            }
+            divider_resp.on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+        }
         ui.allocate_ui_with_layout(vec2(right_w, total_height), Layout::top_down(Align::Min), |ui| {
             ui.set_clip_rect(Rect::from_min_size(right_pos, vec2(right_w, total_height)));
             egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.border)).show(ui, |ui| {
@@ -4282,6 +4320,17 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The dock opens at 320 px, and the divider can drag it only within
+    /// [`RIGHT_DOCK_MIN_W`] and 60% of the window; collapsing gives the 38 px icon strip and no divider.
+    #[test]
+    fn dock_width_clamps_and_collapses() {
+        assert_eq!(dock_width(1440.0, true, default_right_dock_w()), (320.0, DOCK_DIVIDER_W));
+        assert_eq!(dock_width(1440.0, true, 40.0).0, RIGHT_DOCK_MIN_W);
+        assert_eq!(dock_width(1440.0, true, 5000.0).0, 1440.0 * RIGHT_DOCK_MAX_SHARE);
+        assert_eq!(dock_width(300.0, true, 5000.0).0, RIGHT_DOCK_MIN_W);
+        assert_eq!(dock_width(1440.0, false, 320.0), (RIGHT_DOCK_COLLAPSED_W, 0.0));
+    }
 
     /// Card rows contain `Ui::horizontal` rows (pills, footer) that are never shorter than the
     /// style's `interact_size.y` (18 px by default). The measurement must budget those minimums or

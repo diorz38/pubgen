@@ -300,6 +300,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Zebra striping", "Pewarnaan baris otomatis (zebra)"),
     ("Zoom Tool", "Alat Pembesar"),
     // Orchestrator workspace strings (UI consistency F8).
+    ("Resize panels", "Ubah Ukuran Panel"),
     ("📂 Open file (.pubgen)", "📂 Buka Berkas (.pubgen)"),
     ("➡ Open Active Studio", "➡ Buka Studio Aktif"),
     (
