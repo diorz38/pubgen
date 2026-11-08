@@ -8,12 +8,12 @@
 //! Both the left and right panels follow the exact visual styling and design tokens of DesignCraft's left panel.
 
 use egui::{
-    pos2, vec2, Align, Align2, Color32, CornerRadius, FontId, Layout, Margin, Rect, Response, RichText, ScrollArea, Sense, Stroke, StrokeKind, Ui,
+    Align, Align2, Color32, CornerRadius, FontId, Layout, Margin, Rect, Response, RichText, ScrollArea, Sense, Stroke, StrokeKind, Ui, pos2, vec2,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::theme::{semibold, Tokens};
 use crate::DesignApp;
+use crate::theme::{Tokens, semibold};
 
 const WORKSPACE_STATE_ID: &str = "pubgen_orchestrator_workspace_state";
 
@@ -856,11 +856,7 @@ pub fn apply_ingest_report_to_state(
     // sources at it, so a new prefix would orphan those sources.
     let norm = |prefix: &str, name: &str| {
         let n = name.replace('\\', "/");
-        if n.starts_with(prefix) || n.contains('/') {
-            n
-        } else {
-            format!("{prefix}/{n}")
-        }
+        if n.starts_with(prefix) || n.contains('/') { n } else { format!("{prefix}/{n}") }
     };
 
     // Narratives are RTF; a package written before that change still carries Markdown, whose
@@ -2950,11 +2946,7 @@ fn render_facing_card(
         });
     });
 
-    if clicked_edit {
-        Some(idx)
-    } else {
-        None
-    }
+    if clicked_edit { Some(idx) } else { None }
 }
 
 fn render_card_action_bar(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, lang: &str) {
@@ -4349,20 +4341,6 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
     // Fix round 2: carry the worksheet's language into the pipeline state. The page generator
     // reads it to decide bilingual output for BRS, so it must not arrive empty.
     st.doc_language = state.doc_language.clone();
-    let is_bilingual = state.doc_language.to_lowercase().contains("bilingual")
-        || state.doc_language.to_lowercase().contains("dwibahasa")
-        || state.doc_language.eq_ignore_ascii_case("indonesian-english")
-        || state.doc_language.eq_ignore_ascii_case("indo-english")
-        || (state.doc_language.to_lowercase().contains("indonesia") && state.doc_language.to_lowercase().contains("english"));
-    if is_bilingual || state.selected_profile == "bps_dda" {
-        st.bilingual_output = true;
-    } else if state.selected_profile == "bps_brs" {
-        st.bilingual_output = false;
-    }
-
-    // T7: seed the generation cache from the translation memory so a compile reuses
-    // every translation; the worksheet's glossary reaches `pair_cells` the same way.
-    super::translate_stage::seed_pubgen_state(&mut st, &state.tm);
     st.glossary = super::ai::BpsGlossary::load(&app.session.prefs.pubgen_glossary_path);
 
     if state.margin_top_mm > 0 {
@@ -4459,11 +4437,7 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
             event_theme: card.settings.get("event_theme").cloned().unwrap_or_default(),
             palette: card.cover_ai_palette.clone(),
             release_no: if state.selected_profile == "bps_brs" {
-                if !card.cover_release_no.trim().is_empty() {
-                    card.cover_release_no.clone()
-                } else {
-                    state.meta_release_no.clone()
-                }
+                if !card.cover_release_no.trim().is_empty() { card.cover_release_no.clone() } else { state.meta_release_no.clone() }
             } else {
                 String::new()
             },
@@ -4505,15 +4479,7 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
                 let is_rxx = id_upper.starts_with('R') && id_upper.len() > 1 && id_upper[1..].chars().all(|c| c.is_ascii_digit() || c == '_');
                 let title_upper = card.title.trim().to_ascii_uppercase();
                 let title_starts_bab = title_upper.starts_with("BAB ") || title_upper.starts_with("CHAPTER ");
-                if is_rxx || title_starts_bab {
-                    if file.is_empty() {
-                        "Note"
-                    } else {
-                        "Ulasan"
-                    }
-                } else {
-                    "Note"
-                }
+                if is_rxx || title_starts_bab { if file.is_empty() { "Note" } else { "Ulasan" } } else { "Note" }
             }
             CardKind::Table => "Tabel",
             CardKind::Divider => "Divider",
@@ -4554,11 +4520,7 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
                 })
                 .or_else(|| {
                     let stripped = card.chapter_id.trim_start_matches(|c: char| c.is_alphabetic() || c == '_');
-                    if !stripped.is_empty() && stripped.contains('_') {
-                        Some(stripped.replace('_', "."))
-                    } else {
-                        None
-                    }
+                    if !stripped.is_empty() && stripped.contains('_') { Some(stripped.replace('_', ".")) } else { None }
                 })
                 .or_else(|| card.title.split_whitespace().find(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_digit())).map(str::to_string))
                 .unwrap_or_default()
@@ -4614,6 +4576,24 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         super::csv::load_card2_csv(&mut st, &first_table);
     }
 
+    // Bilingual output is re-derived *here*, at the last point before page generation: every
+    // `apply_profile` call and `excel::apply_excel_cover` above resets `bilingual_output` from
+    // the profile, and the seed below derives `translate_with_ai` from it. Deriving it earlier
+    // left the two flags disagreeing and the paired English never rendered.
+    let is_bilingual = state.doc_language.to_lowercase().contains("bilingual")
+        || state.doc_language.to_lowercase().contains("dwibahasa")
+        || state.doc_language.eq_ignore_ascii_case("indonesian-english")
+        || state.doc_language.eq_ignore_ascii_case("indo-english")
+        || (state.doc_language.to_lowercase().contains("indonesia") && state.doc_language.to_lowercase().contains("english"));
+    if is_bilingual || state.selected_profile == "bps_dda" {
+        st.bilingual_output = true;
+    } else if state.selected_profile == "bps_brs" {
+        st.bilingual_output = false;
+    }
+    // T7: seed the generation cache from the translation memory so a compile reuses
+    // every translation; the worksheet's glossary reaches `pair_cells` the same way.
+    super::translate_stage::seed_pubgen_state(&mut st, &state.tm);
+
     super::excel::generate_publication_pages(app, &mut st)
 }
 
@@ -4661,11 +4641,7 @@ fn execute_compile(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orchest
 fn sanitize_file_stem(title: &str) -> String {
     let stem: String = title.trim().chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == ' ' { c } else { ' ' }).collect();
     let stem = stem.split_whitespace().collect::<Vec<_>>().join("_");
-    if stem.is_empty() {
-        "publikasi".into()
-    } else {
-        stem
-    }
+    if stem.is_empty() { "publikasi".into() } else { stem }
 }
 
 /// Renders the Re-compilation Safety Guard Dialog (3-way modal: Overwrite / Save v2 / Cancel).
@@ -5401,10 +5377,7 @@ mod tests {
             );
 
             // Verify Map Chart titles are present in the document
-            assert!(
-                doc.stories.values().any(|s| s.text.contains("Perbandingan Jumlah Penduduk")),
-                "Map title must be present in document stories!"
-            );
+            assert!(doc.stories.values().any(|s| s.text.contains("Perbandingan Jumlah Penduduk")), "Map title must be present in document stories!");
             assert!(
                 doc.stories.values().any(|s| s.text.contains("Comparison of Population Size")),
                 "Map English title must be present in document stories!"
@@ -5413,8 +5386,6 @@ mod tests {
             // Verify DDA subtitle has no release date or multi-line agency text
             assert!(!state.meta_subtitle.contains("Oktober"), "DDA subtitle must not contain release date: {}", state.meta_subtitle);
             assert!(!state.meta_subtitle.contains('\n'), "DDA subtitle must not contain newlines: {}", state.meta_subtitle);
-
-
 
             // Verify Bookmark debris is completely absent
             for s in doc.stories.values() {

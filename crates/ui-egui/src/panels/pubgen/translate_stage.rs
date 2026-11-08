@@ -263,15 +263,16 @@ pub fn write_card_english(card: &mut PublicationCard, role: UnitRole, _source: &
 /// Seed the generation cache from the memory so a compile reuses every translation:
 /// `st.translations` is the map the page generators consult (`en_text`, `pair_cells`,
 /// the title fallbacks). Bilingual output turns on when the profile is bilingual and
-/// there is anything to render.
+/// there is anything to render, and `translate_with_ai` — the flag the page
+/// generators gate the paired table cells and the English narrative body on — follows
+/// it. Nothing else on the Generate path sets that flag, so without this line the
+/// plan's English would never render.
 pub fn seed_pubgen_state(st: &mut PubgenState, tm: &TranslationMemory) {
-    if tm.entries.is_empty() {
-        return;
-    }
     st.translations.extend(tm.to_map());
-    if st.active_profile().structure.bilingual {
+    if !tm.entries.is_empty() && st.active_profile().structure.bilingual {
         st.bilingual_output = true;
     }
+    st.translate_with_ai = st.bilingual_output && !tm.entries.is_empty();
 }
 
 // ---------------------------------------------------------------------------
@@ -645,6 +646,51 @@ mod tests {
         let mut st2 = PubgenState::default();
         seed_pubgen_state(&mut st2, &TranslationMemory::default());
         assert!(st2.translations.is_empty());
+    }
+
+    #[test]
+    fn a_bilingual_profile_and_a_memory_arm_bilingual_rendering() {
+        // The page generators gate the paired English on `translate_with_ai`; nothing on the
+        // Generate path sets it, so the seed is the one place that must.
+        let mut tm = TranslationMemory::default();
+        tm.insert(TmEntry {
+            source: "Produksi Padi".into(),
+            target: "Rice Production".into(),
+            origin: TmOrigin::Reviewed,
+            role: "table_header".into(),
+            updated: now_stamp(),
+        });
+        let mut st = PubgenState::default();
+        assert!(!st.translate_with_ai, "a fresh state never renders bilingual English");
+        seed_pubgen_state(&mut st, &tm);
+        assert!(st.bilingual_output, "the default profile is bilingual");
+        assert!(st.translate_with_ai, "a bilingual profile with a memory must render the English");
+        assert_eq!(st.translations.get("Produksi Padi").map(String::as_str), Some("Rice Production"));
+    }
+
+    #[test]
+    fn an_empty_memory_never_arms_bilingual_rendering() {
+        let mut st = PubgenState::default();
+        st.translate_with_ai = true; // stale flag from an earlier run
+        seed_pubgen_state(&mut st, &TranslationMemory::default());
+        assert!(!st.translate_with_ai, "nothing to render must not leave the gate armed");
+    }
+
+    #[test]
+    fn a_single_language_profile_never_arms_bilingual_rendering() {
+        let mut tm = TranslationMemory::default();
+        tm.insert(TmEntry {
+            source: "Produksi Padi".into(),
+            target: "Rice Production".into(),
+            origin: TmOrigin::Reviewed,
+            role: "table_header".into(),
+            updated: now_stamp(),
+        });
+        let mut st = PubgenState { active_profile_id: "bps_brs".into(), ..PubgenState::default() };
+        seed_pubgen_state(&mut st, &tm);
+        assert!(!st.bilingual_output, "BRS is single-language");
+        assert!(!st.translate_with_ai, "a single-language profile must not pair cells");
+        assert_eq!(st.translations.get("Produksi Padi").map(String::as_str), Some("Rice Production"), "the memory is still cached");
     }
 
     #[test]
