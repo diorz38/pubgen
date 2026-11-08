@@ -17,7 +17,7 @@ Tempat pengaturannya: di DesignCraft berupa preferensi penyedia di `prefs.json` 
 
 ### Lembar Kerja Terjemahan (sebelum kompilasi)
 
-Di dock kanan Orchestrator, tab **Profil & Eksekusi** (antarmuka Inggris: **Profile & Execution**), ada tombol **Translate Worksheet** di bawah kotak profil publikasi. Tombol ini diredupkan sampai ada penyedia yang dikonfigurasi dan lembar kerja berisi minimal satu kartu, tetapi tetap bisa ditekan: bila ada kartu dan belum ada penyedia, tahapnya tetap menyelesaikan kecocokan memori dan glosarium secara lokal, dan sisa yang belum dikenal melaporkan bahwa belum ada penyedia yang dikonfigurasi. Satu tekan memulai pekerjaan latar belakang:
+Di dock kanan Orchestrator, tab **Profil & Eksekusi** (antarmuka Inggris: **Profile & Execution**), ada tombol **Translate Worksheet** di bawah kotak profil publikasi. Tombol ini diredupkan sampai ada penyedia yang dikonfigurasi dan lembar kerja berisi minimal satu kartu, tetapi tetap bisa ditekan: bila ada kartu dan belum ada penyedia, tahapnya tetap menyelesaikan kecocokan memori dan glosarium secara lokal, dan sisa yang belum dikenal melaporkan bahwa belum ada penyedia yang dikonfigurasi. Setelah penyedia dikonfigurasi, satu tekan memulai pekerjaan latar belakang:
 
 1. Kumpulkan unit yang dapat diterjemahkan dari setiap kartu (tabel di bawah).
 2. Selesaikan apa yang bisa diselesaikan secara lokal: entri memori terjemahan (asal mana pun), atau istilah glosarium resmi yang cocok utuh. Unit-unit itu dihitung sebagai digunakan ulang (*reused*) dan tidak memakan permintaan; kecocokan glosarium juga masuk ke memori sebagai *Imported*.

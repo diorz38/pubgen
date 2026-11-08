@@ -1071,7 +1071,7 @@ Where the settings live: in DesignCraft they are provider preferences in `prefs.
 
 ### Translate Worksheet (pre-compile)
 
-The Orchestrator's right dock, **Profile & Execution** tab, has **Translate Worksheet** under the publication-profile box. It is dimmed until a provider is configured and the worksheet has at least one card, but it can still be pressed: with cards and no provider it resolves memory and glossary hits locally, and anything left over reports that no provider is configured. One press starts a background job:
+The Orchestrator's right dock, **Profile & Execution** tab, has **Translate Worksheet** under the publication-profile box. It is dimmed until a provider is configured and the worksheet has at least one card, but it can still be pressed: with cards and no provider it resolves memory and glossary hits locally, and anything left over reports that no provider is configured. Once a provider is configured, one press starts a background job:
 
 1. Collect the translatable units of every card (the table below).
 2. Resolve what can be resolved locally: a translation-memory entry (any origin), or a whole-string official glossary term. Those units are counted as reused and cost no request; a glossary hit also enters the memory as *Imported*.
