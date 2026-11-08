@@ -127,6 +127,11 @@ impl OnlineTranslator {
         Self { inner: online::OnlineTranslator::new(key, model) }
     }
 
+    /// Any OpenAI-compatible endpoint (custom host or local server).
+    pub fn with_endpoint(key: &str, model: &str, base_url: &str) -> Self {
+        Self { inner: online::OnlineTranslator::with_endpoint(key, model, base_url) }
+    }
+
     /// The model ids the account may use (Groq \`GET /openai/v1/models\`).
     pub fn list_models(&self) -> Result<Vec<String>, TranslateError> {
         self.inner.list_models()
@@ -155,7 +160,7 @@ pub fn is_available() -> bool {
     nllb::compiled_in()
 }
 
-/// Online (Groq) backend compiled in? (\`cfg!(feature = "groq")\`.)
+/// Online (Groq) backend compiled in? (\`cfg!(feature = "online")\`.)
 pub fn online_available() -> bool {
     online::compiled_in()
 }
@@ -278,6 +283,6 @@ mod tests {
         let err = Translator::load(Path::new(".")).err().expect("offline load must error without a model");
         assert!(matches!(err, TranslateError::Unavailable));
         assert!(!is_available());
-        assert_eq!(online_available(), cfg!(feature = "groq"));
+        assert_eq!(online_available(), cfg!(feature = "online"));
     }
 }
