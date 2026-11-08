@@ -270,6 +270,19 @@ pub struct Prefs {
     pub translation_groq_api_key: String,
     /// Groq model id (resolved via GET /openai/v1/models on first use).
     pub translation_groq_model: String,
+    /// Base URL of a custom OpenAI-compatible endpoint (no trailing slash).
+    #[serde(default)]
+    pub translation_custom_base_url: String,
+    /// Key for the custom endpoint. Header only; never logged or exported.
+    #[serde(default)]
+    pub translation_custom_api_key: String,
+    #[serde(default)]
+    pub translation_custom_model: String,
+    /// Local OpenAI-compatible server (Ollama, LM Studio, llama.cpp).
+    #[serde(default = "default_local_base_url")]
+    pub translation_local_base_url: String,
+    #[serde(default)]
+    pub translation_local_model: String,
     /// Pubgen BPS terminology: path to a user-edited glossary JSON. Empty = the bundled
     /// `assets/pubgen/bps_glossary.json`.
     pub pubgen_glossary_path: String,
@@ -285,6 +298,11 @@ pub struct Prefs {
 
 /// The most recent files Preferences lets File › Open Recent keep.
 pub const MAX_RECENT_FILES: u32 = 100;
+
+/// Default base URL of the local OpenAI-compatible translation server (Ollama's port).
+fn default_local_base_url() -> String {
+    "http://localhost:11434/v1".to_string()
+}
 
 impl Prefs {
     /// Move `path` to the front of File › Open Recent (no duplicates, at most `recent_files_max`).
@@ -415,6 +433,11 @@ impl Default for Prefs {
             translation_provider: String::from("offline"),
             translation_groq_api_key: String::new(),
             translation_groq_model: String::new(),
+            translation_custom_base_url: String::new(),
+            translation_custom_api_key: String::new(),
+            translation_custom_model: String::new(),
+            translation_local_base_url: default_local_base_url(),
+            translation_local_model: String::new(),
             pubgen_glossary_path: String::new(),
             pubgen_project_path: String::new(),
             cover_ai_cloudflare_account_id: String::new(),

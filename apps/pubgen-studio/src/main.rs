@@ -12,6 +12,7 @@ mod app;
 mod domain;
 mod mode;
 mod project;
+mod settings;
 mod window_frame;
 mod workspaces;
 
@@ -110,7 +111,7 @@ fn main() -> eframe::Result<()> {
                 }
             }
 
-            Ok(Box::new(PubgenStudioApp::new(app, initial_mode, project_path, container)))
+            Ok(Box::new(PubgenStudioApp::new(app, initial_mode, project_path, container, settings::ProviderSettings::load())))
         }),
     )
 }

@@ -10,13 +10,22 @@ pub struct PubgenStudioApp {
     pub app: DesignApp,
     pub project_path: Option<PathBuf>,
     pub container: Option<PubgenContainer>,
+    /// AI translation provider config, loaded from settings.json on start;
+    /// saved when the setup dialog is accepted (Task 6).
+    pub settings: crate::settings::ProviderSettings,
     pub guard_dialog: RecompileGuardDialog,
     pub orchestrator_tabs: OrchestratorTabs,
     pending_open: Option<PathBuf>,
 }
 
 impl PubgenStudioApp {
-    pub fn new(app: DesignApp, initial_mode: StudioMode, project_path: Option<PathBuf>, container: Option<PubgenContainer>) -> Self {
+    pub fn new(
+        app: DesignApp,
+        initial_mode: StudioMode,
+        project_path: Option<PathBuf>,
+        container: Option<PubgenContainer>,
+        settings: crate::settings::ProviderSettings,
+    ) -> Self {
         let pending_open =
             project_path.as_ref().filter(|path| path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("pubgen"))).cloned();
         Self {
@@ -24,6 +33,7 @@ impl PubgenStudioApp {
             app,
             project_path,
             container,
+            settings,
             guard_dialog: RecompileGuardDialog::new(),
             orchestrator_tabs: OrchestratorTabs::default(),
             pending_open,
