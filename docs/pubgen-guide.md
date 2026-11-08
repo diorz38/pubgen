@@ -1054,7 +1054,7 @@ Two limits worth knowing: a customised profile lives for the session only (the a
 
 ## 13. AI Translation & Terminology Memory
 
-Pubgen translates an Indonesian publication into English with an OpenAI-compatible chat model you choose, and keeps every decision in the project package. Translation is prepared **before** a compile: the Orchestrator's **Translate Worksheet** stage fills the English, you review it, and the compile renders it. The in-document per-page actions are still there for fixing a single page by hand.
+Pubgen translates an Indonesian publication into English with an OpenAI-compatible chat model you choose, and keeps every decision in the project package. Translation is prepared **before** a compile: the Orchestrator's **Translate Worksheet** stage fills the English, you review it, and a compile renders the titles, captions and notes the stage stored — table cells and the narrative body are the exception (see Limits). The in-document per-page actions are still there for fixing a single page by hand.
 
 Everything below needs the online build (`--features pubgen,ai-translate-online`; the Studio app enables it) and a configured provider. The offline NLLB model cannot run in this build — the setup dialog's **Offline on this computer** row says so.
 
@@ -1071,7 +1071,7 @@ Where the settings live: in DesignCraft they are provider preferences in `prefs.
 
 ### Translate Worksheet (pre-compile)
 
-The Orchestrator's right dock, **Profile & Execution** tab, has **Translate Worksheet** under the publication-profile box. It is disabled until a provider is configured and the worksheet has at least one card. One press starts a background job:
+The Orchestrator's right dock, **Profile & Execution** tab, has **Translate Worksheet** under the publication-profile box. It is dimmed until a provider is configured and the worksheet has at least one card, but it can still be pressed: with cards and no provider it resolves memory and glossary hits locally, and anything left over reports that no provider is configured. One press starts a background job:
 
 1. Collect the translatable units of every card (the table below).
 2. Resolve what can be resolved locally: a translation-memory entry (any origin), or a whole-string official glossary term. Those units are counted as reused and cost no request; a glossary hit also enters the memory as *Imported*.
@@ -1100,7 +1100,7 @@ The button shows the progress (`Menerjemahkan dengan AI… 12/84`, Indonesian in
 
 - empty or whitespace only;
 - a number on its own (`1.234,56`, `(1)`, `2026`, `12,5%`, `-`);
-- an identifier — ISSN/ISBN, a catalogue code (`Katalog BPS: …`), a URL, an e-mail address, a file path;
+- an identifier — ISSN/ISBN, a catalogue code (`Katalog BPS: …`), a URL, an e-mail address, a path ending in a known file extension;
 - a protected proper name — GeoJSON region names on map cards (`nmdesa`/`nmkec`), and the cover's agency, office and contact names;
 - already bilingual (it contains ` / ` or a forced line break) or already known (the same text is collected once).
 
@@ -1114,11 +1114,11 @@ The right dock's third tab is **Translation Review** (Indonesian interface: **Ul
 - **Reject** removes the entry, so a later run may translate that text again.
 - Either action marks the project dirty; save the package to keep it.
 
-The card editor shows the state next to **Title EN:** — a badge **AI draft** with its own **Accept** button, or **Reviewed** (these two labels are English in both interface languages). A *Reviewed* entry is never overwritten by a later AI run: the model's new target is dropped and the reviewed one is kept. A glossary hit shows no badge — it is deterministic, not a draft.
+The card editor shows the state next to **Title EN:** (a field that appears only in a bilingual or English document) — a badge **AI draft** with its own **Accept** button, or **Reviewed** (these two labels are English in both interface languages). A *Reviewed* entry is never overwritten by a later AI run: the model's new target is dropped and the reviewed one is kept. A glossary hit shows no badge — it is deterministic, not a draft.
 
 ### Translation memory
 
-Every accepted unit is stored in `translation_memory.json` inside the `.pubgen` package: source, target, origin, role and timestamp. Origins are **Ai** (a draft), **Reviewed** (a human decision) and **Imported** (a whole-string glossary hit).
+Every accepted unit is stored in `translation_memory.json` inside the `.pubgen` package: source, target, origin, role and timestamp. In the file the origins are `ai` (a draft), `reviewed` (a human decision) and `imported` (a whole-string glossary hit).
 
 - Lookup ignores extra whitespace and falls back to case; a *Reviewed* or *Imported* entry wins over an AI draft with the same source.
 - The memory is capped at 100,000 entries per package. Past the cap new units are not stored; an existing entry can still be replaced.
@@ -1160,7 +1160,7 @@ pgs-cli translate <PROJECT.pubgen> --provider <groq|custom|local> --model <MODEL
 
 - `--provider` is `groq`, `custom` or `local`; `offline` is refused.
 - `--base-url` is optional for `groq` (Groq's endpoint is the default) and required for `custom` and `local`.
-- `--key-env` names the environment variable that holds the key — required for `groq` and `custom`, not read for `local`. There is deliberately no option that takes the key itself.
+- `--key-env` names the environment variable that holds the key — required for `groq` and `custom`, not required for `local`; when it is given, the variable is read for every provider, so one that is unset or empty is an error. There is deliberately no option that takes the key itself.
 - `--dry-run` counts the units and stops: no network, no environment lookup, no package write.
 - The report is JSON on stdout — `units` (collected), `translated` (new AI targets stored), `reused` (memory hits), `skipped` (whole-string glossary hits), and `failed`, each entry naming the unit and the reason.
 - The exit status is non-zero when any unit failed. Only the memory is written back; card settings and package content stay untouched, so the GUI still shows the new drafts for review.
@@ -1170,7 +1170,7 @@ pgs-cli translate <PROJECT.pubgen> --provider <groq|custom|local> --model <MODEL
 - **A BRS direct table page stays single-language.** The BRS sheet import renders such a table with its Indonesian title and single-language cells; only the template (DDA) table path writes a bilingual table title and the paired note/source line.
 - **Table header/row cells and the English narrative body are not painted by a Compile.** The generation step that pairs table cells and rebuilds the English narrative body from the memory belongs to the per-page AI mode, which a compile leaves off; a Compile therefore paints the Indonesian cells and body. Use the in-document table and review actions for those pages, or name an English RTF in the card's `file_en`.
 - **A narrative paragraph with no usable English keeps its Indonesian text.** When the English body is rebuilt from the memory, a paragraph whose target is missing, empty, or would add a line break keeps the Indonesian paragraph; the paragraph count and every paragraph style are preserved, and the rest of the body still publishes.
-- **English heading detection needs paragraph styles.** In a narrative spread, a heading is recognised by its paragraph style (**Title**, **Heading 1**, **Heading 2**). A legacy Indonesian document whose paragraphs carry no such style falls back to text heuristics that only match the Indonesian headings.
+- **English heading detection needs paragraph styles.** In a narrative spread, a heading is recognised by its paragraph style (**Title**, **Heading 1**, **Heading 2**). A legacy Indonesian document whose paragraphs carry no such style falls back to text heuristics: the known Indonesian headings, plus short paragraphs starting `A. `, `B. ` or `C. ` recognised as **Title**.
 - **The manifest compile does not translate.** `pubgen.compileProject` and `pgs-cli compile` start from a fresh generation state: they do not run the worksheet stage and do not read the memory, so they render only the workbook's own English columns and the glossary. Generate from the Orchestrator for AI English.
 - **TLS trusts public roots only.** The HTTP client is ureq 2 with the Mozilla root store compiled in (webpki-roots); it does not read the operating system's certificate store. An endpoint behind a private CA — an internal gateway or a corporate proxy — fails with a certificate error. Use Local AI over plain `http://localhost`, or a certificate from a publicly trusted CA.
 - **The offline model is not in this build**, whatever the hardware pane reports.

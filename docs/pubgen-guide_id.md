@@ -951,7 +951,7 @@ Dua batasan yang perlu diketahui: profil kustom hanya bertahan selama sesi (pili
 
 ## 13. Terjemahan AI & Memori Terminologi
 
-Pubgen menerjemahkan publikasi berbahasa Indonesia ke bahasa Inggris dengan model chat yang kompatibel dengan OpenAI pilihan Anda, dan menyimpan setiap keputusan di dalam paket proyek. Terjemahan disiapkan **sebelum** kompilasi: tahap **Translate Worksheet** di Orchestrator mengisi teks Inggris, Anda mengulasnya, lalu kompilasi merendernya. Tindakan per halaman di dalam dokumen tetap tersedia untuk membetulkan satu halaman secara manual.
+Pubgen menerjemahkan publikasi berbahasa Indonesia ke bahasa Inggris dengan model chat yang kompatibel dengan OpenAI pilihan Anda, dan menyimpan setiap keputusan di dalam paket proyek. Terjemahan disiapkan **sebelum** kompilasi: tahap **Translate Worksheet** di Orchestrator mengisi teks Inggris, Anda mengulasnya, lalu kompilasi merender judul, keterangan, dan catatan yang disimpannya — sel tabel dan badan narasi adalah pengecualian (lihat batasan). Tindakan per halaman di dalam dokumen tetap tersedia untuk membetulkan satu halaman secara manual.
 
 Semua di bawah ini memerlukan build daring (`--features pubgen,ai-translate-online`; aplikasi Studio mengaktifkannya) dan penyedia yang sudah dikonfigurasi. Model NLLB luring tidak dapat berjalan di build ini — baris **Offline on this computer** di dialog penyiapan menyatakannya.
 
@@ -968,7 +968,7 @@ Tempat pengaturannya: di DesignCraft berupa preferensi penyedia di `prefs.json` 
 
 ### Lembar Kerja Terjemahan (sebelum kompilasi)
 
-Di dock kanan Orchestrator, tab **Profil & Eksekusi** (antarmuka Inggris: **Profile & Execution**), ada tombol **Translate Worksheet** di bawah kotak profil publikasi. Tombol ini nonaktif sampai ada penyedia yang dikonfigurasi dan lembar kerja berisi minimal satu kartu. Satu tekan memulai pekerjaan latar belakang:
+Di dock kanan Orchestrator, tab **Profil & Eksekusi** (antarmuka Inggris: **Profile & Execution**), ada tombol **Translate Worksheet** di bawah kotak profil publikasi. Tombol ini diredupkan sampai ada penyedia yang dikonfigurasi dan lembar kerja berisi minimal satu kartu, tetapi tetap bisa ditekan: bila ada kartu dan belum ada penyedia, tahapnya tetap menyelesaikan kecocokan memori dan glosarium secara lokal, dan sisa yang belum dikenal melaporkan bahwa belum ada penyedia yang dikonfigurasi. Satu tekan memulai pekerjaan latar belakang:
 
 1. Kumpulkan unit yang dapat diterjemahkan dari setiap kartu (tabel di bawah).
 2. Selesaikan apa yang bisa diselesaikan secara lokal: entri memori terjemahan (asal mana pun), atau istilah glosarium resmi yang cocok utuh. Unit-unit itu dihitung sebagai digunakan ulang (*reused*) dan tidak memakan permintaan; kecocokan glosarium juga masuk ke memori sebagai *Imported*.
@@ -997,7 +997,7 @@ Tombol menampilkan progres (`Menerjemahkan dengan AI… 12/84`, berbahasa Indone
 
 - kosong atau hanya spasi;
 - angka sendirian (`1.234,56`, `(1)`, `2026`, `12,5%`, `-`);
-- pengenal — ISSN/ISBN, kode katalog (`Katalog BPS: …`), URL, alamat e-mail, jalur berkas;
+- pengenal — ISSN/ISBN, kode katalog (`Katalog BPS: …`), URL, alamat e-mail, jalur yang berakhiran ekstensi berkas yang dikenal;
 - nama diri yang dilindungi — nama wilayah GeoJSON pada kartu peta (`nmdesa`/`nmkec`), serta nama instansi, kantor, dan kontak pada sampul;
 - sudah dwibahasa (mengandung ` / ` atau pemisah baris paksa) atau sudah dikenal (teks yang sama hanya dikumpulkan sekali).
 
@@ -1011,11 +1011,11 @@ Tab ketiga di dock kanan adalah **Ulasan Terjemahan** (antarmuka Inggris: **Tran
 - **Reject** menghapus entri, sehingga proses berikutnya dapat menerjemahkan teks itu lagi.
 - Kedua tindakan menandai proyek berubah; simpan paket untuk mempertahankannya.
 
-Editor kartu menampilkan status di samping **Judul EN:** (antarmuka Inggris: **Title EN:**) — lencana **AI draft** dengan tombol **Accept** tersendiri, atau **Reviewed** (label ini berbahasa Inggris di kedua bahasa antarmuka). Entri *Reviewed* tidak pernah ditimpa oleh proses AI berikutnya: target baru dari model dibuang dan yang sudah diulas dipertahankan. Kecocokan glosarium tidak menampilkan lencana — hasilnya deterministik, bukan draf.
+Editor kartu menampilkan status di samping **Judul EN:** (antarmuka Inggris: **Title EN:**; kolom ini hanya muncul di dokumen dwibahasa atau Inggris) — lencana **AI draft** dengan tombol **Accept** tersendiri, atau **Reviewed** (label ini berbahasa Inggris di kedua bahasa antarmuka). Entri *Reviewed* tidak pernah ditimpa oleh proses AI berikutnya: target baru dari model dibuang dan yang sudah diulas dipertahankan. Kecocokan glosarium tidak menampilkan lencana — hasilnya deterministik, bukan draf.
 
 ### Memori terjemahan
 
-Setiap unit yang diterima disimpan di `translation_memory.json` di dalam paket `.pubgen`: sumber, target, asal, peran, dan waktu. Asalnya adalah **Ai** (draf), **Reviewed** (keputusan manusia), dan **Imported** (kecocokan glosarium utuh).
+Setiap unit yang diterima disimpan di `translation_memory.json` di dalam paket `.pubgen`: sumber, target, asal, peran, dan waktu. Di berkas, asalnya ditulis `ai` (draf), `reviewed` (keputusan manusia), dan `imported` (kecocokan glosarium utuh).
 
 - Pencarian mengabaikan spasi berlebih dan beralih ke padanan huruf besar-kecil; entri *Reviewed* atau *Imported* menang atas draf AI dengan sumber yang sama.
 - Memori dibatasi 100.000 entri per paket. Melewati batas itu unit baru tidak disimpan; entri lama masih bisa diganti.
@@ -1057,7 +1057,7 @@ pgs-cli translate <PROJECT.pubgen> --provider <groq|custom|local> --model <MODEL
 
 - `--provider` adalah `groq`, `custom`, atau `local`; `offline` ditolak.
 - `--base-url` opsional untuk `groq` (endpoint Groq menjadi bawaan) dan wajib untuk `custom` dan `local`.
-- `--key-env` menamai variabel lingkungan yang menyimpan kunci — wajib untuk `groq` dan `custom`, tidak dibaca untuk `local`. Sengaja tidak ada opsi yang menerima kunci itu sendiri.
+- `--key-env` menamai variabel lingkungan yang menyimpan kunci — wajib untuk `groq` dan `custom`, tidak wajib untuk `local`; bila diberikan, variabelnya tetap dibaca untuk penyedia apa pun, sehingga variabel yang tidak disetel atau kosong menjadi kesalahan. Sengaja tidak ada opsi yang menerima kunci itu sendiri.
 - `--dry-run` menghitung unit lalu berhenti: tanpa jaringan, tanpa membaca lingkungan, tanpa menulis paket.
 - Laporannya berupa JSON di stdout — `units` (dikumpulkan), `translated` (target AI baru tersimpan), `reused` (kecocokan memori), `skipped` (kecocokan glosarium utuh), dan `failed`, masing-masing menyebut unit dan alasannya.
 - Status keluar non-nol bila ada unit yang gagal. Hanya memori yang ditulis balik; pengaturan kartu dan isi paket tidak disentuh, sehingga GUI tetap menampilkan draf baru untuk diulas.
@@ -1067,7 +1067,7 @@ pgs-cli translate <PROJECT.pubgen> --provider <groq|custom|local> --model <MODEL
 - **Halaman tabel langsung BRS tetap satu bahasa.** Impor sheet BRS merender tabel semacam itu dengan judul dan sel satu bahasa Indonesia; hanya jalur tabel templat (DDA) yang menulis judul tabel dwibahasa dan baris catatan/sumber berpasangan.
 - **Sel header/baris tabel dan badan narasi Inggris tidak digambar oleh kompilasi.** Langkah generasi yang memasangkan sel tabel dan membangun ulang badan narasi Inggris dari memori adalah bagian dari mode AI per halaman, dan kompilasi mematikannya; karena itu kompilasi menggambar sel dan badan berbahasa Indonesia. Gunakan tindakan tabel dan ulasan di dalam dokumen untuk halaman tersebut, atau sebutkan RTF Inggris di `file_en` kartu.
 - **Paragraf narasi tanpa bahasa Inggris yang bisa dipakai mempertahankan teks Indonesianya.** Saat badan Inggris dibangun ulang dari memori, paragraf yang targetnya hilang, kosong, atau akan menambah pemisah baris tetap memakai paragraf Indonesia; jumlah paragraf dan setiap gaya paragraf dipertahankan, dan sisa badan tetap terbit.
-- **Deteksi judul Inggris membutuhkan gaya paragraf.** Dalam spread narasi, judul dikenali dari gaya paragrafnya (**Title**, **Heading 1**, **Heading 2**). Dokumen Indonesia lama yang paragrafnya tidak memakai gaya tersebut jatuh ke heuristik teks yang hanya mengenali judul Indonesia.
+- **Deteksi judul Inggris membutuhkan gaya paragraf.** Dalam spread narasi, judul dikenali dari gaya paragrafnya (**Title**, **Heading 1**, **Heading 2**). Dokumen Indonesia lama yang paragrafnya tidak memakai gaya tersebut jatuh ke heuristik teks: judul Indonesia yang dikenal, plus paragraf pendek berawalan `A. `, `B. `, atau `C. ` yang dikenali sebagai **Title**.
 - **Kompilasi manifest tidak menerjemahkan.** `pubgen.compileProject` dan `pgs-cli compile` mulai dari keadaan generasi baru: keduanya tidak menjalankan tahap lembar kerja dan tidak membaca memori, jadi hanya merender kolom Inggris milik buku kerja itu sendiri dan glosarium. Lakukan Generate dari Orchestrator untuk bahasa Inggris dari AI.
 - **TLS hanya memercayai root publik.** Klien HTTP adalah ureq 2 dengan root store Mozilla yang dikompilasi ke dalamnya (webpki-roots); klien tidak membaca certificate store sistem operasi. Endpoint di balik CA privat — gateway internal atau proxy korporat — gagal dengan kesalahan sertifikat. Gunakan Local AI melalui `http://localhost` biasa, atau sertifikat dari CA yang dipercaya publik.
 - **Model luring tidak ada di build ini**, apa pun yang dilaporkan panel perangkat keras.
