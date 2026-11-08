@@ -2021,7 +2021,7 @@ pub(crate) fn save_pubgen_package_to(app: &mut DesignApp, save_path: &Path) -> R
 
     let mut content = pubgen_core::container::ProjectContent::default();
 
-    for (key, bytes) in &orch.cached_content {
+    for (key, bytes) in orch.cached_content.iter() {
         let clean = key.replace('\\', "/");
         if let Some(name) = clean.strip_prefix("csv/") {
             content.csv.push((name.to_string(), bytes.clone()));
@@ -3812,8 +3812,8 @@ Grafik,01.02,Kepadatan,
         orch.meta_title = "Kabupaten Karawang Dalam Angka 2026".into();
         orch.meta_subtitle = "BPS Karawang".into();
         orch.meta_release_no = "1234.56".into();
-        orch.cached_content.insert("csv/test.csv".into(), b"col1,col2\nval1,val2\n".to_vec());
-        orch.cached_content.insert("md/test.md".into(), b"# Chapter 1\n".to_vec());
+        std::sync::Arc::make_mut(&mut orch.cached_content).insert("csv/test.csv".into(), b"col1,col2\nval1,val2\n".to_vec());
+        std::sync::Arc::make_mut(&mut orch.cached_content).insert("md/test.md".into(), b"# Chapter 1\n".to_vec());
         crate::dock::pubgen::workspace::set_state(&ctx, orch);
 
         let res = save_package_as(&mut app, &serde_json::json!({"path": pkg_path.to_string_lossy()})).unwrap();
@@ -3824,7 +3824,7 @@ Grafik,01.02,Kepadatan,
         // Clear state and open package
         let mut fresh = crate::dock::pubgen::workspace::OrchestratorWorkspaceState::default();
         fresh.meta_title.clear();
-        fresh.cached_content.clear();
+        std::sync::Arc::make_mut(&mut fresh.cached_content).clear();
         crate::dock::pubgen::workspace::set_state(&ctx, fresh);
 
         let open_res = open_project(&mut app, &serde_json::json!({"path": pkg_path.to_string_lossy()})).unwrap();

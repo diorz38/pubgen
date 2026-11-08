@@ -57,72 +57,83 @@ fn to_title_case(s: &str) -> String {
     }
 }
 
+static CACHED_CHART_MAPS: std::sync::OnceLock<Vec<StockMapEntry>> = std::sync::OnceLock::new();
+static CACHED_COVER_MAPS: std::sync::OnceLock<Vec<StockMapEntry>> = std::sync::OnceLock::new();
+
 /// Lists available stock maps for **Choropleth Map Charts**.
 /// Uses compile-time embedded maps first, augmented by any disk-based maps.
 pub fn list_stock_map_charts() -> Vec<StockMapEntry> {
-    let mut out: Vec<StockMapEntry> = EMBEDDED_CHART_MAPS
-        .iter()
-        .map(|m| StockMapEntry { id: m.id.to_string(), display_name: m.display_name.to_string(), path: PathBuf::from(m.filename) })
-        .collect();
+    CACHED_CHART_MAPS
+        .get_or_init(|| {
+            let mut out: Vec<StockMapEntry> = EMBEDDED_CHART_MAPS
+                .iter()
+                .map(|m| StockMapEntry { id: m.id.to_string(), display_name: m.display_name.to_string(), path: PathBuf::from(m.filename) })
+                .collect();
 
-    // Augment with any additional custom maps found in assets/pubgen/maps on disk
-    if let Some(dir) = find_maps_dir() {
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if !path.is_file() {
-                    continue;
-                }
+            // Augment with any additional custom maps found in assets/pubgen/maps on disk
+            if let Some(dir) = find_maps_dir() {
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if !path.is_file() {
+                            continue;
+                        }
 
-                let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+                        let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
 
-                if let Some(prefix) = fname.strip_suffix("_DESA.geojson").or_else(|| fname.strip_suffix("_desa.geojson")) {
-                    let id = prefix.to_uppercase();
-                    if !out.iter().any(|e| e.id == id) {
-                        out.push(StockMapEntry { id, display_name: format!("{} (Desa)", to_title_case(prefix)), path });
+                        if let Some(prefix) = fname.strip_suffix("_DESA.geojson").or_else(|| fname.strip_suffix("_desa.geojson")) {
+                            let id = prefix.to_uppercase();
+                            if !out.iter().any(|e| e.id == id) {
+                                out.push(StockMapEntry { id, display_name: format!("{} (Desa)", to_title_case(prefix)), path });
+                            }
+                        }
                     }
                 }
             }
-        }
-    }
 
-    out.sort_by(|a, b| a.display_name.cmp(&b.display_name));
-    out
+            out.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+            out
+        })
+        .clone()
 }
 
 /// Lists available stock maps for **Publication Covers**.
 /// Uses compile-time embedded maps first, augmented by any disk-based maps.
 pub fn list_stock_cover_maps() -> Vec<StockMapEntry> {
-    let mut out: Vec<StockMapEntry> = EMBEDDED_COVER_MAPS
-        .iter()
-        .map(|m| StockMapEntry { id: m.id.to_string(), display_name: m.display_name.to_string(), path: PathBuf::from(m.filename) })
-        .collect();
+    CACHED_COVER_MAPS
+        .get_or_init(|| {
+            let mut out: Vec<StockMapEntry> = EMBEDDED_COVER_MAPS
+                .iter()
+                .map(|m| StockMapEntry { id: m.id.to_string(), display_name: m.display_name.to_string(), path: PathBuf::from(m.filename) })
+                .collect();
 
-    // Augment with any additional custom maps found in assets/pubgen/maps on disk
-    if let Some(dir) = find_maps_dir() {
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if !path.is_file() {
-                    continue;
-                }
+            // Augment with any additional custom maps found in assets/pubgen/maps on disk
+            if let Some(dir) = find_maps_dir() {
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if !path.is_file() {
+                            continue;
+                        }
 
-                let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+                        let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
 
-                if (fname.ends_with(".geojson") || fname.ends_with(".GEOJSON")) && !fname.to_lowercase().ends_with("_desa.geojson") {
-                    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(&fname).to_string();
+                        if (fname.ends_with(".geojson") || fname.ends_with(".GEOJSON")) && !fname.to_lowercase().ends_with("_desa.geojson") {
+                            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or(&fname).to_string();
 
-                    let id = stem.to_uppercase();
-                    if !out.iter().any(|e| e.id == id) {
-                        out.push(StockMapEntry { id, display_name: format!("{} (Kecamatan)", to_title_case(&stem)), path });
+                            let id = stem.to_uppercase();
+                            if !out.iter().any(|e| e.id == id) {
+                                out.push(StockMapEntry { id, display_name: format!("{} (Kecamatan)", to_title_case(&stem)), path });
+                            }
+                        }
                     }
                 }
             }
-        }
-    }
 
-    out.sort_by(|a, b| a.display_name.cmp(&b.display_name));
-    out
+            out.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+            out
+        })
+        .clone()
 }
 
 /// Loads a `GeoMap` for **Choropleth Map Charts** (expects village-level `*_DESA.geojson`).
@@ -236,6 +247,12 @@ mod tests {
 
     #[test]
     fn test_list_stock_maps_finds_pangkalan() {
+        // GeoJSON maps are gitignored; CI builds embed nothing → skip.
+        if EMBEDDED_CHART_MAPS.is_empty() {
+            eprintln!("skipping: no embedded GeoJSON maps (CI build)");
+            return;
+        }
+
         let chart_maps = list_stock_map_charts();
         assert!(!chart_maps.is_empty(), "Expected at least one stock chart map (e.g. PANGKALAN_DESA)");
         assert!(
@@ -255,6 +272,12 @@ mod tests {
 
     #[test]
     fn embedded_chart_maps_parse_without_reading_disk() {
+        // GeoJSON maps are gitignored; CI builds embed nothing → skip.
+        if EMBEDDED_CHART_MAPS.is_empty() {
+            eprintln!("skipping: no embedded GeoJSON maps (CI build)");
+            return;
+        }
+
         let entry = EMBEDDED_CHART_MAPS.iter().find(|m| m.id == "PANGKALAN").expect("PANGKALAN must be embedded");
         let map = GeoMap::from_json_str(entry.geojson).expect("embedded GeoJSON must parse");
         assert!(map.features.len() >= 8, "expected all Pangkalan villages, got {}", map.features.len());
@@ -262,6 +285,12 @@ mod tests {
 
     #[test]
     fn test_embedded_maps_load_without_disk() {
+        // GeoJSON maps are gitignored; CI builds embed nothing → skip.
+        if EMBEDDED_CHART_MAPS.is_empty() {
+            eprintln!("skipping: no embedded GeoJSON maps (CI build)");
+            return;
+        }
+
         let map_res = load_chart_geo_map("PANGKALAN");
         assert!(map_res.is_ok(), "Expected embedded PANGKALAN_DESA chart map to load: {map_res:?}");
         let map = map_res.unwrap();

@@ -1601,6 +1601,12 @@ mod tests {
 
     #[test]
     fn test_map_defaults_to_pangkalan_stock_map_and_absolute_values() {
+        // GeoJSON maps are gitignored; CI builds embed nothing → skip.
+        if super::super::stock_maps::EMBEDDED_CHART_MAPS.is_empty() {
+            eprintln!("skipping: no embedded GeoJSON maps (CI build)");
+            return;
+        }
+
         let maps = super::super::stock_maps::list_stock_map_charts();
         let pangkalan = maps.iter().position(|m| m.id == "PANGKALAN").expect("Pangkalan stock map exists");
 

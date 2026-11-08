@@ -352,7 +352,7 @@ pub struct OrchestratorWorkspaceState {
     pub metadata_open: bool,
     pub content_files: Vec<ContentItem>,
     #[serde(default)]
-    pub cached_content: std::collections::BTreeMap<String, Vec<u8>>,
+    pub cached_content: std::sync::Arc<std::collections::BTreeMap<String, Vec<u8>>>,
     // Metadata form
     pub meta_title: String,
     pub meta_subtitle: String,
@@ -557,7 +557,7 @@ impl Default for OrchestratorWorkspaceState {
             md_group_open: true,
             metadata_open: true,
             content_files,
-            cached_content: std::collections::BTreeMap::new(),
+            cached_content: std::sync::Arc::new(std::collections::BTreeMap::new()),
             meta_title: "Perkembangan Nilai Tukar Petani".into(),
             meta_subtitle: "1 Oktober 2026 · BADAN PUSAT STATISTIK PROVINSI JAWA BARAT".into(),
             meta_release_no: "BRS No. 01/01/Th. XXVI, 15".into(),
@@ -889,24 +889,25 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
         .chain(report.assets.iter().map(|(name, bytes)| ContentItem { path: norm("assets", name), size_bytes: bytes.len() }))
         .collect();
 
-    state.cached_content.clear();
+    let cache = std::sync::Arc::make_mut(&mut state.cached_content);
+    cache.clear();
     for (name, bytes) in &report.csv {
-        state.cached_content.insert(norm("csv", name), bytes.clone());
+        cache.insert(norm("csv", name), bytes.clone());
     }
     for (name, bytes) in &text_entries {
         let key = norm_text(name);
-        state.cached_content.insert(key.clone(), bytes.clone());
+        cache.insert(key.clone(), bytes.clone());
         let bare = name.replace('\\', "/");
         if bare != key {
-            state.cached_content.insert(bare, bytes.clone());
+            cache.insert(bare, bytes.clone());
         }
     }
     for (name, bytes) in &report.assets {
         let key = norm("assets", name);
-        state.cached_content.insert(key.clone(), bytes.clone());
+        cache.insert(key.clone(), bytes.clone());
         let bare = name.replace('\\', "/");
         if bare != key {
-            state.cached_content.insert(bare, bytes.clone());
+            cache.insert(bare, bytes.clone());
         }
     }
 
@@ -2260,7 +2261,7 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                         };
                         st.content_files.retain(|f| f.path != target_path);
                         st.content_files.push(ContentItem { path: target_path.clone(), size_bytes: bytes.len() });
-                        st.cached_content.insert(target_path.clone(), bytes.clone());
+                        std::sync::Arc::make_mut(&mut st.cached_content).insert(target_path.clone(), bytes.clone());
                         let now = format_now();
                         st.execution_log.push(format!(
                             "[{now}] {}",
@@ -2811,6 +2812,7 @@ fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
     let avail_w = ui.available_width();
     let gap = 8.0f32;
     let mut clicked_edit_idx = None;
+    let visible_window = ui.clip_rect().expand2(vec2(0.0, 100.0));
 
     if state.page_layout_facing {
         // FACING PAGES SPREADS LAYOUT (InDesign parity - Image #3)
@@ -2821,15 +2823,21 @@ fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
 
         if let Some(cover_card) = state.cards.first() {
             let row_h = card_row_height(ui.painter(), std::slice::from_ref(cover_card), det_w, lang);
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing = vec2(gap, 0.0);
-                if let Some(idx) = render_facing_card(ui, 0, cover_card, col_w, false, row_h, t, lang) {
-                    clicked_edit_idx = Some(idx);
-                }
-                // Empty right slot so cover card width is col_w and height matches the row
-                ui.allocate_exact_size(vec2(col_w, row_h), Sense::hover());
-            });
-            ui.add_space(gap);
+            let row_rect = Rect::from_min_size(ui.cursor().min, vec2(avail_w, row_h));
+            if !visible_window.intersects(row_rect) {
+                ui.allocate_exact_size(vec2(avail_w, row_h), Sense::hover());
+                ui.add_space(gap);
+            } else {
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(gap, 0.0);
+                    if let Some(idx) = render_facing_card(ui, 0, cover_card, col_w, false, row_h, t, lang) {
+                        clicked_edit_idx = Some(idx);
+                    }
+                    // Empty right slot so cover card width is col_w and height matches the row
+                    ui.allocate_exact_size(vec2(col_w, row_h), Sense::hover());
+                });
+                ui.add_space(gap);
+            }
         }
 
         // Remaining body cards starting from index 1 (Page 2 onwards)
@@ -2837,6 +2845,12 @@ fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
             let body_cards = &state.cards[1..];
             for (chunk_idx, pair) in body_cards.chunks(2).enumerate() {
                 let row_h = card_row_height(ui.painter(), pair, det_w, lang);
+                let row_rect = Rect::from_min_size(ui.cursor().min, vec2(avail_w, row_h));
+                if !visible_window.intersects(row_rect) {
+                    ui.allocate_exact_size(vec2(avail_w, row_h), Sense::hover());
+                    ui.add_space(gap);
+                    continue;
+                }
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing = vec2(gap, 0.0);
                     let actual_idx_left = 1 + chunk_idx * 2;
@@ -2868,6 +2882,12 @@ fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         let chunk_size = col_count;
         for (row_idx, chunk) in state.cards.chunks(chunk_size).enumerate() {
             let row_h = card_row_height(ui.painter(), chunk, det_w, lang);
+            let row_rect = Rect::from_min_size(ui.cursor().min, vec2(avail_w, row_h));
+            if !visible_window.intersects(row_rect) {
+                ui.allocate_exact_size(vec2(avail_w, row_h), Sense::hover());
+                ui.add_space(gap);
+                continue;
+            }
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing = vec2(gap, 0.0);
                 for (col_idx, card) in chunk.iter().enumerate() {
@@ -2910,6 +2930,10 @@ fn card_details_width(card_w: f32) -> f32 {
 /// `interact_size.y` (18 px by default), so the same minimum applies here —
 /// assuming text height alone under-measured and clipped card footers.
 fn measured_card_height(painter: &egui::Painter, card: &PublicationCard, details_w: f32, lang: &str) -> f32 {
+    let cache_id = egui::Id::unique(("card_h", card.page, &card.title, &card.source, lang, details_w.to_bits()));
+    if let Some(h) = painter.ctx().data(|d| d.get_temp::<f32>(cache_id)) {
+        return h;
+    }
     // Only metrics matter here (nothing is painted): PLACEHOLDER keeps the layout independent of the
     // theme's text colour.
     let title = painter.layout(card.title.clone(), semibold(12.0), Color32::PLACEHOLDER, details_w);
@@ -2919,7 +2943,9 @@ fn measured_card_height(painter: &egui::Painter, card: &PublicationCard, details
     const LINE_GAP: f32 = 2.0;
     const PAD_Y: f32 = 12.0; // 6px top + 6px bottom inner padding
     let rows = [row_min, title.size().y.max(row_min), source.size().y.max(row_min), row_min];
-    PAD_Y + LINE_GAP * (rows.len() - 1) as f32 + rows.iter().sum::<f32>()
+    let h = PAD_Y + LINE_GAP * (rows.len() - 1) as f32 + rows.iter().sum::<f32>();
+    painter.ctx().data_mut(|d| d.insert_temp(cache_id, h));
+    h
 }
 
 /// Uniform row height: the tallest card in the row, never below the legacy 84px.
@@ -4322,7 +4348,7 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         let rel = key.trim();
         (rel != "Tanpa sumber" && !rel.is_empty()).then(|| stage.join(rel.replace('\\', "/")).to_string_lossy().into_owned())
     };
-    for (rel, bytes) in &state.cached_content {
+    for (rel, bytes) in state.cached_content.iter() {
         let p = stage.join(rel.replace('\\', "/"));
         if let Some(dir) = p.parent() {
             let _ = std::fs::create_dir_all(dir);
