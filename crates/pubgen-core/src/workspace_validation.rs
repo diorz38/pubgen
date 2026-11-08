@@ -2,6 +2,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use crate::excel::IngestReport;
+use crate::translation::TranslationMemory;
 use crate::workspace::{ProjectManifest, PublicationMetadata};
 use std::collections::BTreeSet;
 
@@ -23,6 +24,7 @@ pub struct WorkspaceDraft {
     pub manifest: ProjectManifest,
     pub metadata: PublicationMetadata,
     pub glossary: crate::workspace::Glossary,
+    pub tm: TranslationMemory,
     pub csv: Vec<(String, Vec<u8>)>,
     /// Narrative text files (RTF; Markdown in packages written before the RTF change).
     pub text: Vec<(String, Vec<u8>)>,
@@ -41,6 +43,7 @@ impl WorkspaceDraft {
             },
             metadata: report.metadata,
             glossary: crate::workspace::Glossary::default(),
+            tm: TranslationMemory::default(),
             csv: report.csv,
             text: report.text,
             assets: report.assets,

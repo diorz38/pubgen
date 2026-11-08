@@ -12,6 +12,7 @@ pub mod manifest;
 pub mod plan;
 pub mod profile;
 pub mod report;
+pub mod translation;
 pub mod workspace;
 pub mod workspace_compile;
 pub mod workspace_validation;
@@ -23,6 +24,7 @@ pub use manifest::{BuildSettings, ChapterEntry, DocumentSettings, PubgenManifest
 pub use plan::{CommandPlan, PublicationOp};
 pub use profile::{LayoutGeometry, ProfileId, ProfileService, PublicationProfile};
 pub use report::{ChapterReport, CompileReport, DiagnosticItem, DiagnosticSeverity, OutputArtifacts};
+pub use translation::{TmEntry, TmOrigin, TranslationMemory, now_stamp};
 pub use workspace::{
     CardKind, CardScope, Glossary, GlossaryEntry, Language, PUBGEN_FORMAT_VERSION, PageLayout, ProjectManifest, PublicationCard, PublicationMetadata,
     Slot,

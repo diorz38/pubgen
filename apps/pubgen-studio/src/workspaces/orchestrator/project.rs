@@ -24,6 +24,7 @@ impl OrchestratorProject {
             manifest: opened.manifest,
             metadata: metadata.clone(),
             glossary: opened.glossary,
+            tm: opened.tm,
             csv,
             text: text.clone(),
             assets: assets.clone(),
@@ -41,7 +42,7 @@ impl OrchestratorProject {
         let text = if !draft.text.is_empty() { draft.text.clone() } else { self.text.clone() };
         let assets = if !draft.assets.is_empty() { draft.assets.clone() } else { self.assets.clone() };
         let content = ProjectContent { csv: draft.csv.clone(), text, assets, ..ProjectContent::default() };
-        save_pubgen(path, &draft.manifest, &draft.metadata, &draft.glossary, &content).map_err(|error| error.to_string())?;
+        save_pubgen(path, &draft.manifest, &draft.metadata, &draft.glossary, &draft.tm, &content).map_err(|error| error.to_string())?;
         self.path = Some(path.to_path_buf());
         self.dirty = false;
         self.status = "Project saved".into();
@@ -350,7 +351,8 @@ mod tests {
             extra: Default::default(),
         };
         let content = ProjectContent { csv: vec![("T1.csv".into(), b"a,b\n1,2\n".to_vec())], ..ProjectContent::default() };
-        save_pubgen(path, &manifest, &metadata, &pubgen_core::Glossary::default(), &content).expect("package");
+        save_pubgen(path, &manifest, &metadata, &pubgen_core::Glossary::default(), &pubgen_core::TranslationMemory::default(), &content)
+            .expect("package");
     }
 
     #[test]
