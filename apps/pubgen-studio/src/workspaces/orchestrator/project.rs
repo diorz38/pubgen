@@ -62,6 +62,7 @@ impl OrchestratorProject {
                 ctx,
                 self.path.as_ref().and_then(|path| path.to_str()).unwrap_or("Workbook"),
                 &draft.metadata,
+                &draft.tm,
                 &draft.csv,
                 text,
                 assets,

@@ -779,6 +779,15 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
     }
     .into();
 
+    // A worksheet import replaces the publication, so the previous document's translation memory
+    // must not leak its English onto this one's cards (or be saved into its package). Any
+    // translation still in flight belongs to the document that is being replaced.
+    state.tm = pubgen_core::TranslationMemory::default();
+    state.translate_units.clear();
+    state.translate_glossary_pairs.clear();
+    state.translate_reused = 0;
+    state.translate_job = None;
+
     if state.selected_profile == "bps_dda" {
         state.meta_release_no.clear();
         state.meta_release_date.clear();
@@ -1398,7 +1407,6 @@ pub fn sync_external_workspace(
 ) {
     let mut state = get_state(ctx);
     state.view = OrchestratorView::Studio;
-    state.tm = tm.clone();
     let report = pubgen_core::excel::IngestReport {
         profile_id: metadata.profile_id.clone(),
         metadata: metadata.clone(),
@@ -1408,6 +1416,8 @@ pub fn sync_external_workspace(
         warnings: Vec::new(),
     };
     apply_ingest_report_to_state(&mut state, source_name, &report);
+    // The package's own memory is loaded after the import reset, so opening a `.pubgen` keeps it.
+    state.tm = tm.clone();
     super::with_state(ctx, |pubgen_st| {
         if let Some(cov_card) = state.cards.iter().find(|c| c.kind == CardKind::Cover) {
             sync_card_to_pubgen_state(cov_card, &state, pubgen_st);
@@ -4982,6 +4992,78 @@ mod tests {
             assert_eq!(pubgen_st.cover_title, "Perkembangan Nilai Tukar Petani");
             assert_eq!(pubgen_st.cover_agency_text, "BADAN PUSAT STATISTIK PROVINSI JAWA BARAT");
         }
+    }
+
+    /// T7: importing a workbook replaces the publication, so the previous document's translation
+    /// memory must not reuse its English on the new cards (or be saved into the new package).
+    #[test]
+    fn test_ingesting_a_workbook_clears_the_previous_translation_memory() {
+        let mut state = OrchestratorWorkspaceState::default();
+        state.tm.insert(pubgen_core::translation::TmEntry {
+            source: "Luas Wilayah".into(),
+            target: "Total Area".into(),
+            origin: pubgen_core::translation::TmOrigin::Ai,
+            role: "table_title".into(),
+            updated: pubgen_core::translation::now_stamp(),
+        });
+        state.translate_units.push(pubgen_core::translation_units::TransUnit {
+            key: "Luas Wilayah".into(),
+            text: "Luas Wilayah".into(),
+            role: pubgen_core::translation_units::UnitRole::TableTitle,
+            card_id: "table-1".into(),
+        });
+        state.translate_glossary_pairs.push(("Kecamatan".into(), "Subdistrict".into()));
+
+        let report = pubgen_core::excel::IngestReport {
+            profile_id: "bps_brs".into(),
+            metadata: pubgen_core::PublicationMetadata {
+                profile_id: "bps_brs".into(),
+                layout: pubgen_core::PageLayout::Single,
+                language: pubgen_core::Language::Id,
+                title: "Terjemahan Berikutnya".into(),
+                title_en: None,
+                cards: Vec::new(),
+                extra: Default::default(),
+            },
+            csv: Vec::new(),
+            text: Vec::new(),
+            assets: Vec::new(),
+            warnings: Vec::new(),
+        };
+        apply_ingest_report_to_state(&mut state, "other.xlsx", &report);
+
+        assert!(state.tm.entries.is_empty(), "a newly imported document must not inherit the previous memory");
+        assert!(state.tm.lookup("Luas Wilayah").is_none());
+        assert!(state.translate_units.is_empty(), "a pending unit belongs to the replaced document");
+        assert!(state.translate_glossary_pairs.is_empty());
+    }
+
+    /// T7: opening a `.pubgen` loads that package's own memory, which the import reset must keep.
+    #[test]
+    fn test_sync_external_workspace_keeps_the_opened_packages_memory() {
+        let ctx = egui::Context::default();
+        let mut tm = pubgen_core::TranslationMemory::default();
+        tm.insert(pubgen_core::translation::TmEntry {
+            source: "Luas Wilayah".into(),
+            target: "Total Area".into(),
+            origin: pubgen_core::translation::TmOrigin::Reviewed,
+            role: "table_title".into(),
+            updated: pubgen_core::translation::now_stamp(),
+        });
+        let metadata = pubgen_core::PublicationMetadata {
+            profile_id: "bps_brs".into(),
+            layout: pubgen_core::PageLayout::Single,
+            language: pubgen_core::Language::Id,
+            title: "Paket".into(),
+            title_en: None,
+            cards: Vec::new(),
+            extra: Default::default(),
+        };
+
+        sync_external_workspace(&ctx, "Paket.pubgen", &metadata, &tm, &[], &[], &[]);
+
+        let state = get_state(&ctx);
+        assert_eq!(state.tm.lookup("Luas Wilayah").map(|entry| entry.target.as_str()), Some("Total Area"));
     }
 
     #[test]
