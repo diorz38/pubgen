@@ -99,7 +99,9 @@ pub fn open_pubgen(path: &Path) -> Result<OpenedProject, ContainerError> {
     let metadata: PublicationMetadata = read_json(&mut archive, "metadata.json")?;
     let glossary: Glossary = read_json(&mut archive, "glossary.json")?;
     // Optional so packages written before the translation memory existed still open.
-    let tm: TranslationMemory = read_json_opt(&mut archive, "translation_memory.json")?.unwrap_or_default();
+    let mut tm: TranslationMemory = read_json_opt(&mut archive, "translation_memory.json")?.unwrap_or_default();
+    // Untrusted input: a hostile file must not make the memory (and every save) unbounded.
+    tm.truncate_to_cap();
     manifest.validate().map_err(ContainerError::Invalid)?;
     metadata.validate().map_err(ContainerError::Invalid)?;
     let mut content = ProjectContent::default();
@@ -354,6 +356,31 @@ mod tests {
         save_pubgen(&path, &manifest, &meta("TM test"), &Glossary::default(), &tm, &ProjectContent::default()).expect("save");
         let opened = open_pubgen(&path).expect("open");
         assert_eq!(opened.tm.lookup("Kecamatan").map(|e| e.target.as_str()), Some("Subdistrict"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_over_cap_memory_is_truncated_on_open() {
+        // A hostile package may deserialize more entries than `insert` ever accepts, so open
+        // must bound the memory it hands back (and every later save).
+        let dir = std::env::temp_dir().join(format!("pubgen-tm-cap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("cap.pubgen");
+        let manifest = ProjectManifest { format_version: 1, name: "TM cap".into(), template: false, slots: Vec::new() };
+        let over = TranslationMemory {
+            entries: (0..=crate::translation::MAX_ENTRIES)
+                .map(|i| TmEntry {
+                    source: format!("s{i}"),
+                    target: "t".into(),
+                    origin: TmOrigin::Ai,
+                    role: "table_header".into(),
+                    updated: now_stamp(),
+                })
+                .collect(),
+        };
+        save_pubgen(&path, &manifest, &meta("TM cap"), &Glossary::default(), &over, &ProjectContent::default()).expect("save");
+        let opened = open_pubgen(&path).expect("open");
+        assert_eq!(opened.tm.entries.len(), crate::translation::MAX_ENTRIES);
         std::fs::remove_dir_all(&dir).ok();
     }
 

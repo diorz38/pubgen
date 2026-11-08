@@ -1515,12 +1515,26 @@ pub(crate) fn push_groq_quota_popup(st: &mut PubgenState, provider: &str) {
 /// The backend the panel should use right now: the provider id, its credentials and
 /// the endpoint every provider speaks (OpenAI-compatible chat completions). Owned by
 /// the job, so it derives `Clone`.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct BackendConfig {
     pub provider: String,
     pub key: String,
     pub model: String,
     pub base_url: String,
+}
+
+impl std::fmt::Debug for BackendConfig {
+    /// Redacted on purpose: a derived `Debug` would print the API key, and one future log
+    /// line (`{:?}`) must not be able to leak it.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let key = if self.key.is_empty() { "" } else { "<redacted>" };
+        f.debug_struct("BackendConfig")
+            .field("provider", &self.provider)
+            .field("model", &self.model)
+            .field("base_url", &self.base_url)
+            .field("key", &key)
+            .finish()
+    }
 }
 
 /// The backend the panel should use right now from the persisted prefs. `None` when
@@ -2524,6 +2538,25 @@ mod tests {
         assert!(lines[0].starts_with("Groq AI: "), "{lines:?}");
     }
 
+    #[test]
+    fn the_backend_debug_never_prints_the_key() {
+        let cfg = BackendConfig {
+            provider: "groq".into(),
+            key: "gsk_secret_value".into(),
+            model: "llama-3.3-70b-versatile".into(),
+            base_url: "https://api.groq.com/openai/v1".into(),
+        };
+        let shown = format!("{cfg:?}");
+        assert!(!shown.contains("gsk_secret_value"), "a Debug line must never carry the key: {shown}");
+        assert!(shown.contains("<redacted>"), "{shown}");
+        assert!(shown.contains("groq") && shown.contains("llama-3.3-70b-versatile"), "the rest stays readable: {shown}");
+
+        let unkeyed = BackendConfig { key: String::new(), ..cfg };
+        let shown = format!("{unkeyed:?}");
+        assert!(!shown.contains("<redacted>"), "an absent key prints as empty, not redacted: {shown}");
+    }
+
+    #[cfg(feature = "ai-translate-online")]
     #[test]
     fn backend_config_resolves_each_provider() {
         let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());

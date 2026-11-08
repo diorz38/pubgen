@@ -289,19 +289,23 @@ fn narrative_paragraphs(draft: &WorkspaceDraft, card: &PublicationCard) -> Vec<S
     imported.story.text.lines().map(str::trim).filter(|line| !line.is_empty()).take(MAX_UNITS).map(str::to_string).collect()
 }
 
-/// The staged narrative bytes (`name`, bytes) for a card source. The same aliases
+/// The staged `files` entry a card source names, under the same aliases
 /// `WorkspaceDraft::validate` accepts: the exact staged name, a staged name ending in
 /// `/<source>`, or either side with a staging prefix (`csv/`, `text/`, `md/`, `rtf/`,
 /// `assets/`) stripped — a package may stage `rtf/R01.rtf` for a card source of
 /// `text/R01.rtf`, and a file that validates must not silently contribute no units.
-fn narrative_source<'a>(draft: &'a WorkspaceDraft, source: Option<&str>) -> Option<(&'a str, &'a [u8])> {
+fn staged_source<'a>(files: &'a [(String, Vec<u8>)], source: Option<&str>) -> Option<(&'a str, &'a [u8])> {
     let source = source?.replace('\\', "/");
     let stripped = STAGING_PREFIXES.iter().find_map(|prefix| source.strip_prefix(prefix)).unwrap_or(source.as_str());
-    draft
-        .text
+    files
         .iter()
         .find(|(name, _)| same_staged_file(name, &source) || same_staged_file(name, stripped))
         .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+}
+
+/// The staged narrative text file (`name`, bytes) for a card source.
+fn narrative_source<'a>(draft: &'a WorkspaceDraft, source: Option<&str>) -> Option<(&'a str, &'a [u8])> {
+    staged_source(&draft.text, source)
 }
 
 /// Staging prefixes `WorkspaceDraft::validate` strips from a card source (`workspace_validation.rs`).
@@ -324,10 +328,11 @@ fn header_indexes(rows: &[Vec<String>], names: &[&str]) -> Vec<usize> {
 
 /// Parse a staged CSV, sniffing the delimiter from the header line (BPS sheets use `;`).
 /// Hostile bytes: lossy decode, stop at the first malformed record, bound rows to the
-/// unit cap. Returns `None` when the card has no staged CSV.
+/// unit cap. The card source matches under the same staging-prefix rules as a narrative
+/// source, so a card that validates always yields its table units. Returns `None` when
+/// the card has no staged CSV.
 fn csv_rows(draft: &WorkspaceDraft, source: Option<&str>) -> Option<Vec<Vec<String>>> {
-    let source = source?;
-    let (_, bytes) = draft.csv.iter().find(|(name, _)| name == source)?;
+    let (_, bytes) = staged_source(&draft.csv, source)?;
     let text = String::from_utf8_lossy(bytes);
     let first_line = text.split('\n').next().unwrap_or_default().to_string();
     // Tie-break towards `;` (BPS convention) by ordering it last for `max_by_key`.
@@ -340,7 +345,7 @@ fn csv_rows(draft: &WorkspaceDraft, source: Option<&str>) -> Option<Vec<Vec<Stri
         }
     }
     let delimiter = counts.iter().max_by_key(|entry| entry.1).filter(|entry| entry.1 > 0).map_or(b',', |entry| entry.0 as u8);
-    let mut reader = csv::ReaderBuilder::new().has_headers(false).delimiter(delimiter).from_reader(bytes.as_slice());
+    let mut reader = csv::ReaderBuilder::new().has_headers(false).delimiter(delimiter).from_reader(bytes);
     let mut rows: Vec<Vec<String>> = Vec::new();
     for record in reader.records() {
         match record {
@@ -524,6 +529,21 @@ mod tests {
         draft.metadata.cards.push(narrative_card("R01", "rtf/R01.rtf"));
         let units = collect_units(&draft);
         assert!(units.iter().any(|u| u.role == UnitRole::NarrativeBody && u.text == "Satu paragraf."), "{units:?}");
+    }
+
+    /// The card source and the staged CSV name may disagree on the staging prefix:
+    /// `WorkspaceDraft::validate` strips `csv/`, so both spellings are valid cards and each
+    /// must yield the table units the header row and labels produce.
+    #[test]
+    fn a_table_csv_is_found_when_only_the_staging_prefix_differs() {
+        for (staged, source) in [("csv/T1.csv", "T1.csv"), ("T1.csv", "csv/T1.csv")] {
+            let mut draft = draft();
+            draft.csv.push((staged.into(), b"Kecamatan;Luas Wilayah\nBatujaya;1.234,5\n".to_vec()));
+            draft.metadata.cards.push(card(CardKind::Table, "Luas Wilayah", &[("source", source)]));
+            let units = collect_units(&draft);
+            assert!(units.iter().any(|u| u.role == UnitRole::TableHeader && u.text == "Kecamatan"), "staged {staged} vs source {source}: {units:?}");
+            assert!(units.iter().any(|u| u.role == UnitRole::TableRowLabel && u.text == "Batujaya"), "staged {staged} vs source {source}: {units:?}");
+        }
     }
 
     fn narrative_card(title: &str, source: &str) -> PublicationCard {

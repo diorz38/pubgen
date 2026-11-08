@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 /// Guard: packages are untrusted input; a corrupt or hostile TM file must not grow the memory
 /// (and thus save/open cost) without bound.
-const MAX_ENTRIES: usize = 100_000;
+pub const MAX_ENTRIES: usize = 100_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -114,8 +114,16 @@ impl TranslationMemory {
     pub fn pending_review(&self) -> Vec<&TmEntry> {
         self.entries.iter().filter(|e| e.origin == TmOrigin::Ai).collect()
     }
+    /// Keep at most [`MAX_ENTRIES`] entries. Called when a package's `translation_memory.json`
+    /// is loaded: the file is untrusted input, and `insert` alone cannot shrink an already
+    /// oversized memory read from disk.
+    pub fn truncate_to_cap(&mut self) {
+        self.entries.truncate(MAX_ENTRIES);
+    }
     pub fn to_map(&self) -> BTreeMap<String, String> {
-        self.entries.iter().filter(|e| !e.target.is_empty()).map(|e| (normalize(&e.source), e.target.clone())).collect()
+        // `insert` rejects a whitespace-only target; a memory loaded from disk may still carry
+        // one, and the generation cache must never pair an empty English under the Indonesian.
+        self.entries.iter().filter(|e| !e.target.trim().is_empty()).map(|e| (normalize(&e.source), e.target.clone())).collect()
     }
 }
 
@@ -197,6 +205,29 @@ mod tests {
         let map = tm.to_map();
         assert_eq!(map.get("Kecamatan").map(String::as_str), Some("Subdistrict"));
         assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn to_map_skips_a_whitespace_only_target() {
+        // `insert` refuses such a target, but a memory loaded from disk may carry one and the
+        // generation cache must not pair an empty English.
+        let tm = TranslationMemory {
+            entries: vec![entry("Kecamatan", "Subdistrict", TmOrigin::Ai), entry("Desa", "   ", TmOrigin::Ai), entry("Kelurahan", "", TmOrigin::Ai)],
+        };
+        let map = tm.to_map();
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get("Kecamatan").map(String::as_str), Some("Subdistrict"));
+        assert!(map.get("Desa").is_none(), "whitespace-only target leaked into the cache");
+    }
+
+    #[test]
+    fn truncate_to_cap_keeps_the_first_entries() {
+        // A hostile package can deserialize more entries than `insert` would ever accept.
+        let mut tm = TranslationMemory { entries: (0..=MAX_ENTRIES).map(|i| entry(&format!("s{i}"), "t", TmOrigin::Ai)).collect() };
+        assert_eq!(tm.entries.len(), MAX_ENTRIES + 1);
+        tm.truncate_to_cap();
+        assert_eq!(tm.entries.len(), MAX_ENTRIES);
+        assert_eq!(tm.entries.last().map(|e| e.source.as_str()), Some(format!("s{}", MAX_ENTRIES - 1).as_str()));
     }
 
     #[test]
