@@ -3649,7 +3649,9 @@ pub(crate) fn apply_excel_cover(st: &mut PubgenState, cover: &ExcelCoverData, ba
     if is_brs_profile || (!is_dda_profile && (!cover.release_no.is_empty() || !cover.points_body.is_empty())) {
         st.cover_style = 13;
         st.cover_include_inside_back = false;
-        st.bilingual_output = false;
+        // BRS is single-language by default, but the document language stays authoritative:
+        // a bilingual choice must survive the profile defaults (fix round 2).
+        st.bilingual_output = doc_language_is_bilingual(&st.doc_language);
         st.card2_table_footer = false;
     } else if is_dda_profile {
         st.cover_include_inside_back = true;
@@ -3728,6 +3730,20 @@ pub fn execute_excel_and_generate(app: &mut DesignApp, st: &mut PubgenState, pat
     }
 }
 
+/// Whether a document language asks for bilingual (Indonesian–English) output.
+///
+/// Mirrors the checks the Orchestrator uses when it seeds `bilingual_output` from the
+/// worksheet (`workspace.rs::generate_from_workspace`), so the page pipeline never
+/// overrides an explicit bilingual choice with the BRS single-language default.
+fn doc_language_is_bilingual(lang: &str) -> bool {
+    let lower = lang.to_lowercase();
+    lower.contains("bilingual")
+        || lower.contains("dwibahasa")
+        || lang.eq_ignore_ascii_case("indonesian-english")
+        || lang.eq_ignore_ascii_case("indo-english")
+        || (lower.contains("indonesia") && lower.contains("english"))
+}
+
 /// Run the automatic page-generation stages over the catalog already loaded in `st`:
 /// document setup, cover pages, "Page from CSV" body pages, back cover and the
 /// profile header/footer. Shared by the Excel import pipeline and the Orchestrator
@@ -3788,8 +3804,13 @@ pub fn generate_publication_pages(app: &mut DesignApp, st: &mut PubgenState) -> 
     st.card2_first_row_header = true;
     st.card2_col_numbers = if is_brs { true } else { st.active_profile().table_styling.include_column_number_row };
     st.card2_table_footer = !is_brs && st.active_profile().table_styling.include_table_footer;
+    // The document language is authoritative for bilingual output (plan acceptance): BRS
+    // defaults to single-language ("Indonesian") when no language selects English, but a
+    // bilingual document keeps the EN titles/captions the translation stage produced. A
+    // profile or margin override earlier in the compile may have reset the flag, so it is
+    // re-derived from the language here, not merely preserved.
     if is_brs {
-        st.bilingual_output = false;
+        st.bilingual_output = doc_language_is_bilingual(&st.doc_language);
     }
     st.card2_row_conditions = true;
 
@@ -4560,5 +4581,70 @@ pub(crate) mod flow_tests {
         assert!(has_back_branding, "Back cover must contain agency text branding");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -----------------------------------------------------------------------
+    // Fix round 2: `doc_language` is authoritative for bilingual output.
+    // `generate_publication_pages` is the entry `generate_from_workspace` runs, so these
+    // exercise the shipped Orchestrator Compile path, not the inner template generator.
+    // -----------------------------------------------------------------------
+
+    /// One BRS catalogue with a single image row, the translation map the Orchestrator seeds
+    /// from its translation memory, and the document language under test. `bilingual_output`
+    /// starts `true` exactly as `generate_from_workspace` sets it before calling the pipeline.
+    fn brs_image_pipeline_state(doc_language: &str) -> PubgenState {
+        let mut translations = std::collections::HashMap::new();
+        translations.insert("Gambar 1 Kantor BPS".to_string(), "Figure 1 BPS Office".to_string());
+        PubgenState {
+            active_profile_id: "bps_brs".into(),
+            doc_language: doc_language.into(),
+            bilingual_output: true,
+            translations,
+            card1_records: vec![vec!["Image".into(), "1".into(), "Gambar 1 Kantor BPS".into(), super::testutil::sample_image_path()]],
+            card1_headers: vec!["type".into(), "number".into(), "title".into(), "file".into()],
+            card1_type_col: 0,
+            card1_num_col: 1,
+            card1_title_col: 2,
+            card1_file_col: 3,
+            card1_range_all: true,
+            ..Default::default()
+        }
+    }
+
+    fn pipeline_stories(app: &DesignApp) -> Vec<String> {
+        app.session.active().map(|a| a.doc.stories.values().map(|s| s.text.clone()).collect()).unwrap_or_default()
+    }
+
+    /// A BRS document set to Indonesian-English must keep the English image caption through
+    /// the whole pipeline. Before the fix the pipeline forced `bilingual_output = false` for
+    /// every BRS build, so the caption always rendered Indonesian.
+    #[test]
+    fn test_brs_pipeline_keeps_the_bilingual_caption_from_doc_language() {
+        let mut st = brs_image_pipeline_state("Indonesian-English");
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let res = generate_publication_pages(&mut app, &mut st);
+        assert!(res.is_ok(), "BRS pipeline generation failed: {res:?}");
+        assert!(st.bilingual_output, "the Indonesian-English document language must keep bilingual output on BRS");
+
+        let texts = pipeline_stories(&app);
+        assert!(texts.iter().any(|t| t.trim() == "Figure 1 BPS Office"), "the pipeline must render the English image caption, found: {texts:?}");
+    }
+
+    /// The other side of the same rule: an Indonesian BRS document stays single-language, so
+    /// the seeded bilingual flag is cleared and the caption keeps its catalogue title.
+    #[test]
+    fn test_brs_pipeline_clears_bilingual_output_for_an_indonesian_document() {
+        let mut st = brs_image_pipeline_state("Indonesian");
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let res = generate_publication_pages(&mut app, &mut st);
+        assert!(res.is_ok(), "BRS pipeline generation failed: {res:?}");
+        assert!(!st.bilingual_output, "an Indonesian document must not generate bilingual output on BRS");
+
+        let texts = pipeline_stories(&app);
+        assert!(texts.iter().any(|t| t.trim() == "Gambar 1 Kantor BPS"), "the Indonesian image caption must render, found: {texts:?}");
+        assert!(
+            !texts.iter().any(|t| t.trim() == "Figure 1 BPS Office"),
+            "the English caption must not leak into a single-language document, found: {texts:?}"
+        );
     }
 }

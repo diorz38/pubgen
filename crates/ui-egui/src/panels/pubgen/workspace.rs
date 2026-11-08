@@ -4210,6 +4210,9 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
     // (`excel::execute_excel_to_csvs`), otherwise BRS loses its table style,
     // theme and header/footer preset (`state::apply_profile`, `state.rs:787`).
     st.apply_profile(super::profiles::ProfileManager::get_profile(&state.selected_profile), false);
+    // Fix round 2: carry the worksheet's language into the pipeline state. The page generator
+    // reads it to decide bilingual output for BRS, so it must not arrive empty.
+    st.doc_language = state.doc_language.clone();
     let is_bilingual = state.doc_language.to_lowercase().contains("bilingual")
         || state.doc_language.to_lowercase().contains("dwibahasa")
         || state.doc_language.eq_ignore_ascii_case("indonesian-english")
@@ -5529,5 +5532,41 @@ mod tests {
                 let _ = app.run("file.saveAs", serde_json::json!({"path": target.to_string_lossy()}));
             }
         }
+    }
+
+    /// Fix round 2 (shipped path): Compile must carry the worksheet's `doc_language` into the
+    /// page pipeline. A BRS document set to Indonesian-English used to lose the English image
+    /// caption because the pipeline forced `bilingual_output = false` for every BRS build.
+    #[test]
+    fn test_generate_from_workspace_keeps_the_bilingual_image_caption() {
+        let image = std::fs::read(super::super::testutil::sample_image_path()).expect("sample image");
+        let mut state =
+            OrchestratorWorkspaceState { selected_profile: "bps_brs".into(), doc_language: "Indonesian-English".into(), ..Default::default() };
+        state.cards.clear();
+        state.cards.push(PublicationCard {
+            kind: CardKind::Image,
+            title: "Gambar 1 Kantor BPS".into(),
+            source: "img/office.png".into(),
+            chapter_id: "G1".into(),
+            ..Default::default()
+        });
+        state.cached_content.insert("img/office.png".into(), image);
+        state.tm.insert(pubgen_core::translation::TmEntry {
+            source: "Gambar 1 Kantor BPS".into(),
+            target: "Figure 1 BPS Office".into(),
+            origin: pubgen_core::translation::TmOrigin::Ai,
+            role: "image_caption".into(),
+            updated: pubgen_core::translation::now_stamp(),
+        });
+
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let res = generate_from_workspace(&mut app, &state);
+        assert!(res.is_ok(), "worksheet compilation failed: {res:?}");
+
+        let texts: Vec<String> = app.session.active().map(|a| a.doc.stories.values().map(|s| s.text.clone()).collect()).unwrap_or_default();
+        assert!(
+            texts.iter().any(|t| t.trim() == "Figure 1 BPS Office"),
+            "the compile pipeline must render the English image caption, found: {texts:?}"
+        );
     }
 }
