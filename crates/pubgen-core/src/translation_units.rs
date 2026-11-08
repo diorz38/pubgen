@@ -90,7 +90,7 @@ fn is_numeric(text: &str) -> bool {
     for c in text.chars() {
         match c {
             '0'..='9' => digits += 1,
-            '.' | ',' | '%' | '(' | ')' | '+' | '-' => {}
+            '.' | ',' | '%' | '(' | ')' | '+' | '-' | '/' | '–' | '—' => {}
             c if c.is_whitespace() => {}
             _ => return false,
         }
@@ -204,12 +204,18 @@ fn collect_card(draft: &WorkspaceDraft, card: &PublicationCard, protected: &[Str
             push(out, seen, protected, &card.title, UnitRole::TableTitle, &card.id);
             if let Some(rows) = csv_rows(draft, card_source(card)) {
                 for (index, row) in rows.iter().enumerate() {
-                    let Some(first) = row.first().map(String::as_str) else { continue };
                     if index == 0 {
-                        for part in split_header_stacks(first) {
-                            push(out, seen, protected, &part, UnitRole::TableHeader, &card.id);
+                        // The renderer splits every header column (`tables.rs:132-146`),
+                        // so every cell of row 0 is a header, not just the first.
+                        for cell in row {
+                            for part in split_header_stacks(cell) {
+                                push(out, seen, protected, &part, UnitRole::TableHeader, &card.id);
+                            }
                         }
-                    } else if is_table_note_row(first) {
+                        continue;
+                    }
+                    let Some(first) = row.first().map(String::as_str) else { continue };
+                    if is_table_note_row(first) {
                         push(out, seen, protected, first, UnitRole::TableNote, &card.id);
                     } else {
                         push(out, seen, protected, first, UnitRole::TableRowLabel, &card.id);
@@ -335,7 +341,7 @@ mod tests {
 
     #[test]
     fn numeric_cells_are_skipped() {
-        for n in ["1.234,56", "2026", "(1)", "12,5%", "-", "1 234", "0", "3.1"] {
+        for n in ["1.234,56", "2026", "(1)", "12,5%", "-", "1 234", "0", "3.1", "2024/2025", "1–2"] {
             assert!(is_skippable(n, &[]), "must skip {n}");
         }
     }
@@ -412,6 +418,17 @@ mod tests {
         let units = collect_units(&draft);
         assert!(units.iter().any(|u| u.role == UnitRole::MapTitle));
         assert!(!units.iter().any(|u| u.text == "Karawang Timur"));
+    }
+
+    #[test]
+    fn all_header_columns_are_collected_as_table_headers() {
+        let mut draft = draft();
+        draft.csv.push(("csv/T1.csv".into(), b"Kecamatan;Luas Wilayah (km2);Jumlah Penduduk (jiwa)\nBatujaya;1.234,5;56.789\n".to_vec()));
+        draft.metadata.cards.push(card(CardKind::Table, "Luas Wilayah", &[("source", "csv/T1.csv")]));
+        let units = collect_units(&draft);
+        for header in ["Kecamatan", "Luas Wilayah (km2)", "Jumlah Penduduk (jiwa)"] {
+            assert!(units.iter().any(|u| u.role == UnitRole::TableHeader && u.text == header), "missing header column {header}: {units:?}");
+        }
     }
 
     #[test]
