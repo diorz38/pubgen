@@ -1569,14 +1569,10 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
         let is_cover_or_div = is_div || type_val.eq_ignore_ascii_case("COVER");
         // The narrative sheets: `GXX` (the front matter) and `RXX` (the chapter reviews). Their
         // pages are the ones the paragraph table of contents lists.
-        let is_narrative_row =
-            type_val.eq_ignore_ascii_case("Ulasan") || type_val.eq_ignore_ascii_case("G") || type_val.eq_ignore_ascii_case("Paragraph");
+        let is_narrative_row = type_val.eq_ignore_ascii_case("Ulasan") || type_val.eq_ignore_ascii_case("G") || type_val.eq_ignore_ascii_case("Paragraph");
 
         let is_cover = type_val.eq_ignore_ascii_case("COVER") || type_val.eq_ignore_ascii_case("SAMPUL");
-        let is_preface_row = is_preface
-            || type_val.eq_ignore_ascii_case("G")
-            || type_val.eq_ignore_ascii_case("PREFACE")
-            || type_val.eq_ignore_ascii_case("Paragraph");
+        let is_preface_row = is_preface || type_val.eq_ignore_ascii_case("G") || type_val.eq_ignore_ascii_case("PREFACE") || type_val.eq_ignore_ascii_case("Paragraph");
         let row_chapter_id = if !is_cover && !is_preface_row { extract_catalog_chapter_id(num_val, type_val, file_val, title_val) } else { None };
 
         let row_tpl_spec = row.get(template_col).map(String::as_str).unwrap_or("").trim();
@@ -2792,8 +2788,10 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                             let mut pd = super::charts::spec::MapCsvData::default();
                             if let Ok(geo) = super::charts::stock_maps::load_chart_geo_map(&map_info.map_name_or_path) {
                                 for (i, feat) in geo.features.iter().enumerate() {
-                                    let name =
-                                        feat.nmdesa().or_else(|| feat.nmkec()).map(|s| s.to_string()).unwrap_or_else(|| format!("Area {}", i + 1));
+                                    let name = feat.nmdesa()
+                                        .or_else(|| feat.nmkec())
+                                        .map(|s| s.to_string())
+                                        .unwrap_or_else(|| format!("Area {}", i + 1));
                                     pd.categories.push(name);
                                     pd.values.push(((i + 1) as f64) * 10.0);
                                 }
@@ -2825,7 +2823,11 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                                     eff_title_en_val.to_string()
                                 },
                                 category_col: "A".into(),
-                                series: vec![super::charts::spec::SeriesSpec { col: "B".into(), label_id: "Nilai".into(), label_en: "Value".into() }],
+                                series: vec![super::charts::spec::SeriesSpec {
+                                    col: "B".into(),
+                                    label_id: "Nilai".into(),
+                                    label_en: "Value".into(),
+                                }],
                                 data_start_row: 1,
                                 data_end_row: parsed_data.categories.len(),
                                 value_format: super::charts::spec::ValueFormat::Number,
@@ -2958,18 +2960,29 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                     let mut cats = Vec::new();
                     let mut vals = Vec::new();
                     for (i, feat) in geo.features.iter().enumerate() {
-                        let name = feat.nmdesa().or_else(|| feat.nmkec()).map(|s| s.to_string()).unwrap_or_else(|| format!("Area {}", i + 1));
+                        let name = feat.nmdesa()
+                            .or_else(|| feat.nmkec())
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| format!("Area {}", i + 1));
                         cats.push(name);
                         vals.push(((i + 1) as f64) * 10.0);
                     }
                     if !cats.is_empty() {
-                        let pal_idx = if !theme_val.is_empty() { super::charts::palette::find_map_palette_idx(theme_val) } else { 0 };
+                        let pal_idx = if !theme_val.is_empty() {
+                            super::charts::palette::find_map_palette_idx(theme_val)
+                        } else {
+                            0
+                        };
                         let map_spec = super::charts::spec::ChartSpec {
                             chart_type: super::charts::spec::ChartType::Map,
                             title_id: eff_id_title.to_string(),
                             title_en: eff_title_en_val.to_string(),
                             category_col: "A".into(),
-                            series: vec![super::charts::spec::SeriesSpec { col: "B".into(), label_id: "Nilai".into(), label_en: "Value".into() }],
+                            series: vec![super::charts::spec::SeriesSpec {
+                                col: "B".into(),
+                                label_id: "Nilai".into(),
+                                label_en: "Value".into(),
+                            }],
                             data_start_row: 1,
                             data_end_row: cats.len(),
                             value_format: super::charts::spec::ValueFormat::Number,
@@ -2982,7 +2995,13 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                             include_data_table: false,
                         };
                         let chart_margin = designcraft_geom::Rect { x0: margin.x0, y0: margin.y0, x1: margin.x1, y1: margin.y1 };
-                        if let Ok(layout) = super::charts::layout::compute_layout(&map_spec, &cats, &[vals], chart_margin, st.bilingual_output) {
+                        if let Ok(layout) = super::charts::layout::compute_layout(
+                            &map_spec,
+                            &cats,
+                            &[vals],
+                            chart_margin,
+                            st.bilingual_output,
+                        ) {
                             let palette = if !theme_val.is_empty() {
                                 vec![theme_val.to_string()]
                             } else if let Some(ref th) = st.card2_theme_override {
