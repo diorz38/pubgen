@@ -69,6 +69,8 @@ impl OnlineTranslator {
     /// Any OpenAI-compatible endpoint: Groq, a custom host, or a local server
     /// (Ollama, LM Studio, llama.cpp). An empty key means no Authorization header.
     pub fn with_endpoint(key: &str, model: &str, base_url: &str) -> Self {
+        #[cfg(not(feature = "online"))]
+        let _ = base_url;
         Self {
             key: key.trim().to_string(),
             model: model.trim().to_string(),
