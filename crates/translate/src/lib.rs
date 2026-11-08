@@ -11,10 +11,13 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod mask;
 pub mod models;
 pub mod nllb;
 pub mod online;
 pub mod system;
+
+pub use mask::{MaskError, Masked, mask, unmask};
 
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
