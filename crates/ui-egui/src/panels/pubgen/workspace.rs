@@ -4711,7 +4711,7 @@ fn start_compile_job(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orche
                 current_page: 0,
                 status_text: crate::i18n::tr(lang, "Menyiapkan pratinjau halaman tata letak…").to_string(),
                 error_msg: None,
-                completed: false,
+                completed: total_doc_pages == 0,
             });
             ctx.request_repaint();
         }
@@ -4737,7 +4737,7 @@ fn render_compile_progress_modal(app: &mut DesignApp, ctx: &egui::Context, state
     let mut finish_and_switch = false;
     let mut close = false;
 
-    egui::Window::new(title).collapsible(false).resizable(false).fixed_size([440.0, 160.0]).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).show(
+    egui::Window::new(title).collapsible(false).resizable(false).fixed_size([460.0, 180.0]).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).show(
         ctx,
         |ui| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
@@ -4750,17 +4750,41 @@ fn render_compile_progress_modal(app: &mut DesignApp, ctx: &egui::Context, state
                 }
             } else if prog.completed {
                 ui.label(
-                    RichText::new(crate::i18n::tr(lang, "Tata letak siap! Membuka lembar kerja DesignCraft…"))
+                    RichText::new(format!("✓ {}", crate::i18n::tr(lang, "Tata letak siap! Semua halaman dan visual cache selesai diproses.")))
                         .font(semibold(12.0))
                         .color(t.text_strong),
                 );
-                ui.add(egui::ProgressBar::new(1.0).show_percentage().desired_width(ui.available_width()));
+                let count_text = format!("{}/{} {}", prog.total_pages, prog.total_pages, crate::i18n::tr(lang, "halaman"));
+                ui.add(egui::ProgressBar::new(1.0).show_percentage().desired_width(ui.available_width()).text(count_text));
                 ui.label(
-                    RichText::new(crate::i18n::tr(lang, "Semua halaman dan cache visual selesai diproses."))
-                        .font(FontId::proportional(11.0))
-                        .color(t.text_dim),
+                    RichText::new(crate::i18n::tr(
+                        lang,
+                        "Seluruh halaman dokumen dan visual cache telah selesai dimuat. Navigasi panel dan kanvas di DesignCraft kini dapat berjalan lancar tanpa freeze.",
+                    ))
+                    .font(FontId::proportional(11.0))
+                    .color(t.text_dim),
                 );
-                finish_and_switch = true;
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(format!("🎨 {}", crate::i18n::tr(lang, "Buka Lembar Kerja DesignCraft")))
+                                    .font(semibold(12.0))
+                                    .color(Color32::WHITE),
+                            )
+                            .fill(t.accent_strong)
+                            .corner_radius(CornerRadius::same(t.radius)),
+                        )
+                        .clicked()
+                    {
+                        finish_and_switch = true;
+                    }
+
+                    if ui.button(crate::i18n::tr(lang, "Tetap di Orchestrator")).clicked() {
+                        close = true;
+                    }
+                });
             } else {
                 ui.label(RichText::new(&prog.status_text).font(semibold(12.0)).color(t.text_strong));
 
@@ -4773,34 +4797,46 @@ fn render_compile_progress_modal(app: &mut DesignApp, ctx: &egui::Context, state
                 ui.add(progress_bar);
 
                 ui.label(
-                    RichText::new(crate::i18n::tr(lang, "Membuat cache visual agar panel dan menu tidak freeze saat navigasi..."))
+                    RichText::new(crate::i18n::tr(lang, "Membuat cache visual dan komposisi halaman agar navigasi panel lancar..."))
                         .font(FontId::proportional(11.0))
                         .color(t.text_dim),
                 );
 
-                // Pre-warming completed or skipped; proceed to finalization
-                if prog.is_publish {
-                    let pdf_path = format!("outputs/{}.pdf", sanitize_file_stem(&state.meta_title));
-                    match app.run("file.exportPdf", serde_json::json!({ "path": pdf_path })) {
-                        Ok(_) => {
-                            let now = format_now();
-                            state
-                                .execution_log
-                                .push(format!("[{now}] {}", crate::i18n::tr(lang, "Exported release PDF: {path}").replace("{path}", &pdf_path)));
-                            state.last_output_pdf = Some(pdf_path);
-                            state.status_message = Some(("Kompilasi & Publikasi PDF Berhasil".into(), true));
-                            prog.completed = true;
-                        }
-                        Err(e) => {
-                            prog.error_msg = Some(format!("Ekspor PDF gagal: {e}"));
-                        }
-                    }
+                if prog.current_page < prog.total_pages {
+                    let page_idx = prog.current_page;
+                    let _ = crate::panels::pages::prewarm_page_thumbnail(app, ctx, page_idx);
+                    prog.current_page += 1;
+                    prog.status_text = format!(
+                        "{} ({}/{})",
+                        crate::i18n::tr(lang, "Membuat cache visual halaman…"),
+                        prog.current_page,
+                        prog.total_pages
+                    );
+                    ctx.request_repaint();
                 } else {
-                    state.status_message = Some(("Dokumen berhasil digenerate".into(), true));
-                    prog.completed = true;
+                    // All pages pre-warmed!
+                    if prog.is_publish {
+                        let pdf_path = format!("outputs/{}.pdf", sanitize_file_stem(&state.meta_title));
+                        match app.run("file.exportPdf", serde_json::json!({ "path": pdf_path })) {
+                            Ok(_) => {
+                                let now = format_now();
+                                state
+                                    .execution_log
+                                    .push(format!("[{now}] {}", crate::i18n::tr(lang, "Exported release PDF: {path}").replace("{path}", &pdf_path)));
+                                state.last_output_pdf = Some(pdf_path);
+                                state.status_message = Some(("Kompilasi & Publikasi PDF Berhasil".into(), true));
+                                prog.completed = true;
+                            }
+                            Err(e) => {
+                                prog.error_msg = Some(format!("Ekspor PDF gagal: {e}"));
+                            }
+                        }
+                    } else {
+                        state.status_message = Some(("Dokumen berhasil digenerate dan visual cache siap".into(), true));
+                        prog.completed = true;
+                    }
+                    ctx.request_repaint();
                 }
-
-                ctx.request_repaint();
             }
         },
     );
@@ -5035,6 +5071,51 @@ mod tests {
         // Cancel dialog
         state.show_guard_dialog = false;
         assert!(!state.show_guard_dialog);
+    }
+
+    #[test]
+    fn test_compile_progress_modal_prewarms_and_does_not_jump_prematurely() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx, "id");
+        crate::menus::pubgen_bar::set_orchestrator_mode(&ctx, true);
+        assert!(crate::menus::pubgen_bar::is_orchestrator_mode(&ctx));
+
+        let t = Tokens::get(&ctx);
+        let mut state = OrchestratorWorkspaceState::default();
+        state.compile_progress = Some(CompileProgressState {
+            is_publish: false,
+            total_pages: 2,
+            current_page: 0,
+            status_text: "Memulai...".into(),
+            error_msg: None,
+            completed: false,
+        });
+
+        // Step 1: Page 0 pre-warming
+        let mut out = ctx.run_ui(Default::default(), |_| {
+            render_compile_progress_modal(&mut app, &ctx, &mut state, &t, "id");
+        });
+        out.textures_delta.clear();
+        assert!(crate::menus::pubgen_bar::is_orchestrator_mode(&ctx), "must NOT jump to DesignCraft during page loading");
+        assert_eq!(state.compile_progress.as_ref().unwrap().current_page, 1);
+        assert!(!state.compile_progress.as_ref().unwrap().completed);
+
+        // Step 2: Page 1 pre-warming
+        let mut out = ctx.run_ui(Default::default(), |_| {
+            render_compile_progress_modal(&mut app, &ctx, &mut state, &t, "id");
+        });
+        out.textures_delta.clear();
+        assert!(crate::menus::pubgen_bar::is_orchestrator_mode(&ctx), "must NOT jump during second page");
+        assert_eq!(state.compile_progress.as_ref().unwrap().current_page, 2);
+
+        // Step 3: Finalization sets completed = true, but remains in Orchestrator waiting for user action
+        let mut out = ctx.run_ui(Default::default(), |_| {
+            render_compile_progress_modal(&mut app, &ctx, &mut state, &t, "id");
+        });
+        out.textures_delta.clear();
+        assert!(crate::menus::pubgen_bar::is_orchestrator_mode(&ctx), "must wait for user button click before jumping");
+        assert!(state.compile_progress.as_ref().unwrap().completed);
     }
 
     #[test]
