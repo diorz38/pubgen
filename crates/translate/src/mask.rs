@@ -68,7 +68,9 @@ fn window_matches(orig: &[char], start: usize, term_lower: &str) -> bool {
 pub fn mask(text: &str, glossary: &[(String, String)]) -> Masked {
     let chars: Vec<char> = text.chars().collect();
     // Longest term first, so "Luas Wilayah" wins over "Wilayah".
-    let mut terms: Vec<&(String, String)> = glossary.iter().collect();
+    // Empty or whitespace-only terms (blank CSV rows) are skipped: a zero-length
+    // match never advances `i` and would loop forever pushing placeholders.
+    let mut terms: Vec<&(String, String)> = glossary.iter().filter(|(t, _)| !t.trim().is_empty()).collect();
     terms.sort_by_key(|(t, _)| std::cmp::Reverse(t.chars().count()));
 
     let mut tokens: Vec<Token> = Vec::new();
@@ -302,6 +304,16 @@ mod tests {
         assert_eq!(m.text, "Halo dunia.");
         assert!(m.tokens.is_empty());
         assert_eq!(unmask(&m.text, &m).expect("intact"), "Halo dunia.");
+    }
+
+    #[test]
+    fn empty_or_whitespace_glossary_terms_are_ignored() {
+        // Before the guard these hung: a zero-length match at a non-word char
+        // pushed "[[n]]" forever without advancing.
+        let g = vec![("".into(), "X".into()), ("  ".into(), "Y".into())];
+        let m = mask("Kecamatan Karawang", &g);
+        assert_eq!(m.text, "Kecamatan Karawang");
+        assert!(m.tokens.is_empty());
     }
 
     #[test]
