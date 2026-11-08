@@ -32,6 +32,7 @@ pub mod ai_cover;
 pub mod ai_cover_job;
 pub mod audit;
 pub mod charts;
+pub mod translate_stage;
 pub mod workspace;
 
 #[cfg(not(target_arch = "wasm32"))]

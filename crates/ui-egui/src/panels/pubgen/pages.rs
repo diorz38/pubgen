@@ -474,6 +474,18 @@ fn row_template_slots(
     } else if type_val.eq_ignore_ascii_case("Image") || type_val.eq_ignore_ascii_case("Graphic") {
         let note_title = title_val.trim();
         text.insert("title".into(), json!(note_title));
+        // Translated caption (T7): the explicit title_en column wins, then the session
+        // map — the same precedence the divider, chart and table branches use.
+        if st.bilingual_output {
+            let en = if !title_en_val.is_empty() {
+                title_en_val.to_string()
+            } else {
+                st.translations.get(note_title).map(String::as_str).unwrap_or_default().to_string()
+            };
+            if !en.is_empty() {
+                text.insert("title_en".into(), json!(en));
+            }
+        }
         if let Some(file_str) = file_opt
             && let Some(img_file) = resolve_image_file(&st.card1_path, file_str, &["png", "jpg", "jpeg"])
         {

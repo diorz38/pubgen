@@ -377,6 +377,19 @@ pub struct OrchestratorWorkspaceState {
     // Re-compilation Safety Guard Dialog state
     pub show_guard_dialog: bool,
     pub guard_is_publish: bool,
+    // Translation memory (T7): persisted inside the .pubgen package, seeded from it on open.
+    #[serde(default)]
+    pub tm: pubgen_core::TranslationMemory,
+    // The worksheet translation stage's in-flight job (T7). A job never survives a
+    // restart, so none of this is serialized.
+    #[serde(skip)]
+    pub translate_job: Option<super::ai::TranslateJob>,
+    #[serde(skip)]
+    pub translate_units: Vec<pubgen_core::translation_units::TransUnit>,
+    #[serde(skip)]
+    pub translate_glossary_pairs: Vec<(String, String)>,
+    #[serde(skip)]
+    pub translate_reused: usize,
 }
 
 impl Default for OrchestratorWorkspaceState {
@@ -561,6 +574,11 @@ impl Default for OrchestratorWorkspaceState {
             status_message: None,
             show_guard_dialog: false,
             guard_is_publish: false,
+            tm: pubgen_core::TranslationMemory::default(),
+            translate_job: None,
+            translate_units: Vec::new(),
+            translate_glossary_pairs: Vec::new(),
+            translate_reused: 0,
         }
     }
 }
@@ -1373,12 +1391,14 @@ pub fn sync_external_workspace(
     ctx: &egui::Context,
     source_name: &str,
     metadata: &pubgen_core::PublicationMetadata,
+    tm: &pubgen_core::TranslationMemory,
     csv: &[(String, Vec<u8>)],
     text: &[(String, Vec<u8>)],
     assets: &[(String, Vec<u8>)],
 ) {
     let mut state = get_state(ctx);
     state.view = OrchestratorView::Studio;
+    state.tm = tm.clone();
     let report = pubgen_core::excel::IngestReport {
         profile_id: metadata.profile_id.clone(),
         metadata: metadata.clone(),
@@ -1706,6 +1726,12 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
         ui.ctx().data_mut(|d| d.insert_temp(host_tab_action_id(), action));
     }
     let mut state = get_state(ui.ctx());
+
+    // Poll the in-flight worksheet translation job every frame (T7). The button lives in
+    // the Studio view, so a job can only exist there.
+    if state.view == OrchestratorView::Studio {
+        poll_translate_job(&mut state);
+    }
 
     if state.view == OrchestratorView::Home {
         render_orchestrator_home(app, ui, &mut state, &t, &lang);
@@ -3080,8 +3106,42 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
             ui.label(RichText::new("Margins: T:20.2 B:20.0 L:19.0 R:15.0 mm | Spreads: Tidak").font(FontId::proportional(11.0)).color(t.text_dim));
         });
 
-    // 2. Action Buttons: Generate & Generate and Publish
+    // 2. Action Buttons: Translate, Generate & Generate and Publish
     let btn_h = 28.0f32;
+
+    // Translate Worksheet (T7): TM/glossary hits resolve locally, only misses are sent.
+    let translate_enabled = super::ai::backend_config_from_prefs(app).is_some() && !state.cards.is_empty();
+    let translate_label = if state.translate_job.is_some() {
+        format!(
+            "Menerjemahkan dengan AI… {}/{}",
+            state.translate_job.as_ref().map(|j| j.done).unwrap_or(0),
+            state.translate_job.as_ref().map(|j| j.total).unwrap_or(0)
+        )
+    } else {
+        crate::i18n::tr(lang, "Translate Worksheet").to_string()
+    };
+    let translate_resp = ui
+        .add_sized(
+            [ui.available_width(), btn_h],
+            egui::Button::new(RichText::new(translate_label).font(semibold(11.5)).color(if translate_enabled || state.translate_job.is_some() {
+                t.text_strong
+            } else {
+                t.text_dim
+            }))
+            .fill(t.panel_darker)
+            .corner_radius(CornerRadius::same(t.radius)),
+        )
+        .on_hover_text(crate::i18n::tr(
+            lang,
+            "Translate the worksheet's titles, headers and notes into English (memory and glossary hits need no request)",
+        ));
+    if !translate_enabled && state.translate_job.is_none() {
+        translate_resp.clone().on_hover_text(crate::i18n::tr(lang, "Configure an AI provider first, and add at least one card"));
+    }
+    if translate_resp.clicked() {
+        start_translate_stage(app, ui.ctx(), state);
+    }
+    // The job itself is polled once per frame in `show`, whichever tab is open.
 
     // Generate Button (Deep Cyan)
     if ui
@@ -4009,6 +4069,125 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
     }
 }
 
+/// The core draft of the current worksheet (T7): the metadata `to_metadata` writes into
+/// a package, plus the staged content and the translation memory. This is what the
+/// translation stage plans over (`collect_units` consumes the core draft).
+fn worksheet_draft(state: &OrchestratorWorkspaceState) -> pubgen_core::workspace_validation::WorkspaceDraft {
+    let mut csv = Vec::new();
+    let mut text = Vec::new();
+    let mut assets = Vec::new();
+    for (key, bytes) in &state.cached_content {
+        let clean = key.replace('\\', "/");
+        if clean.starts_with("csv/") || clean.ends_with(".csv") {
+            csv.push((key.clone(), bytes.clone()));
+        } else if clean.starts_with("rtf/")
+            || clean.starts_with("md/")
+            || clean.starts_with("text/")
+            || clean.ends_with(".rtf")
+            || clean.ends_with(".md")
+        {
+            text.push((key.clone(), bytes.clone()));
+        } else {
+            assets.push((key.clone(), bytes.clone()));
+        }
+    }
+    let name = state.meta_title.trim();
+    let name = if name.is_empty() { "worksheet" } else { name };
+    let mut draft = pubgen_core::workspace_validation::WorkspaceDraft::from_ingest(
+        name.to_string(),
+        pubgen_core::excel::IngestReport {
+            profile_id: state.selected_profile.clone(),
+            metadata: state.to_metadata(),
+            csv,
+            text,
+            assets,
+            warnings: Vec::new(),
+        },
+    );
+    draft.tm = state.tm.clone();
+    draft
+}
+
+/// "Translate Worksheet" (T7): resolve the TM and whole-string glossary hits locally,
+/// then send only the misses to the provider as one background job.
+fn start_translate_stage(app: &mut DesignApp, ctx: &egui::Context, state: &mut OrchestratorWorkspaceState) {
+    if state.translate_job.is_some() || state.cards.is_empty() {
+        return;
+    }
+    let glossary = super::ai::BpsGlossary::load(&app.session.prefs.pubgen_glossary_path);
+    let draft = worksheet_draft(state);
+    let mut tm = state.tm.clone();
+    let (misses, plan) = super::translate_stage::plan_units(&draft, &tm, &glossary);
+    super::translate_stage::store_glossary_hits(&draft, &mut tm, &glossary, &misses);
+    state.tm = tm;
+    state.translate_reused = plan.reused;
+    if misses.is_empty() {
+        // Everything resolved locally: no request leaves the machine.
+        let now = format_now();
+        state.execution_log.push(format!("[{now}] Translated 0 unit(s), reused {}, skipped 0, failed 0.", plan.reused));
+        state.status_message = Some((format!("Semua unit berasal dari memori/kosakata ({}) — tidak ada permintaan AI.", plan.reused), true));
+        state.is_dirty = true;
+        return;
+    }
+    let Some(cfg) = super::ai::backend_config_from_prefs(app) else {
+        state.status_message = Some(("Tidak ada penyedia AI yang dikonfigurasi (Pengaturan AI).".into(), false));
+        return;
+    };
+    let pairs = glossary.prompt_pairs();
+    let requests = super::translate_stage::masked_requests(&misses, &pairs);
+    state.translate_units = misses;
+    state.translate_glossary_pairs = pairs.clone();
+    state.translate_job = Some(super::ai::TranslateJob::spawn(&cfg, requests, pairs, ctx.clone()));
+    state.status_message = Some((format!("Menerjemahkan {} unit dengan AI…", state.translate_units.len()), true));
+}
+
+/// Poll the worksheet translation job (T7): restore the masked outputs, reject any
+/// unit whose numbers did not survive, write the accepted English onto the cards and
+/// into the memory, and report one line in LogEksekusi.
+fn poll_translate_job(state: &mut OrchestratorWorkspaceState) {
+    let Some(mut job) = state.translate_job.take() else { return };
+    let mut scratch = super::PubgenState::default();
+    let _ok = job.poll(&mut scratch);
+    if !job.finished {
+        state.status_message = Some((format!("Menerjemahkan dengan AI… {}/{}", job.done, job.total), true));
+        state.translate_job = Some(job);
+        return;
+    }
+    let mut draft = worksheet_draft(state);
+    let mut tm = std::mem::take(&mut state.tm);
+    let outputs: Vec<(String, String)> = scratch.translations.into_iter().collect();
+    let (results, restore_failed) = super::translate_stage::restore_outputs(&state.translate_units, &outputs, &state.translate_glossary_pairs);
+    let mut res = super::translate_stage::apply_results(&mut draft, &mut tm, &state.translate_units, &results);
+    state.tm = tm;
+    res.failed.extend(restore_failed);
+    // Refresh the UI cards from the core draft: `to_metadata` maps `state.cards` 1:1.
+    for (core_card, ui_card) in draft.metadata.cards.iter().zip(&mut state.cards) {
+        if let Some(ten) = core_card.settings.get("title_en").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            ui_card.title_en = ten.to_string();
+        }
+    }
+    let now = format_now();
+    state.execution_log.push(format!(
+        "[{now}] Translated {} unit(s), reused {}, skipped {}, failed {}.",
+        res.translated,
+        state.translate_reused,
+        res.skipped,
+        res.failed.len()
+    ));
+    if let Some((msg, good)) = scratch.header_status
+        && !good
+    {
+        state.execution_log.push(format!("[{now}] {msg}"));
+    }
+    state.status_message = Some((
+        format!("Terjemahan selesai: {} unit, {} daur ulang, {} gagal", res.translated, state.translate_reused, res.failed.len()),
+        res.failed.is_empty(),
+    ));
+    state.is_dirty = true;
+    state.translate_units.clear();
+    state.translate_glossary_pairs.clear();
+}
+
 /// Executes compilation and automatically transitions workspace to DesignCraft Layout mode.
 /// Build a `PubgenState` from the active worksheet (cards + cached csv/text/assets),
 /// stage the cached content into a temp folder, and run the shared page-generation
@@ -4031,6 +4210,11 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
     } else if state.selected_profile == "bps_brs" {
         st.bilingual_output = false;
     }
+
+    // T7: seed the generation cache from the translation memory so a compile reuses
+    // every translation; the worksheet's glossary reaches `pair_cells` the same way.
+    super::translate_stage::seed_pubgen_state(&mut st, &state.tm);
+    st.glossary = super::ai::BpsGlossary::load(&app.session.prefs.pubgen_glossary_path);
 
     if state.margin_top_mm > 0 {
         let mut prof = st.active_profile();

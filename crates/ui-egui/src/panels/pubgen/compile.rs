@@ -1881,6 +1881,7 @@ pub(crate) fn open_project(app: &mut DesignApp, p: &Value) -> Result<Value, Stri
                 &ctx,
                 &path,
                 &opened.metadata,
+                &opened.tm,
                 &opened.content.csv,
                 &opened.content.text,
                 &opened.content.assets,
@@ -1929,6 +1930,7 @@ fn ask_for_manifest(app: &mut DesignApp) {
                         ctx,
                         &path,
                         &opened.metadata,
+                        &opened.tm,
                         &opened.content.csv,
                         &opened.content.text,
                         &opened.content.assets,
@@ -2050,7 +2052,7 @@ pub(crate) fn save_pubgen_package_to(app: &mut DesignApp, save_path: &Path) -> R
         }
     }
 
-    pubgen_core::container::save_pubgen(save_path, &manifest, &metadata, &glossary, &pubgen_core::TranslationMemory::default(), &content)
+    pubgen_core::container::save_pubgen(save_path, &manifest, &metadata, &glossary, &orch.tm, &content)
         .map_err(|e| format!("failed to save .pubgen package: {e}"))?;
 
     let path_str = save_path.to_string_lossy().to_string();
