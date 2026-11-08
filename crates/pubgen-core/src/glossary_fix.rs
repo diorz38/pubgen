@@ -42,6 +42,11 @@ fn apply_case(replacement: &str, upper: bool) -> String {
 
 /// Replace glossary terms in `text` with their standard replacements at word boundaries.
 /// Returns the updated text and the number of replacements applied.
+///
+/// One left-to-right scan per entry. The scan never looks at replacement text again, so it
+/// always terminates — including for an entry whose replacement reproduces its term
+/// (`total` → `Total`, `no` → `No`) — and an expanding replacement (`no` → `No data`)
+/// cannot grow the text past one substitution per match.
 pub fn enforce(text: &str, glossary: &[Entry]) -> (String, usize) {
     let mut fixes = 0usize;
     let mut current = text.to_owned();
@@ -55,30 +60,32 @@ pub fn enforce(text: &str, glossary: &[Entry]) -> (String, usize) {
             continue;
         }
 
-        loop {
-            let chars: Vec<char> = current.chars().collect();
-            let lower: Vec<char> = chars.iter().map(|c| c.to_lowercase().next().unwrap_or(*c)).collect();
-
-            let mut found = None;
-            for i in 0..=lower.len().saturating_sub(needle.len()) {
-                if lower[i..i + needle.len()] == needle[..]
-                    && (i == 0 || !is_word_char(chars[i - 1]))
-                    && (i + needle.len() == chars.len() || !is_word_char(chars[i + needle.len()]))
-                {
-                    found = Some(i);
-                    break;
-                }
+        let chars: Vec<char> = current.chars().collect();
+        let lower: Vec<char> = chars.iter().map(|c| c.to_lowercase().next().unwrap_or(*c)).collect();
+        let mut result = String::with_capacity(current.len());
+        let mut entry_fixes = 0usize;
+        let mut i = 0usize;
+        while i < chars.len() {
+            let end = i.saturating_add(needle.len());
+            let matched = end <= chars.len()
+                && lower[i..end] == needle[..]
+                && (i == 0 || !is_word_char(chars[i - 1]))
+                && (end == chars.len() || !is_word_char(chars[end]));
+            if matched {
+                let source: String = chars[i..end].iter().collect();
+                let replacement =
+                    if entry.case_preserve { apply_case(&entry.replacement, match_case_of(&source)) } else { entry.replacement.clone() };
+                result.push_str(&replacement);
+                entry_fixes += 1;
+                i = end;
+            } else {
+                result.push(chars[i]);
+                i += 1;
             }
-
-            let Some(at) = found else { break };
-            let matched: String = chars[at..at + needle.len()].iter().collect();
-            let replacement = if entry.case_preserve { apply_case(&entry.replacement, match_case_of(&matched)) } else { entry.replacement.clone() };
-
-            let mut result: String = chars[..at].iter().collect();
-            result.push_str(&replacement);
-            result.extend(chars[at + needle.len()..].iter());
+        }
+        if entry_fixes > 0 {
+            fixes += entry_fixes;
             current = result;
-            fixes += 1;
         }
     }
 
@@ -88,6 +95,56 @@ pub fn enforce(text: &str, glossary: &[Entry]) -> (String, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Run `enforce` on a worker thread so a non-terminating scan shows up as a failing
+    /// assertion instead of hanging the whole test binary. The threshold is generous: a
+    /// correct scan of a few bytes is microseconds.
+    fn enforce_with_timeout(text: &str, glossary: &[Entry]) -> (String, usize) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let text = text.to_string();
+        let glossary = glossary.to_vec();
+        std::thread::spawn(move || {
+            let _ = tx.send(enforce(&text, &glossary));
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(5)).expect("glossary enforcement must terminate")
+    }
+
+    fn entry(term: &str, replacement: &str, case_preserve: bool) -> Entry {
+        Entry { term: term.into(), replacement: replacement.into(), do_not_translate: false, case_preserve }
+    }
+
+    #[test]
+    fn a_case_preserving_entry_whose_replacement_is_the_needle_terminates() {
+        // The bundled glossary has total -> Total: rescanning the text after the replacement
+        // matched the same word again, forever. The scan must run once, left to right.
+        let (text, fixes) = enforce_with_timeout("Total", &[entry("total", "Total", true)]);
+        assert_eq!(text, "Total");
+        assert_eq!(fixes, 1);
+    }
+
+    #[test]
+    fn a_case_preserving_no_entry_terminates() {
+        // The bundled glossary also has no -> No, which froze the UI thread on "No."
+        let (text, fixes) = enforce_with_timeout("No.", &[entry("no", "No", true)]);
+        assert_eq!(text, "No.");
+        assert_eq!(fixes, 1);
+    }
+
+    #[test]
+    fn an_expanding_replacement_is_applied_once_and_never_regrows() {
+        // An entry whose replacement contains the term must not be re-scanned: the inserted
+        // English is output, not input.
+        let (text, fixes) = enforce_with_timeout("no", &[entry("no", "No data", true)]);
+        assert_eq!(text, "No data");
+        assert_eq!(fixes, 1);
+    }
+
+    #[test]
+    fn multiple_occurrences_are_all_replaced() {
+        let (text, fixes) = enforce_with_timeout("total and total.", &[entry("total", "Total", true)]);
+        assert_eq!(text, "Total and Total.");
+        assert_eq!(fixes, 2);
+    }
 
     #[test]
     fn test_glossary_enforcement() {
