@@ -170,7 +170,17 @@ enum ReviewAction {
 /// The Translation review pane: one row per unreviewed AI draft. The source is read-only, the
 /// target is editable, Accept promotes (or replaces an edited target and promotes), Reject drops
 /// the entry so the next run may translate it again. Any change sets `dirty`.
+///
+/// A run leaves dozens–hundreds of drafts and the right dock's body is clipped to the panel, so the
+/// rows live in a vertical [`egui::ScrollArea`] like every sibling dock body.
 pub fn review_pane(ui: &mut egui::Ui, tm: &mut TranslationMemory, dirty: &mut bool) {
+    egui::ScrollArea::vertical().id_salt("pubgen_tm_review_scroll").auto_shrink([false, false]).show(ui, |ui| {
+        review_rows(ui, tm, dirty);
+    });
+}
+
+/// The pane's rows, laid out inside [`review_pane`]'s scroll area.
+fn review_rows(ui: &mut egui::Ui, tm: &mut TranslationMemory, dirty: &mut bool) {
     let pending: Vec<(String, String)> = tm.pending_review().iter().map(|e| (e.source.clone(), e.target.clone())).collect();
     if pending.is_empty() {
         ui.label(egui::RichText::new("No AI drafts awaiting review.").color(ui.visuals().weak_text_color()));
@@ -463,6 +473,30 @@ mod tests {
         assert_eq!(badge_label(&tm, "missing"), None);
     }
 
+    /// The Accept button's unchanged-target branch: a human decision must survive a later AI run.
+    #[test]
+    fn accepting_a_draft_promotes_it_to_reviewed() {
+        let mut tm = TranslationMemory::default();
+        tm.insert(TmEntry { source: "PDRB".into(), target: "GDP".into(), origin: TmOrigin::Ai, role: "table_header".into(), updated: now_stamp() });
+        assert_eq!(tm.pending_review().len(), 1);
+        tm.promote("PDRB");
+        assert!(tm.pending_review().is_empty());
+        // A later AI run must not undo the human decision.
+        tm.insert(TmEntry { source: "PDRB".into(), target: "GDP".into(), origin: TmOrigin::Ai, role: "table_header".into(), updated: now_stamp() });
+        assert_eq!(tm.lookup("PDRB").map(|e| e.origin), Some(TmOrigin::Reviewed));
+    }
+
+    /// The Accept button's edited-target branch (`update_target`): the target is replaced too, not
+    /// only the origin.
+    #[test]
+    fn editing_a_draft_promotes_and_replaces() {
+        let mut tm = TranslationMemory::default();
+        tm.insert(TmEntry { source: "PDRB".into(), target: "GDP".into(), origin: TmOrigin::Ai, role: "table_header".into(), updated: now_stamp() });
+        assert!(tm.update_target("PDRB", "GRDP"));
+        assert_eq!(tm.lookup("PDRB").map(|e| e.target.as_str()), Some("GRDP"));
+        assert_eq!(tm.lookup("PDRB").map(|e| e.origin), Some(TmOrigin::Reviewed));
+    }
+
     fn review_harness(tm: TranslationMemory) -> egui_kittest::Harness<'static, (TranslationMemory, bool)> {
         egui_kittest::Harness::builder()
             .with_size(egui::vec2(560.0, 400.0))
@@ -495,6 +529,67 @@ mod tests {
         h.run();
         assert!(h.state().0.entries.is_empty(), "Reject removes the draft");
         assert!(h.state().1, "rejecting marks the workspace dirty");
+    }
+
+    /// The pane's edited-target branch: typing a different target into the row and clicking Accept
+    /// replaces the memory's target and promotes it (not just `promote`, which keeps "GDP").
+    #[test]
+    fn review_pane_accepts_an_edited_target_through_the_button() {
+        use egui_kittest::kittest::Queryable;
+        let mut tm = TranslationMemory::default();
+        tm.insert(TmEntry { source: "PDRB".into(), target: "GDP".into(), origin: TmOrigin::Ai, role: "table_header".into(), updated: now_stamp() });
+        let mut h = review_harness(tm);
+        h.run();
+        h.get_by_role(egui::Role::TextInput).set_text_value_accesskit("GRDP");
+        h.run();
+        h.get_by_label("Accept").click();
+        h.run();
+        assert_eq!(h.state().0.lookup("PDRB").map(|e| e.target.as_str()), Some("GRDP"), "Accept applies the typed target");
+        assert_eq!(h.state().0.lookup("PDRB").map(|e| e.origin), Some(TmOrigin::Reviewed));
+        assert!(h.state().1, "accepting marks the workspace dirty");
+    }
+
+    /// A real run leaves dozens–hundreds of drafts. The dock body is clipped to the panel, so the
+    /// rows must live in a scroll area (like every sibling dock body) or all but the first screen
+    /// are unreachable.
+    #[test]
+    fn the_review_pane_scrolls_down_to_the_last_of_many_drafts() {
+        use egui_kittest::kittest::Queryable;
+        let mut tm = TranslationMemory::default();
+        for i in 0..50 {
+            tm.insert(TmEntry {
+                source: format!("Source {i:02}"),
+                target: format!("Target {i:02}"),
+                origin: TmOrigin::Ai,
+                role: "table_header".into(),
+                updated: now_stamp(),
+            });
+        }
+        let mut h = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(320.0, 400.0))
+            .with_accessibility_check(false)
+            .build_ui_state(|ui, (tm, dirty): &mut (TranslationMemory, bool)| review_pane(ui, tm, dirty), (tm, false));
+        h.run();
+        // Rows are laid out in memory even when clipped, so reachability is a *position*: the
+        // first draft is inside the 400 px viewport and the last one is below it.
+        let first = h.query_by_label("Source 00").map(|n| n.rect()).expect("the first draft is laid out");
+        let last = h.query_by_label("Source 49").map(|n| n.rect()).expect("the last draft is laid out");
+        assert!(first.top() >= 0.0 && first.bottom() <= 400.0, "the first draft starts in the viewport: {first:?}");
+        assert!(last.top() >= 400.0, "the last draft starts below the viewport's 400 px: {last:?}");
+        // A ScrollArea only takes the wheel while the pointer is over it.
+        h.event(egui::Event::PointerMoved(egui::pos2(160.0, 200.0)));
+        h.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -20_000.0),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(20); // smooth scrolling needs frames to settle
+        let first = h.query_by_label("Source 00").map(|n| n.rect()).expect("the first draft is still laid out after scrolling");
+        let last = h.query_by_label("Source 49").map(|n| n.rect()).expect("the last draft is laid out after scrolling");
+        assert!(last.top() < 400.0 && last.bottom() > 0.0, "scrolling must bring the last draft into the viewport: {last:?}");
+        assert!(first.bottom() <= 0.0, "the first draft scrolled off the top: {first:?}");
     }
 
     fn table_card(title: &str) -> pubgen_core::PublicationCard {

@@ -1231,6 +1231,25 @@ const ORCH_TAB_PAD: f32 = 44.0;
 const DOCK_TAB_H: f32 = 27.0;
 const DOCK_TAB_LABEL: f32 = 12.0;
 const DOCK_TAB_PAD: f32 = 10.0;
+/// Width of the collapse-to-icons button at the left of the dock's tab strip.
+const DOCK_COLLAPSE_W: f32 = 18.0;
+
+/// Lay out one dock tab label inside its tab: [`DOCK_TAB_PAD`] on the left, the rest for text.
+/// At the default 320 px dock the three tabs are ~100 px wide, narrower than "Sources & Content",
+/// "Profile & Execution" and "Translation Review" at [`DOCK_TAB_LABEL`], so the string is cut with
+/// an ellipsis rather than painted over the neighbouring tab (the full label stays in the tooltip).
+fn dock_tab_label(ctx: &egui::Context, rect: Rect, text: &str, color: Color32) -> std::sync::Arc<egui::Galley> {
+    let max_w = (rect.width() - DOCK_TAB_PAD).max(DOCK_TAB_LABEL);
+    crate::rtl::truncated(ctx, text, FontId::proportional(DOCK_TAB_LABEL), color, max_w)
+}
+
+/// Paint a [`dock_tab_label`] galley with its left edge [`DOCK_TAB_PAD`] inside the tab.
+fn paint_dock_tab_label(ui: &Ui, rect: Rect, galley: std::sync::Arc<egui::Galley>) {
+    let pos = pos2(rect.min.x + DOCK_TAB_PAD, rect.center().y - galley.size().y / 2.0);
+    // PLACEHOLDER keeps the colours the galley was laid out with (same as the host tab strip).
+    ui.painter().galley(pos, galley, Color32::PLACEHOLDER);
+}
+
 /// Home screen scale — the same sizes `chrome::start_screen` uses for DesignCraft's own welcome
 /// page, so both entry screens read as one product. (F5)
 const HOME_TITLE: f32 = 24.0;
@@ -1259,6 +1278,14 @@ fn dock_width(total_width: f32, dock_expanded: bool, stored_w: f32) -> (f32, f32
     }
     let dock_max = (total_width * RIGHT_DOCK_MAX_SHARE).max(RIGHT_DOCK_MIN_W);
     (stored_w.clamp(RIGHT_DOCK_MIN_W, dock_max), DOCK_DIVIDER_W)
+}
+
+/// The three tab widths of the expanded dock's tab strip at `width`: two equal floors after the
+/// collapse button, and the remainder for the last tab.
+fn dock_tab_widths(width: f32) -> (f32, f32, f32) {
+    let remaining_w = (width - DOCK_COLLAPSE_W).max(100.0);
+    let tab_w = (remaining_w / 3.0).floor();
+    (tab_w, tab_w, (width - (DOCK_COLLAPSE_W + 2.0 * tab_w)).max(0.0))
 }
 
 /// Draws the workspace tab strip at the top of the Orchestrator panel, following Designcraft document tabs design.
@@ -1956,9 +1983,8 @@ fn render_expanded_dock(
     ui.set_height(total_height);
 
     let tab_bar_height = DOCK_TAB_H;
-    let collapse_btn_w = 18.0f32;
-    let remaining_w = (width - collapse_btn_w).max(100.0);
-    let tab_w = (remaining_w / 3.0).floor();
+    let collapse_btn_w = DOCK_COLLAPSE_W;
+    let (tab_w, tab2_w, tab3_w) = dock_tab_widths(width);
 
     // 1. Tab Bar strip
     let (strip, _) = ui.allocate_exact_size(vec2(width, tab_bar_height), Sense::hover());
@@ -1995,19 +2021,16 @@ fn render_expanded_dock(
         }
         ui.painter().line_segment([tab1_rect.left_bottom(), tab1_rect.right_bottom()], Stroke::new(1.0, t.border));
     }
-    ui.painter().text(
-        tab1_rect.left_center() + vec2(DOCK_TAB_PAD, 0.0),
-        Align2::LEFT_CENTER,
-        crate::i18n::tr(lang, "Sources & Content"),
-        FontId::proportional(DOCK_TAB_LABEL),
-        if is_tab1 { t.text_strong } else { t.text_dim },
+    paint_dock_tab_label(
+        ui,
+        tab1_rect,
+        dock_tab_label(ui.ctx(), tab1_rect, crate::i18n::tr(lang, "Sources & Content"), if is_tab1 { t.text_strong } else { t.text_dim }),
     );
     if tab1_resp.clicked() {
         state.right_dock_tab = OrchestratorRightTab::SumberKonten;
     }
 
     // Tab 2: Profil & Eksekusi
-    let tab2_w = tab_w;
     let tab2_rect = Rect::from_min_size(pos2(strip.min.x + collapse_btn_w + tab_w, strip.min.y), vec2(tab2_w, tab_bar_height));
     let is_tab2 = state.right_dock_tab == OrchestratorRightTab::ProfilEksekusi;
     let tab2_resp =
@@ -2023,19 +2046,16 @@ fn render_expanded_dock(
         }
         ui.painter().line_segment([tab2_rect.left_bottom(), tab2_rect.right_bottom()], Stroke::new(1.0, t.border));
     }
-    ui.painter().text(
-        tab2_rect.left_center() + vec2(DOCK_TAB_PAD, 0.0),
-        Align2::LEFT_CENTER,
-        crate::i18n::tr(lang, "Profile & Execution"),
-        FontId::proportional(DOCK_TAB_LABEL),
-        if is_tab2 { t.text_strong } else { t.text_dim },
+    paint_dock_tab_label(
+        ui,
+        tab2_rect,
+        dock_tab_label(ui.ctx(), tab2_rect, crate::i18n::tr(lang, "Profile & Execution"), if is_tab2 { t.text_strong } else { t.text_dim }),
     );
     if tab2_resp.clicked() {
         state.right_dock_tab = OrchestratorRightTab::ProfilEksekusi;
     }
 
     // Tab 3: Ulasan Terjemahan (T8)
-    let tab3_w = (width - (collapse_btn_w + 2.0 * tab_w)).max(0.0);
     let tab3_rect = Rect::from_min_size(pos2(strip.min.x + collapse_btn_w + 2.0 * tab_w, strip.min.y), vec2(tab3_w, tab_bar_height));
     let is_tab3 = state.right_dock_tab == OrchestratorRightTab::Terjemahan;
     let tab3_resp =
@@ -2051,12 +2071,10 @@ fn render_expanded_dock(
         }
         ui.painter().line_segment([tab3_rect.left_bottom(), tab3_rect.right_bottom()], Stroke::new(1.0, t.border));
     }
-    ui.painter().text(
-        tab3_rect.left_center() + vec2(DOCK_TAB_PAD, 0.0),
-        Align2::LEFT_CENTER,
-        crate::i18n::tr(lang, "Translation Review"),
-        FontId::proportional(DOCK_TAB_LABEL),
-        if is_tab3 { t.text_strong } else { t.text_dim },
+    paint_dock_tab_label(
+        ui,
+        tab3_rect,
+        dock_tab_label(ui.ctx(), tab3_rect, crate::i18n::tr(lang, "Translation Review"), if is_tab3 { t.text_strong } else { t.text_dim }),
     );
     if tab3_resp.clicked() {
         state.right_dock_tab = OrchestratorRightTab::Terjemahan;
@@ -4805,6 +4823,41 @@ mod tests {
         assert_eq!(dock_width(1440.0, true, 5000.0).0, 1440.0 * RIGHT_DOCK_MAX_SHARE);
         assert_eq!(dock_width(300.0, true, 5000.0).0, RIGHT_DOCK_MIN_W);
         assert_eq!(dock_width(1440.0, false, 320.0), (RIGHT_DOCK_COLLAPSED_W, 0.0));
+    }
+
+    /// Three tabs share the dock at ~100 px each (the default 320 px dock), less than "Sources &
+    /// Content", "Profile & Execution" and "Translation Review" need at 12 px. A painted label must
+    /// therefore fit its own tab — elided with "…" — and never run into its neighbour. Measured with
+    /// the real font: each galley's width against its tab's width minus [`DOCK_TAB_PAD`].
+    #[test]
+    fn dock_tab_labels_fit_their_tab_at_the_default_width() {
+        let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx, "en");
+        let mut out = ctx.run_ui(Default::default(), |_| {}); // fonts only bind inside a run
+        out.textures_delta.clear();
+
+        let (tab1_w, tab2_w, tab3_w) = dock_tab_widths(default_right_dock_w());
+        let tabs = [("Sources & Content", tab1_w), ("Profile & Execution", tab2_w), ("Translation Review", tab3_w)];
+        for lang in ["en", "id"] {
+            for (key, tab_w) in tabs {
+                let text = crate::i18n::tr(lang, key);
+                let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(tab_w, DOCK_TAB_H));
+                let galley = dock_tab_label(&ctx, rect, text, Color32::WHITE);
+                let raw = crate::rtl::plain(&ctx, text, FontId::proportional(DOCK_TAB_LABEL), Color32::WHITE);
+                assert!(
+                    galley.size().x <= tab_w - DOCK_TAB_PAD + 0.5,
+                    "{lang} `{text}` paints {:.1} px into a {tab_w} px tab ({:.1} px unelided, {:.1} px available)",
+                    galley.size().x,
+                    raw.size().x,
+                    tab_w - DOCK_TAB_PAD
+                );
+                assert!(galley.elided || raw.size().x <= tab_w - DOCK_TAB_PAD, "{lang} `{text}` must be elided to fit");
+            }
+            // The widest label must actually elide at this width, or the check above proves nothing.
+            let widest = crate::i18n::tr(lang, "Translation Review");
+            let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(tab3_w, DOCK_TAB_H));
+            assert!(dock_tab_label(&ctx, rect, widest, Color32::WHITE).elided, "{lang} `{widest}` was expected to elide in a {tab3_w} px tab");
+        }
     }
 
     /// Chrome type comes from one small scale: DesignCraft's `LABEL_SIZE` (11 px), the 11.5 px section
