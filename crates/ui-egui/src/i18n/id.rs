@@ -192,6 +192,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("Print…", "Cetak…"),
     ("Proceed", "Lanjutkan"),
     ("Profile & Execution", "Profil & Eksekusi"),
+    ("Translation Review", "Ulasan Terjemahan"),
     ("Prompt Copied!", "Prompt Disalin!"),
     ("Properties", "Properti"),
     ("PubGen", "PubGen"),

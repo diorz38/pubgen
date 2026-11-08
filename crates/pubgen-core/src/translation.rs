@@ -92,6 +92,25 @@ impl TranslationMemory {
         entry.updated = now_stamp();
         true
     }
+    /// Drop the entry `lookup` would return (same whitespace normalization, then the same
+    /// case-insensitive fallback). Returns whether anything was removed: the Reject button.
+    pub fn remove(&mut self, source: &str) -> bool {
+        let key = normalize(source);
+        if key.is_empty() {
+            return false;
+        }
+        let index = self.entries.iter().position(|e| normalize(&e.source) == key).or_else(|| {
+            let lower = key.to_lowercase();
+            self.entries.iter().position(|e| normalize(&e.source).to_lowercase() == lower)
+        });
+        match index {
+            Some(i) => {
+                self.entries.remove(i);
+                true
+            }
+            None => false,
+        }
+    }
     pub fn pending_review(&self) -> Vec<&TmEntry> {
         self.entries.iter().filter(|e| e.origin == TmOrigin::Ai).collect()
     }
@@ -157,6 +176,17 @@ mod tests {
         tm.insert(entry("PDRB", "GDP", TmOrigin::Ai));
         assert!(tm.update_target("PDRB", "GRDP"));
         assert_eq!(tm.lookup("PDRB").map(|e| e.origin), Some(TmOrigin::Reviewed));
+    }
+
+    #[test]
+    fn remove_drops_the_entry_lookup_would_find() {
+        let mut tm = TranslationMemory::default();
+        tm.insert(entry("PDRB", "GRDP", TmOrigin::Ai));
+        // Same keys `lookup` accepts: collapsed whitespace, then case-insensitive.
+        assert!(tm.remove("  pdrb "));
+        assert!(tm.lookup("PDRB").is_none());
+        assert!(tm.entries.is_empty());
+        assert!(!tm.remove("PDRB"), "removing a missing entry is a no-op");
     }
 
     #[test]

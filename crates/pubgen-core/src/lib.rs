@@ -8,6 +8,7 @@ pub mod compiler;
 pub mod container;
 pub mod excel;
 pub mod excel_export;
+pub mod glossary_fix;
 pub mod manifest;
 pub mod plan;
 pub mod profile;

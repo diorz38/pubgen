@@ -1886,6 +1886,7 @@ pub(crate) fn open_project(app: &mut DesignApp, p: &Value) -> Result<Value, Stri
                 &opened.content.text,
                 &opened.content.assets,
             );
+            crate::dock::pubgen::workspace::set_workspace_glossary(&ctx, &opened.glossary.entries);
             ctx.request_repaint();
         }
         return Ok(serde_json::json!({"package": path, "cards": opened.metadata.cards.len()}));
@@ -1935,6 +1936,7 @@ fn ask_for_manifest(app: &mut DesignApp) {
                         &opened.content.text,
                         &opened.content.assets,
                     );
+                    crate::dock::pubgen::workspace::set_workspace_glossary(ctx, &opened.glossary.entries);
                     ctx.request_repaint();
                 }
                 return Ok(Value::Null);
@@ -2011,7 +2013,15 @@ pub(crate) fn save_pubgen_package_to(app: &mut DesignApp, save_path: &Path) -> R
     };
 
     let metadata = orch.to_metadata();
-    let glossary = pubgen_core::workspace::Glossary::default();
+    // T8: write the workspace's own glossary instead of an empty one, so its terminology
+    // survives the package round-trip.
+    let glossary = pubgen_core::workspace::Glossary {
+        entries: orch
+            .glossary_pairs
+            .iter()
+            .map(|(source, target)| pubgen_core::GlossaryEntry { source: source.clone(), target: target.clone() })
+            .collect(),
+    };
 
     let mut content = pubgen_core::container::ProjectContent::default();
 

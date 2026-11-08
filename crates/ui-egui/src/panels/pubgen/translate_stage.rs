@@ -23,6 +23,8 @@ pub struct StageResult {
     pub translated: usize,
     pub reused: usize,
     pub skipped: usize,
+    /// Glossary replacements `deterministic_fix` applied to accepted targets (T8).
+    pub glossary_fixes: usize,
     /// (source key, why it was rejected).
     pub failed: Vec<(String, String)>,
 }
@@ -98,8 +100,15 @@ pub fn restore_outputs(
 /// Apply validated translations: every accepted pair enters the memory as AI work and
 /// is written onto its card. A pair whose number census differs from its source is the
 /// guard that makes statistical tables safe — it is recorded in `failed` and nothing is
-/// written, not even the memory.
-pub fn apply_results(draft: &mut WorkspaceDraft, tm: &mut TranslationMemory, units: &[TransUnit], results: &[(String, String)]) -> StageResult {
+/// written, not even the memory. Official glossary terms are enforced on the model's output
+/// before the census, so a model that ignored the prompt cannot ship a non-standard term.
+pub fn apply_results(
+    draft: &mut WorkspaceDraft,
+    tm: &mut TranslationMemory,
+    units: &[TransUnit],
+    results: &[(String, String)],
+    glossary: &[pubgen_core::glossary_fix::Entry],
+) -> StageResult {
     let mut res = StageResult::default();
     for unit in units {
         let Some(target) = results.iter().find(|(k, _)| *k == unit.key).map(|(_, t)| t.trim()) else {
@@ -110,7 +119,9 @@ pub fn apply_results(draft: &mut WorkspaceDraft, tm: &mut TranslationMemory, uni
             res.skipped += 1;
             continue;
         }
-        if translate::mask::number_census(&unit.text) != translate::mask::number_census(target) {
+        let (target, fixes) = deterministic_fix(target, glossary);
+        res.glossary_fixes += fixes;
+        if translate::mask::number_census(&unit.text) != translate::mask::number_census(&target) {
             res.failed.push((unit.key.clone(), format!("number changed in translation: {target}")));
             continue;
         }
@@ -118,14 +129,14 @@ pub fn apply_results(draft: &mut WorkspaceDraft, tm: &mut TranslationMemory, uni
         // then shows the memory's target so the editor and the pages agree.
         let target = if tm.insert(TmEntry {
             source: unit.text.clone(),
-            target: target.to_string(),
+            target: target.clone(),
             origin: TmOrigin::Ai,
             role: unit.role.as_str().into(),
             updated: now_stamp(),
         }) {
-            target.to_string()
+            target
         } else {
-            tm.lookup(&unit.text).map(|e| e.target.clone()).unwrap_or_else(|| target.to_string())
+            tm.lookup(&unit.text).map(|e| e.target.clone()).unwrap_or(target)
         };
         if let Some(card) = draft.metadata.cards.iter_mut().find(|c| c.id == unit.card_id) {
             write_card_english(card, unit.role, &unit.text, &target);
@@ -133,6 +144,77 @@ pub fn apply_results(draft: &mut WorkspaceDraft, tm: &mut TranslationMemory, uni
         res.translated += 1;
     }
     res
+}
+
+/// Deterministic glossary enforcement: the shared `pubgen_core::glossary_fix::enforce`, applied
+/// to every AI result so the official English wins even when the model ignored the prompt.
+pub fn deterministic_fix(text: &str, entries: &[pubgen_core::glossary_fix::Entry]) -> (String, usize) {
+    pubgen_core::glossary_fix::enforce(text, entries)
+}
+
+/// The review state shown next to a card's English draft: `Ai` is an unreviewed draft,
+/// `Reviewed` is a human decision, and an `Imported` glossary hit is neither.
+pub fn badge_label(tm: &TranslationMemory, source: &str) -> Option<&'static str> {
+    match tm.lookup(source)?.origin {
+        TmOrigin::Ai => Some("AI draft"),
+        TmOrigin::Reviewed => Some("Reviewed"),
+        TmOrigin::Imported => None,
+    }
+}
+
+enum ReviewAction {
+    Accept { source: String, target: String, buffer: egui::Id },
+    Reject { source: String, buffer: egui::Id },
+}
+
+/// The Translation review pane: one row per unreviewed AI draft. The source is read-only, the
+/// target is editable, Accept promotes (or replaces an edited target and promotes), Reject drops
+/// the entry so the next run may translate it again. Any change sets `dirty`.
+pub fn review_pane(ui: &mut egui::Ui, tm: &mut TranslationMemory, dirty: &mut bool) {
+    let pending: Vec<(String, String)> = tm.pending_review().iter().map(|e| (e.source.clone(), e.target.clone())).collect();
+    if pending.is_empty() {
+        ui.label(egui::RichText::new("No AI drafts awaiting review.").color(ui.visuals().weak_text_color()));
+        return;
+    }
+    ui.label(egui::RichText::new(format!("{} AI draft(s) awaiting review", pending.len())).strong());
+    let mut action: Option<ReviewAction> = None;
+    for (source, target) in pending {
+        // Keyed by source *and* target: a later AI run that stores a new target gets a fresh
+        // buffer instead of editing this run's draft with the previous edit.
+        let buffer = ui.scope_id().with(("tm_review_target", &source, &target));
+        let mut draft = ui.data(|d| d.get_temp::<String>(buffer)).unwrap_or_else(|| target.clone());
+        ui.label(egui::RichText::new(&source).strong());
+        if ui.add(egui::TextEdit::singleline(&mut draft).desired_width(f32::INFINITY)).changed() {
+            ui.data_mut(|d| d.insert_temp(buffer, draft.clone()));
+        }
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!draft.trim().is_empty(), egui::Button::new("Accept")).clicked() {
+                action = Some(ReviewAction::Accept { source: source.clone(), target: draft.trim().to_string(), buffer });
+            }
+            if ui.button("Reject").clicked() {
+                action = Some(ReviewAction::Reject { source, buffer });
+            }
+        });
+        ui.separator();
+    }
+    match action {
+        Some(ReviewAction::Accept { source, target, buffer }) => {
+            let applied =
+                if tm.lookup(&source).is_some_and(|e| e.target.trim() == target) { tm.promote(&source) } else { tm.update_target(&source, &target) };
+            if applied {
+                *dirty = true;
+                ui.data_mut(|d| d.remove_temp::<String>(buffer));
+            }
+        }
+        Some(ReviewAction::Reject { source, buffer }) => {
+            if !tm.remove(&source) {
+                return;
+            }
+            *dirty = true;
+            ui.data_mut(|d| d.remove_temp::<String>(buffer));
+        }
+        None => {}
+    }
 }
 
 /// Write one English string onto a core card. Title roles (and the image caption) go to
@@ -177,6 +259,7 @@ pub fn seed_pubgen_state(st: &mut PubgenState, tm: &TranslationMemory) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pubgen_core::glossary_fix::Entry;
     use pubgen_core::translation_units::UnitRole;
     use pubgen_core::workspace::{CardKind, CardScope, Glossary, Language, PageLayout, ProjectManifest, PublicationMetadata};
 
@@ -247,7 +330,7 @@ mod tests {
             card_id: draft.metadata.cards[0].id.clone(),
         }];
         let mut tm = TranslationMemory::default();
-        let res = apply_results(&mut draft, &mut tm, &units, &[("Luas Wilayah".into(), "Total Area".into())]);
+        let res = apply_results(&mut draft, &mut tm, &units, &[("Luas Wilayah".into(), "Total Area".into())], &[]);
         assert_eq!(res.translated, 1);
         assert_eq!(draft.metadata.cards[0].settings.get("title_en").and_then(|v| v.as_str()), Some("Total Area"));
         assert_eq!(tm.lookup("Luas Wilayah").map(|e| e.origin), Some(TmOrigin::Ai));
@@ -265,7 +348,7 @@ mod tests {
         }];
         let mut tm = TranslationMemory::default();
         // The model dropped "3.1": the number census must reject this.
-        let res = apply_results(&mut draft, &mut tm, &units, &[("Tabel 3.1 Luas Wilayah".into(), "Table Total Area".into())]);
+        let res = apply_results(&mut draft, &mut tm, &units, &[("Tabel 3.1 Luas Wilayah".into(), "Table Total Area".into())], &[]);
         assert_eq!(res.translated, 0);
         assert_eq!(res.failed.len(), 1);
         assert!(tm.entries.is_empty(), "a rejected unit must not enter the TM");
@@ -323,6 +406,95 @@ mod tests {
         let mut c = table_card("Kecamatan");
         write_card_english(&mut c, UnitRole::TableHeader, "Kecamatan", "Subdistrict");
         assert!(c.settings.get("title_en").is_none(), "headers render through st.translations, not the card");
+    }
+
+    #[test]
+    fn glossary_enforce_is_applied_to_ai_output() {
+        let entries = vec![Entry { term: "district".into(), replacement: "Subdistrict".into(), do_not_translate: false, case_preserve: true }];
+        let (fixed, n) = deterministic_fix("Karawang Timur district", &entries);
+        assert_eq!(n, 1);
+        assert_eq!(fixed, "Karawang Timur Subdistrict");
+    }
+
+    #[test]
+    fn do_not_translate_entries_are_left_alone() {
+        let entries = vec![Entry { term: "NTP".into(), replacement: "whatever".into(), do_not_translate: true, case_preserve: false }];
+        let (fixed, n) = deterministic_fix("Perkembangan NTP", &entries);
+        assert_eq!(n, 0);
+        assert_eq!(fixed, "Perkembangan NTP");
+    }
+
+    /// The stage applies the glossary to the model's output *before* the number census writes
+    /// anything, so a non-standard term never reaches the card or the memory.
+    #[test]
+    fn apply_results_enforces_the_glossary_before_the_census() {
+        let mut draft = draft();
+        draft.metadata.cards.push(table_card("Karawang Timur district"));
+        let units = vec![TransUnit {
+            key: "Karawang Timur district".into(),
+            text: "Karawang Timur district".into(),
+            role: UnitRole::TableTitle,
+            card_id: draft.metadata.cards[0].id.clone(),
+        }];
+        let entries = vec![Entry { term: "district".into(), replacement: "Subdistrict".into(), do_not_translate: false, case_preserve: true }];
+        let mut tm = TranslationMemory::default();
+        let res = apply_results(&mut draft, &mut tm, &units, &[("Karawang Timur district".into(), "Karawang Timur district".into())], &entries);
+        assert_eq!(res.glossary_fixes, 1);
+        assert_eq!(res.translated, 1);
+        assert_eq!(draft.metadata.cards[0].settings.get("title_en").and_then(|v| v.as_str()), Some("Karawang Timur Subdistrict"));
+        assert_eq!(tm.lookup("Karawang Timur district").map(|e| e.target.as_str()), Some("Karawang Timur Subdistrict"));
+    }
+
+    #[test]
+    fn badge_label_reflects_the_review_state() {
+        let mut tm = TranslationMemory::default();
+        tm.insert(TmEntry { source: "PDRB".into(), target: "GRDP".into(), origin: TmOrigin::Ai, role: "table_header".into(), updated: now_stamp() });
+        assert_eq!(badge_label(&tm, "PDRB"), Some("AI draft"));
+        assert!(tm.promote("PDRB"));
+        assert_eq!(badge_label(&tm, "PDRB"), Some("Reviewed"));
+        tm.insert(TmEntry {
+            source: "Kecamatan".into(),
+            target: "Subdistrict".into(),
+            origin: TmOrigin::Imported,
+            role: "table_header".into(),
+            updated: now_stamp(),
+        });
+        assert_eq!(badge_label(&tm, "Kecamatan"), None, "a glossary hit is not a reviewable draft");
+        assert_eq!(badge_label(&tm, "missing"), None);
+    }
+
+    fn review_harness(tm: TranslationMemory) -> egui_kittest::Harness<'static, (TranslationMemory, bool)> {
+        egui_kittest::Harness::builder()
+            .with_size(egui::vec2(560.0, 400.0))
+            .with_accessibility_check(false)
+            .build_ui_state(|ui, (tm, dirty): &mut (TranslationMemory, bool)| review_pane(ui, tm, dirty), (tm, false))
+    }
+
+    #[test]
+    fn review_pane_accepts_a_draft_through_the_button() {
+        use egui_kittest::kittest::Queryable;
+        let mut tm = TranslationMemory::default();
+        tm.insert(TmEntry { source: "PDRB".into(), target: "GDP".into(), origin: TmOrigin::Ai, role: "table_header".into(), updated: now_stamp() });
+        let mut h = review_harness(tm);
+        h.run();
+        h.get_by_label("Accept").click();
+        h.run();
+        assert!(h.state().0.pending_review().is_empty(), "Accept promotes the draft");
+        assert_eq!(h.state().0.lookup("PDRB").map(|e| e.origin), Some(TmOrigin::Reviewed));
+        assert!(h.state().1, "accepting marks the workspace dirty");
+    }
+
+    #[test]
+    fn review_pane_rejects_a_draft_through_the_button() {
+        use egui_kittest::kittest::Queryable;
+        let mut tm = TranslationMemory::default();
+        tm.insert(TmEntry { source: "PDRB".into(), target: "GDP".into(), origin: TmOrigin::Ai, role: "table_header".into(), updated: now_stamp() });
+        let mut h = review_harness(tm);
+        h.run();
+        h.get_by_label("Reject").click();
+        h.run();
+        assert!(h.state().0.entries.is_empty(), "Reject removes the draft");
+        assert!(h.state().1, "rejecting marks the workspace dirty");
     }
 
     fn table_card(title: &str) -> pubgen_core::PublicationCard {
