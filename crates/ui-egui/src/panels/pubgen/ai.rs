@@ -1429,26 +1429,20 @@ pub fn apply_glossary_corrections(glossary: &BpsGlossary, translations: &mut Has
 }
 
 /// Temp RTF with the translated paragraphs of an Indonesian source RTF (per run temp
-/// dir). Missing translations are skipped; generation tolerates the empty result.
+/// dir). The source body is rebuilt paragraph by paragraph, so the English one keeps the
+/// paragraph formats and character runs (`translate_stage::translated_body_rtf_bytes`);
+/// generation tolerates the empty result.
 pub fn translated_body_rtf(st: &PubgenState, source_rtf: &str) -> Option<PathBuf> {
     if let Some(p) = st.translated_bodies.get(source_rtf) {
         return Some(p.clone());
     }
-    let paras = rtf_paragraphs(st, source_rtf);
-    let mut en_paras: Vec<String> = Vec::new();
-    for p in paras {
-        let en = st.translations.get(p.trim()).map(String::as_str).unwrap_or("").trim().to_string();
-        if !en.is_empty() {
-            en_paras.push(en);
-        }
-    }
-    if en_paras.is_empty() {
-        return None;
-    }
+    let source = resolve_catalog_related_file(&st.card1_path, source_rtf, "rtf")?;
+    let bytes = std::fs::read(&source).ok()?;
+    let english = super::translate_stage::translated_body_rtf_bytes(&bytes, &|paragraph| st.translations.get(paragraph).cloned())?;
     let dir = temp_dir();
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join(format!("{}_en.rtf", super::excel::sanitize_filename(source_rtf.trim_end_matches(".rtf"))));
-    write_plain_rtf(&en_paras.join("\n"), &path).ok()?;
+    std::fs::write(&path, english).ok()?;
     Some(path)
 }
 

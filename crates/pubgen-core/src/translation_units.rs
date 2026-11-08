@@ -1,7 +1,8 @@
 //! Translation unit collection: what gets translated, per card kind, with skip rules.
 //!
-//! Phase 1 scope: titles, table headers/row labels/notes, chart series labels, map titles,
-//! image captions. Narrative bodies arrive in a later phase.
+//! Titles, table headers/row labels/notes, chart series labels, map titles, image captions,
+//! and the paragraph bodies of narrative cards (one unit per paragraph, keyed by its trimmed
+//! text so the page generator's `translated_body_rtf` finds the English again).
 use crate::workspace::{CardKind, PublicationCard};
 use crate::workspace_validation::WorkspaceDraft;
 use serde::{Deserialize, Serialize};
@@ -244,7 +245,12 @@ fn collect_card(draft: &WorkspaceDraft, card: &PublicationCard, protected: &[Str
                 }
             }
         }
-        CardKind::Narrative => push(out, seen, protected, &card.title, UnitRole::NarrativeTitle, &card.id),
+        CardKind::Narrative => {
+            push(out, seen, protected, &card.title, UnitRole::NarrativeTitle, &card.id);
+            for paragraph in narrative_paragraphs(draft, card) {
+                push(out, seen, protected, &paragraph, UnitRole::NarrativeBody, &card.id);
+            }
+        }
         CardKind::Divider => push(out, seen, protected, &card.title, UnitRole::DividerTitle, &card.id),
         CardKind::Image => {
             let caption = card.settings.get("caption").and_then(|v| v.as_str()).unwrap_or(card.title.as_str());
@@ -270,6 +276,26 @@ fn push(out: &mut Vec<TransUnit>, seen: &mut BTreeSet<String>, protected: &[Stri
 /// Staged CSV source: the card's `source` field, or a `source` setting.
 fn card_source(card: &PublicationCard) -> Option<&str> {
     card.source.as_deref().or_else(|| card.settings.get("source").and_then(|v| v.as_str()))
+}
+
+/// The paragraph texts of a narrative card's staged text file, trimmed and non-empty.
+///
+/// The extraction is the one the page generator's `rtf_paragraphs` (`ai.rs`) uses, so a unit's
+/// key is exactly the paragraph text `translated_body_rtf` looks up when it rebuilds the
+/// English body: the two must not drift apart. An unreadable file contributes nothing.
+fn narrative_paragraphs(draft: &WorkspaceDraft, card: &PublicationCard) -> Vec<String> {
+    let Some((name, bytes)) = narrative_source(draft, card_source(card)) else { return Vec::new() };
+    let Ok(imported) = designcraft_textimport::import(name, bytes) else { return Vec::new() };
+    imported.story.text.lines().map(str::trim).filter(|line| !line.is_empty()).take(MAX_UNITS).map(str::to_string).collect()
+}
+
+/// The staged narrative bytes (`name`, bytes) for a card source: the exact staged name, or a
+/// staged name ending in `/<source>` (a package may stage `rtf/U5.rtf` under `text/rtf/U5.rtf`,
+/// the same aliases `WorkspaceDraft::validate` accepts).
+fn narrative_source<'a>(draft: &'a WorkspaceDraft, source: Option<&str>) -> Option<(&'a str, &'a [u8])> {
+    let source = source?.replace('\\', "/");
+    let suffix = format!("/{source}");
+    draft.text.iter().find(|(name, _)| *name == source || name.ends_with(&suffix)).map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
 }
 
 fn header_indexes(rows: &[Vec<String>], names: &[&str]) -> Vec<usize> {
@@ -438,6 +464,45 @@ mod tests {
         draft.metadata.cards.push(card(CardKind::Table, "Luas Wilayah", &[]));
         let units = collect_units(&draft);
         assert_eq!(units.iter().filter(|u| u.text == "Luas Wilayah").count(), 1);
+    }
+
+    /// A narrative card's paragraph bodies are units of their own, keyed by their trimmed text
+    /// (the key `translated_body_rtf` looks up), while numeric-only paragraphs stay out.
+    #[test]
+    fn narrative_paragraphs_are_collected_as_body_units() {
+        let mut draft = draft();
+        let rtf = br"{\rtf1\ansi\deff0{\fonttbl{\f0 Arial;}}\pard\plain Ulasan wilayah Karawang.\par 1.234,56\par\par Tutup.}";
+        draft.text.push(("rtf/R01.rtf".into(), rtf.to_vec()));
+        draft.metadata.cards.push(narrative_card("BAB 01 Geografi", "rtf/R01.rtf"));
+        let units = collect_units(&draft);
+        assert!(units.iter().any(|u| u.role == UnitRole::NarrativeTitle && u.text == "BAB 01 Geografi"), "{units:?}");
+        for paragraph in ["Ulasan wilayah Karawang.", "Tutup."] {
+            assert!(units.iter().any(|u| u.role == UnitRole::NarrativeBody && u.text == paragraph), "missing body paragraph {paragraph}: {units:?}");
+        }
+        assert!(!units.iter().any(|u| u.text == "1.234,56"), "a numeric paragraph is not a translation unit");
+        assert_eq!(units.iter().filter(|u| u.role == UnitRole::NarrativeBody).count(), 2, "the empty paragraph adds nothing");
+    }
+
+    /// The staged name need not equal the card's source: a package stages `text/rtf/R01.rtf`.
+    #[test]
+    fn a_narrative_body_is_found_under_a_staging_prefix() {
+        let mut draft = draft();
+        let rtf = br"{\rtf1\ansi Satu paragraf.}";
+        draft.text.push(("text/rtf/R01.rtf".into(), rtf.to_vec()));
+        draft.metadata.cards.push(narrative_card("R01", "rtf/R01.rtf"));
+        let units = collect_units(&draft);
+        assert!(units.iter().any(|u| u.role == UnitRole::NarrativeBody && u.text == "Satu paragraf."), "{units:?}");
+    }
+
+    fn narrative_card(title: &str, source: &str) -> PublicationCard {
+        PublicationCard {
+            id: format!("narrative-{title}"),
+            kind: CardKind::Narrative,
+            scope: CardScope::NewPage,
+            source: Some(source.into()),
+            title: title.into(),
+            settings: Default::default(),
+        }
     }
 
     fn card(kind: CardKind, title: &str, settings: &[(&str, &str)]) -> PublicationCard {

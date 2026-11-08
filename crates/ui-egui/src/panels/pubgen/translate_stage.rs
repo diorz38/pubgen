@@ -7,15 +7,23 @@
 //! what `collect_units` consumes and what the Orchestrator's worksheet maps into
 //! via `to_metadata`. The UI card's `title_en` is refreshed from the core card's
 //! `settings["title_en"]` after the stage runs.
+//!
+//! T10 adds whole narrative bodies: `translate_narrative` translates an RTF body
+//! paragraph by paragraph and rebuilds it with the source's paragraph styles and
+//! character runs, so the English spread keeps the layout the headings and the
+//! table of contents are derived from.
 
 use pubgen_core::translation::{TmEntry, TmOrigin, TranslationMemory, now_stamp};
 use pubgen_core::translation_units::{TransUnit, UnitRole, collect_units};
 use pubgen_core::workspace::PublicationCard;
 use pubgen_core::workspace_validation::WorkspaceDraft;
 
+use designcraft_doc::{CharFormat, CharRun, Story};
+
 use super::PubgenState;
 use super::ai::BpsGlossary;
 use designcraft_translate as translate;
+use designcraft_translate::TranslateError;
 
 /// What one stage run did: the counts the toolbar log line reports.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -264,6 +272,235 @@ pub fn seed_pubgen_state(st: &mut PubgenState, tm: &TranslationMemory) {
     if st.active_profile().structure.bilingual {
         st.bilingual_output = true;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Narrative bodies (T10): translate a whole RTF body, paragraph by paragraph,
+// keeping the paragraph styles and character runs the BPS heading/TOC generation
+// reads. A paragraph the model drops or distorts keeps its Indonesian text.
+// ---------------------------------------------------------------------------
+
+/// Translate an RTF narrative body and return the English body as RTF, with no network:
+/// `provider` receives the masked paragraph segments and returns one output per segment.
+/// The testable seam [`translate_narrative`] wraps with a real backend.
+pub fn translate_narrative_with(rtf: &[u8], provider: &dyn Fn(&[String]) -> Vec<String>) -> Result<Vec<u8>, TranslateError> {
+    translate_body_with(rtf, &[], provider)
+}
+
+/// Translate an RTF narrative body with the configured provider (Groq, a custom endpoint or a
+/// local server), masking the glossary terms and Indonesian numbers per segment and restoring
+/// them strictly. A provider failure is an error; a paragraph that fails validation keeps its
+/// Indonesian text and the body still publishes.
+pub fn translate_narrative(rtf: &[u8], cfg: &super::ai::BackendConfig, glossary: &[(String, String)]) -> Result<Vec<u8>, TranslateError> {
+    let translator = std::cell::RefCell::new(translate::OnlineTranslator::with_endpoint(&cfg.key, &cfg.model, &cfg.base_url));
+    let failure: std::cell::RefCell<Option<TranslateError>> = std::cell::RefCell::new(None);
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let body = translate_body_with(rtf, glossary, &|texts| {
+        let result =
+            translator.borrow_mut().translate(texts, translate::Lang::Indonesian, translate::Lang::English, Some(glossary), &cancel, &mut |_, _| {});
+        match result {
+            Ok(outputs) => outputs,
+            Err(error) => {
+                *failure.borrow_mut() = Some(error);
+                Vec::new()
+            }
+        }
+    })?;
+    match failure.into_inner() {
+        Some(error) => Err(error),
+        None => Ok(body),
+    }
+}
+
+/// The RTF body with every paragraph `lookup` resolves replaced by its English; `None` when
+/// nothing was translated. Paragraph formats and character runs travel with the text, so the
+/// generated English spread keeps the Indonesian body's layout instead of flat Arial.
+pub fn translated_body_rtf_bytes(source: &[u8], lookup: &dyn Fn(&str) -> Option<String>) -> Option<Vec<u8>> {
+    let imported = import_body(source).ok()?;
+    let story = &imported.story;
+    let mut translations: Vec<Option<String>> = Vec::new();
+    let mut any = false;
+    for range in story.para_ranges() {
+        let english = lookup(story.slice(range).trim()).map(|target| target.trim().to_string()).filter(|target| !target.is_empty());
+        any |= english.is_some();
+        translations.push(english);
+    }
+    any.then(|| render_body(&rebuilt_story(story, &translations)).into_bytes())
+}
+
+/// Mask and request every segment of every translatable paragraph, then rebuild the body by
+/// paragraph index. A paragraph is accepted only when all its segments come back non-empty,
+/// restore their placeholders, keep their numbers and are not suspiciously short; otherwise it
+/// keeps its Indonesian text — one bad paragraph never costs the whole body.
+fn translate_body_with(rtf: &[u8], glossary: &[(String, String)], provider: &dyn Fn(&[String]) -> Vec<String>) -> Result<Vec<u8>, TranslateError> {
+    let story = import_body(rtf)?.story;
+    let ranges = story.para_ranges();
+    let mut requests: Vec<String> = Vec::new();
+    let mut masks: Vec<translate::Masked> = Vec::new();
+    // (paragraph index, first request index, request count) for every requested paragraph.
+    let mut plan: Vec<(usize, usize, usize)> = Vec::new();
+    for (index, range) in ranges.iter().enumerate() {
+        let paragraph = story.slice(range.clone()).trim();
+        if paragraph.is_empty() || paragraph.chars().any(is_story_marker) {
+            continue;
+        }
+        let chunks = translate::segment(paragraph);
+        if chunks.is_empty() {
+            continue;
+        }
+        let first = requests.len();
+        for chunk in chunks {
+            let masked = translate::mask(&chunk, glossary);
+            requests.push(masked.text.clone());
+            masks.push(masked);
+        }
+        plan.push((index, first, requests.len() - first));
+    }
+    if requests.is_empty() {
+        return Ok(rtf.to_vec());
+    }
+    let outputs = provider(&requests);
+    let mut translations: Vec<Option<String>> = vec![None; ranges.len()];
+    for (index, first, count) in plan {
+        let mut joined = String::new();
+        let mut accepted = true;
+        for offset in 0..count {
+            let (Some(output), Some(masked)) = (outputs.get(first + offset), masks.get(first + offset)) else {
+                accepted = false;
+                break;
+            };
+            match translate::unmask(output.trim(), masked) {
+                Ok(restored) if !restored.trim().is_empty() => {
+                    if !joined.is_empty() {
+                        joined.push(' ');
+                    }
+                    joined.push_str(restored.trim());
+                }
+                _ => {
+                    accepted = false;
+                    break;
+                }
+            }
+        }
+        if !accepted {
+            continue;
+        }
+        let source = story.slice(ranges[index].clone());
+        let source = source.trim();
+        if joined.split_whitespace().count() * 2 < source.split_whitespace().count() {
+            continue; // the model answered with a fragment
+        }
+        if translate::mask::number_census(source) != translate::mask::number_census(&joined) {
+            continue; // statistics must not move
+        }
+        translations[index] = Some(joined);
+    }
+    Ok(render_body(&rebuilt_story(&story, &translations)).into_bytes())
+}
+
+/// Import an RTF body for the narrative rebuild. A file the importer cannot read is an error,
+/// never a silently empty body: the caller falls back to the Indonesian text.
+fn import_body(rtf: &[u8]) -> Result<designcraft_textimport::Imported, TranslateError> {
+    designcraft_textimport::import("narrative.rtf", rtf).map_err(|error: designcraft_textimport::ImportError| {
+        TranslateError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string()))
+    })
+}
+
+/// Story markers (table anchors, footnote references, …) in a paragraph: a model would mangle
+/// them, so such a paragraph is left alone.
+fn is_story_marker(c: char) -> bool {
+    ('\u{E000}'..='\u{E1FF}').contains(&c)
+}
+
+/// The source story with `translations[i]` as paragraph `i` (`None` keeps the Indonesian text),
+/// carrying the source paragraph formats and character runs over to the new text. The paragraph
+/// count is always the source's: a paragraph that failed translation is the same paragraph.
+fn rebuilt_story(source: &Story, translations: &[Option<String>]) -> Story {
+    let ranges = source.para_ranges();
+    let paragraphs: Vec<&str> = ranges
+        .iter()
+        .enumerate()
+        .map(|(index, range)| {
+            translations
+                .get(index)
+                .and_then(|target| target.as_deref())
+                .map(str::trim)
+                .filter(|target| !target.is_empty())
+                .unwrap_or_else(|| source.slice(range.clone()))
+        })
+        .collect();
+    let mut rebuilt = Story::with_text(source.id, &paragraphs.join("\n"), source.paras.first().cloned().unwrap_or_default());
+    if source.paras.len() == ranges.len() {
+        rebuilt.paras = source.paras.clone();
+    }
+    let mut chars: Vec<CharRun> = Vec::new();
+    for (index, paragraph) in paragraphs.iter().enumerate() {
+        push_paragraph_runs(source, &ranges[index], paragraph, &mut chars);
+        if index + 1 < paragraphs.len() {
+            push_paragraph_return(&mut chars, source, &ranges[index]);
+        }
+    }
+    rebuilt.chars = chars;
+    rebuilt
+}
+
+/// Push the runs of one rebuilt paragraph: the source paragraph's run pattern, scaled onto the
+/// new text, so a bold lead-in stays bold and body text stays body. Boundaries are pulled back
+/// to character boundaries (the RTF writer slices the text by run range).
+fn push_paragraph_runs(source: &Story, range: &std::ops::Range<usize>, paragraph: &str, chars: &mut Vec<CharRun>) {
+    let mut pieces: Vec<(std::ops::Range<usize>, CharFormat)> = Vec::new();
+    for (run, format) in source.runs() {
+        let start = run.start.max(range.start);
+        let end = run.end.min(range.end);
+        if start < end {
+            pieces.push((start - range.start..end - range.start, format.clone()));
+        }
+    }
+    if pieces.is_empty() {
+        if !paragraph.is_empty() {
+            chars.push(CharRun { len: paragraph.len(), format: source.char_format_at(range.start).clone() });
+        }
+        return;
+    }
+    let source_len: usize = pieces.iter().map(|(piece, _)| piece.len()).sum();
+    let mut written = 0usize;
+    for (index, (piece, format)) in pieces.iter().enumerate() {
+        let end = if index + 1 == pieces.len() || source_len == 0 {
+            paragraph.len()
+        } else {
+            // Proportional, rounded, then pulled back to a character boundary and kept in order.
+            let scaled = piece.end.saturating_mul(paragraph.len()).saturating_add(source_len / 2) / source_len;
+            char_boundary_floor(paragraph, scaled).clamp(written, paragraph.len())
+        };
+        if end > written {
+            chars.push(CharRun { len: end - written, format: format.clone() });
+            written = end;
+        }
+    }
+}
+
+/// The `\n` between two rebuilt paragraphs takes the preceding paragraph's last run format.
+fn push_paragraph_return(chars: &mut Vec<CharRun>, source: &Story, range: &std::ops::Range<usize>) {
+    match chars.last_mut() {
+        Some(last) => last.len += 1,
+        None => chars.push(CharRun { len: 1, format: source.char_format_at(range.start).clone() }),
+    }
+}
+
+/// `index` clamped to `text` and pulled back to the start of the character containing it.
+fn char_boundary_floor(text: &str, index: usize) -> usize {
+    let mut index = index.min(text.len());
+    while index > 0 && !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
+/// RTF for a story: the rich exporter, which writes the resolved paragraph and character
+/// formatting (never `write_plain_rtf`, which flattens every paragraph to Arial 11).
+fn render_body(story: &Story) -> String {
+    let doc = designcraft_doc::Document::new(&designcraft_doc::build::NewDocument::default());
+    designcraft_textimport::export::rtf(&doc, story)
 }
 
 #[cfg(test)]
@@ -590,6 +827,70 @@ mod tests {
         let last = h.query_by_label("Source 49").map(|n| n.rect()).expect("the last draft is laid out after scrolling");
         assert!(last.top() < 400.0 && last.bottom() > 0.0, "scrolling must bring the last draft into the viewport: {last:?}");
         assert!(first.bottom() <= 0.0, "the first draft scrolled off the top: {first:?}");
+    }
+
+    #[test]
+    fn narrative_paragraph_count_and_styles_survive_translation() {
+        let rtf = br"{\rtf1\ansi{\stylesheet{\s1\b\fs40 heading 1;}}\pard\plain \s1\qc Heading_one\par Body paragraph one.\par Body paragraph two.\par}";
+        let out = translate_narrative_with(rtf, &|texts| {
+            // Canned provider: return one EN string per input paragraph.
+            texts.iter().map(|t| format!("EN {t}")).collect()
+        })
+        .expect("translation");
+        let imported = designcraft_textimport::import("t.rtf", &out).expect("reimport");
+        // Use the same paragraph-count API the plain-text path uses (`ai.rs:793`).
+        assert_eq!(paragraph_count(&imported.story), 3, "paragraph count must be preserved");
+        assert!(imported.story.text.contains("EN "), "{:?}", imported.story.text);
+        // The heading paragraph's own formatting travels with its translated text.
+        assert_eq!(imported.story.paras[0].para.align, Some(designcraft_doc::Align::Center), "the heading stays centred");
+        // Guard, and the reason `pages.rs` heading detection needs no change: the rich exporter
+        // writes *resolved* formatting, not a `\stylesheet` table, so the reimported body keeps
+        // its layout but not its style names. Heading detection reads the Indonesian body
+        // (`pages.rs:1202`) and template pages tag by slot label, never by the English body's
+        // paragraph style.
+        assert_eq!(imported.story.paras[0].style, designcraft_doc::story::BASIC_PARAGRAPH, "export::rtf carries formatting, not style names");
+    }
+
+    #[test]
+    fn a_paragraph_the_model_dropped_keeps_its_indonesian_text() {
+        let rtf = br"{\rtf1\ansi Satu.\par Dua.\par}";
+        let out = translate_narrative_with(rtf, &|_texts| vec!["One.".to_string()]) // one short
+            .expect("must not fail the whole body");
+        let imported = designcraft_textimport::import("t.rtf", &out).expect("reimport");
+        assert!(imported.story.text.contains("Dua."), "the untranslated paragraph must survive");
+    }
+
+    fn paragraph_count(story: &designcraft_doc::Story) -> usize {
+        story.para_ranges().len()
+    }
+
+    /// The rebuild is a Story, not a flattened text blob: paragraph styles and the run pattern
+    /// survive, so the English spread keeps the Indonesian body's layout (T10).
+    #[test]
+    fn the_rebuilt_body_keeps_the_source_paragraph_styles_and_runs() {
+        let rtf = br"{\rtf1\ansi{\stylesheet{\s1\b\fs40 heading 1;}}
+\pard\plain \s1 Judul Bagian\par
+\pard\plain {\b Tebal} biasa.\par}";
+        let imported = designcraft_textimport::import("t.rtf", &rtf[..]).expect("import");
+        let rebuilt = rebuilt_story(&imported.story, &[Some("Section title".into()), Some("Bold lead and body text.".into())]);
+        assert!(rebuilt.check().is_ok(), "{:?}", rebuilt.check());
+        assert_eq!(rebuilt.text, "Section title\nBold lead and body text.");
+        assert_eq!(rebuilt.paras[0].style, "Heading 1", "the heading style must be carried over");
+        assert_eq!(rebuilt.paras[1].style, designcraft_doc::story::BASIC_PARAGRAPH);
+        let bold = rebuilt.text.find("Bold").expect("the translated lead is there");
+        assert_eq!(rebuilt.char_format_of(bold).over.font_style.as_deref(), Some("Bold"), "the bold lead stays bold");
+        let plain = rebuilt.text.find("and").expect("the body tail is there");
+        assert_eq!(rebuilt.char_format_of(plain).over.font_style, None, "the plain tail stays plain");
+    }
+
+    /// Numbers are the statistics: a segment whose numbers moved keeps its Indonesian paragraph.
+    #[test]
+    fn a_paragraph_whose_numbers_moved_keeps_its_indonesian_text() {
+        let rtf = br"{\rtf1\ansi Naik 1.234 persen.\par";
+        let out =
+            translate_narrative_with(&rtf[..], &|texts| texts.iter().map(|t| t.replace("persen", "1.500 percent")).collect()).expect("no failure");
+        let imported = designcraft_textimport::import("t.rtf", &out).expect("reimport");
+        assert!(imported.story.text.contains("Naik 1.234 persen."), "{:?}", imported.story.text);
     }
 
     fn table_card(title: &str) -> pubgen_core::PublicationCard {
