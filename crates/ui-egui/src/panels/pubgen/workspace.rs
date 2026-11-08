@@ -29,6 +29,14 @@ pub enum OrchestratorTab {
     LogEksekusi,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum CardEditTab {
+    #[default]
+    KontenSumber,
+    TataLetakSeksi,
+    HeaderFooter,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OrchestratorRightTab {
     SumberKonten,
@@ -372,6 +380,8 @@ pub struct OrchestratorWorkspaceState {
     // Card modal editor
     pub editing_card_idx: Option<usize>,
     pub last_editing_card_idx: Option<usize>,
+    #[serde(default)]
+    pub card_edit_tab: CardEditTab,
     pub card_delete_confirm: bool,
     pub prompt_copied_feedback: bool,
     // Status message
@@ -571,6 +581,7 @@ impl Default for OrchestratorWorkspaceState {
             execution_log,
             editing_card_idx: None,
             last_editing_card_idx: None,
+            card_edit_tab: CardEditTab::KontenSumber,
             card_delete_confirm: false,
             prompt_copied_feedback: false,
             status_message: None,
@@ -3539,671 +3550,784 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
 
             ui.separator();
 
+            // Unified Tab Bar (Matching InDesign-style Right Dock Tabs)
+            let tab_bar_height = DOCK_TAB_H;
+            let tab_count = if card.kind == CardKind::Cover { 2.0 } else { 3.0 };
+            let tab_w = (content_w / tab_count).floor();
+
+            let (strip, _) = ui.allocate_exact_size(vec2(content_w, tab_bar_height), Sense::hover());
+            ui.painter().rect_filled(strip, 0.0, t.tab_strip);
+
+            // Tab 1: Konten & Sumber
+            let tab1_rect = Rect::from_min_size(strip.min, vec2(tab_w, tab_bar_height));
+            let is_tab1 = state.card_edit_tab == CardEditTab::KontenSumber;
+            let tab1_resp = ui.interact(tab1_rect, ui.scope_id().with("card_tab_1"), Sense::click())
+                .on_hover_text(crate::i18n::tr(lang, "Content & Source"));
+            tab1_resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_tab1, crate::i18n::tr(lang, "Content & Source")));
+            if is_tab1 {
+                ui.painter().rect_filled(tab1_rect, 0.0, t.panel);
+                ui.painter().line_segment([tab1_rect.left_top(), tab1_rect.left_bottom()], Stroke::new(1.0, t.border));
+                ui.painter().line_segment([tab1_rect.right_top(), tab1_rect.right_bottom()], Stroke::new(1.0, t.border));
+            } else {
+                if tab1_resp.hovered() {
+                    ui.painter().rect_filled(tab1_rect, 0.0, t.hover);
+                }
+                ui.painter().line_segment([tab1_rect.left_bottom(), tab1_rect.right_bottom()], Stroke::new(1.0, t.border));
+            }
+            ui.painter().text(
+                tab1_rect.center(),
+                Align2::CENTER_CENTER,
+                format!("🏷️ {}", crate::i18n::tr(lang, "Content & Source")),
+                FontId::proportional(DOCK_TAB_LABEL),
+                if is_tab1 { t.text_strong } else { t.text_dim },
+            );
+            if tab1_resp.clicked() {
+                state.card_edit_tab = CardEditTab::KontenSumber;
+            }
+
+            // Tab 2: Tata Letak & Seksi
+            let tab2_rect = Rect::from_min_size(pos2(strip.min.x + tab_w, strip.min.y), vec2(tab_w, tab_bar_height));
+            let is_tab2 = state.card_edit_tab == CardEditTab::TataLetakSeksi;
+            let tab2_resp = ui.interact(tab2_rect, ui.scope_id().with("card_tab_2"), Sense::click())
+                .on_hover_text(crate::i18n::tr(lang, "Layout & Section"));
+            tab2_resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_tab2, crate::i18n::tr(lang, "Layout & Section")));
+            if is_tab2 {
+                ui.painter().rect_filled(tab2_rect, 0.0, t.panel);
+                ui.painter().line_segment([tab2_rect.left_top(), tab2_rect.left_bottom()], Stroke::new(1.0, t.border));
+                ui.painter().line_segment([tab2_rect.right_top(), tab2_rect.right_bottom()], Stroke::new(1.0, t.border));
+            } else {
+                if tab2_resp.hovered() {
+                    ui.painter().rect_filled(tab2_rect, 0.0, t.hover);
+                }
+                ui.painter().line_segment([tab2_rect.left_bottom(), tab2_rect.right_bottom()], Stroke::new(1.0, t.border));
+            }
+            ui.painter().text(
+                tab2_rect.center(),
+                Align2::CENTER_CENTER,
+                format!("📄 {}", crate::i18n::tr(lang, "Layout & Section")),
+                FontId::proportional(DOCK_TAB_LABEL),
+                if is_tab2 { t.text_strong } else { t.text_dim },
+            );
+            if tab2_resp.clicked() {
+                state.card_edit_tab = CardEditTab::TataLetakSeksi;
+            }
+
+            // Tab 3: Header & Footer (Non-cover cards only)
+            if card.kind != CardKind::Cover {
+                let tab3_w = (content_w - (tab_w * 2.0)).max(0.0);
+                let tab3_rect = Rect::from_min_size(pos2(strip.min.x + tab_w * 2.0, strip.min.y), vec2(tab3_w, tab_bar_height));
+                let is_tab3 = state.card_edit_tab == CardEditTab::HeaderFooter;
+                let tab3_resp = ui.interact(tab3_rect, ui.scope_id().with("card_tab_3"), Sense::click())
+                    .on_hover_text(crate::i18n::tr(lang, "Header & Footer"));
+                tab3_resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_tab3, crate::i18n::tr(lang, "Header & Footer")));
+                if is_tab3 {
+                    ui.painter().rect_filled(tab3_rect, 0.0, t.panel);
+                    ui.painter().line_segment([tab3_rect.left_top(), tab3_rect.left_bottom()], Stroke::new(1.0, t.border));
+                    ui.painter().line_segment([tab3_rect.right_top(), tab3_rect.right_bottom()], Stroke::new(1.0, t.border));
+                } else {
+                    if tab3_resp.hovered() {
+                        ui.painter().rect_filled(tab3_rect, 0.0, t.hover);
+                    }
+                    ui.painter().line_segment([tab3_rect.left_bottom(), tab3_rect.right_bottom()], Stroke::new(1.0, t.border));
+                }
+                ui.painter().text(
+                    tab3_rect.center(),
+                    Align2::CENTER_CENTER,
+                    format!("📑 {}", crate::i18n::tr(lang, "Header & Footer")),
+                    FontId::proportional(DOCK_TAB_LABEL),
+                    if is_tab3 { t.text_strong } else { t.text_dim },
+                );
+                if tab3_resp.clicked() {
+                    state.card_edit_tab = CardEditTab::HeaderFooter;
+                }
+            } else if state.card_edit_tab == CardEditTab::HeaderFooter {
+                state.card_edit_tab = CardEditTab::KontenSumber;
+            }
+
+            ui.add_space(2.0);
+
             egui::ScrollArea::vertical()
                 .max_width(content_w)
-                .max_height(scroll_h)
+                .max_height(scroll_h - tab_bar_height)
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
                     ui.set_width(content_w);
                     ui.set_max_width(content_w);
-                // Section 1: Cakupan & Jenis Konten (Scope & Content Type)
-                egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(crate::i18n::tr(lang, "Scope:")).font(semibold(11.0)).color(t.text_strong));
-                        let is_np = card.scope_new_page;
-                        if ui.selectable_label(is_np, crate::i18n::tr(lang, "New Page")).clicked() {
-                            card.scope_new_page = true;
-                            card.tag2 = "Halaman Baru".into();
-                        }
-                        if ui.selectable_label(!is_np, crate::i18n::tr(lang, "New Object")).clicked() {
-                            card.scope_new_page = false;
-                            card.tag2 = "Objek Baru".into();
-                        }
-                    });
 
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(crate::i18n::tr(lang, "Content Type:")).font(semibold(11.0)).color(t.text_strong));
-                        craft_ui::ComboBox::from_id_salt("card_edit_kind_select")
-                            .selected_text(format!("{} {}", card.kind.icon(), card.kind.label(lang)))
-                            .width(180.0)
-                            .show_ui(ui, |ui| {
-                                for k in CardKind::ALL {
-                                    if ui.selectable_label(card.kind == k, format!("{} {}", k.icon(), k.label(lang))).clicked() {
-                                        card.kind = k;
-                                        card.tag1 = match k {
-                                            CardKind::Cover => "Sampul".into(),
-                                            CardKind::Narrative => "Paragraf".into(),
-                                            CardKind::Chart => "Grafik".into(),
-                                            CardKind::MapChart => "Peta Tematik".into(),
-                                            CardKind::Table => "Tabel".into(),
-                                            CardKind::Image => "Gambar".into(),
-                                            CardKind::Toc => "Daftar Isi".into(),
-                                            CardKind::Divider => "Pembatas".into(),
-                                        };
-                                    }
-                                }
-                            });
-                    });
-                });
-
-                // Section 2: Identitas & Sumber Data (Identity & Binding)
-                if card.kind != CardKind::Cover {
-                    egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                        ui.label(RichText::new(crate::i18n::tr(lang, "Publication Title")).font(semibold(11.0)).color(t.text_strong));
-                        ui.add_sized([ui.available_width(), 22.0], egui::TextEdit::singleline(&mut card.title));
-
-                        if show_title_en {
-                            ui.label(RichText::new(crate::i18n::tr(lang, "Title EN:")).font(semibold(11.0)).color(t.text_strong));
-                            ui.add_sized([ui.available_width(), 22.0], egui::TextEdit::singleline(&mut card.title_en));
-                        }
-
-                        let show_chapter = matches!(card.kind, CardKind::Narrative | CardKind::Table | CardKind::Chart | CardKind::MapChart | CardKind::Divider);
-                        if show_chapter {
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr(lang, "Chapter / Section ID:")).font(semibold(11.0)).color(t.text_strong));
-                                ui.add(egui::TextEdit::singleline(&mut card.chapter_id).desired_width(120.0).hint_text("Contoh: Bab 1"));
-                            });
-                        }
-
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(crate::i18n::tr(lang, "Source:")).font(semibold(11.0)).color(t.text_strong));
-                            craft_ui::ComboBox::from_id_salt("card_source_select_box")
-                                .selected_text(if card.source.is_empty() { "Tanpa sumber" } else { &card.source })
-                                .width(240.0)
-                                .show_ui(ui, |ui| {
-                                    if ui.selectable_label(card.source == "Tanpa sumber", "Tanpa sumber").clicked() {
-                                        card.source = "Tanpa sumber".into();
-                                    }
-                                    for f in &state.content_files {
-                                        if ui.selectable_label(card.source == f.path, &f.path).clicked() {
-                                            card.source = f.path.clone();
-                                        }
-                                    }
-                                });
-                        });
-                    });
-                }
-
-                // Section 3: Rule-Based Form Sections per CardKind
-                match card.kind {
-                    CardKind::Cover => {
-                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr(lang, "Source:")).font(semibold(11.0)).color(t.text_strong));
-                                craft_ui::ComboBox::from_id_salt("cover_source_select_box")
-                                    .selected_text(if card.source.is_empty() { "Tanpa sumber" } else { &card.source })
-                                    .width(220.0)
-                                    .show_ui(ui, |ui| {
-                                        if ui.selectable_label(card.source == "Tanpa sumber", "Tanpa sumber").clicked() {
-                                            card.source = "Tanpa sumber".into();
-                                        }
-                                        for f in &state.content_files {
-                                            if ui.selectable_label(card.source == f.path, &f.path).clicked() {
-                                                card.source = f.path.clone();
-                                            }
-                                        }
-                                    });
-                            });
-                            ui.add_space(4.0);
-
-                            ui.horizontal(|ui| {
-                                ui.selectable_value(&mut card.cover_tab, 0, RichText::new("Desain Sampul").font(semibold(11.0)));
-                                ui.selectable_value(&mut card.cover_tab, 1, RichText::new("Metadata Rilis & PIC").font(semibold(11.0)));
-                                ui.selectable_value(&mut card.cover_tab, 2, RichText::new("Kunci & Nilai Lembar COV").font(semibold(11.0)));
-                            });
-                            ui.separator();
-
-                            if card.cover_tab == 0 {
-                                let ctx = ui.ctx().clone();
-                                super::with_state(&ctx, |pubgen_st| {
-                                    super::widgets::card_cover_body_ui(app, ui, pubgen_st, t);
-                                    let new_title = pubgen_st.cover_title.trim();
-                                    if !new_title.is_empty() {
-                                        card.title = format!("Sampul Rilis: {new_title}");
-                                        card.settings.insert("title".into(), new_title.to_string());
-                                    }
-                                    card.title_en = pubgen_st.cover_title_en.clone();
-                                    card.settings.insert("title_en".into(), pubgen_st.cover_title_en.clone());
-                                    card.cover_title2 = pubgen_st.cover_title2.clone();
-                                    card.settings.insert("title2".into(), pubgen_st.cover_title2.clone());
-                                    card.cover_year = pubgen_st.cover_year.clone();
-                                    card.settings.insert("year".into(), pubgen_st.cover_year.clone());
-                                    card.cover_volume = pubgen_st.cover_volume.clone();
-                                    card.settings.insert("volume".into(), pubgen_st.cover_volume.clone());
-                                    card.cover_catalogue = pubgen_st.cover_catalogue.clone();
-                                    card.settings.insert("catalogue".into(), pubgen_st.cover_catalogue.clone());
-                                    card.cover_code_num = pubgen_st.cover_code_num.clone();
-                                    card.settings.insert("code".into(), pubgen_st.cover_code_num.clone());
-                                    card.cover_pub_office = pubgen_st.cover_agency_text.clone();
-                                    card.settings.insert("pub_office".into(), pubgen_st.cover_agency_text.clone());
-                                    card.settings.insert("agency".into(), pubgen_st.cover_agency_text.clone());
-                                    card.cover_office_address = pubgen_st.cover_office_address.clone();
-                                    card.settings.insert("office_address".into(), pubgen_st.cover_office_address.clone());
-                                    card.cover_style_idx = pubgen_st.cover_style;
-                                    card.cover_add_map = pubgen_st.cover_add_map;
-                                    card.cover_inside_back = pubgen_st.cover_include_inside_back;
-                                });
-                            } else if card.cover_tab == 1 {
-                                egui::Grid::new("cover_release_pic_grid").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
-                                    ui.label(RichText::new("Nomor Rilis:").font(semibold(11.0)).color(t.text));
-                                    if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_release_no)).changed() {
-                                        card.settings.insert("release_no".into(), card.cover_release_no.clone());
-                                        state.meta_release_no = card.cover_release_no.clone();
-                                    }
-                                    ui.end_row();
-
-                                    ui.label(RichText::new("Tanggal Rilis:").font(semibold(11.0)).color(t.text));
-                                    if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_release_date)).changed() {
-                                        card.settings.insert("release_date".into(), card.cover_release_date.clone());
-                                        state.meta_release_date = card.cover_release_date.clone();
-                                    }
-                                    ui.end_row();
-
-                                    ui.label(RichText::new("Bulan Rilis:").font(semibold(11.0)).color(t.text));
-                                    if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_release_month)).changed() {
-                                        card.settings.insert("release_month".into(), card.cover_release_month.clone());
-                                        state.meta_release_month = card.cover_release_month.clone();
-                                    }
-                                    ui.end_row();
-
-                                    ui.label(RichText::new("Instansi Publikasi:").font(semibold(11.0)).color(t.text));
-                                    if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_pub_office)).changed() {
-                                        card.settings.insert("pub_office".into(), card.cover_pub_office.clone());
-                                        card.settings.insert("agency".into(), card.cover_pub_office.clone());
-                                        state.meta_agency = card.cover_pub_office.clone();
-                                    }
-                                    ui.end_row();
-
-                                    ui.label(RichText::new("Nama PIC / Kontak:").font(semibold(11.0)).color(t.text));
-                                    if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_pic_name)).changed() {
-                                        card.settings.insert("pic_name".into(), card.cover_pic_name.clone());
-                                    }
-                                    ui.end_row();
-
-                                    ui.label(RichText::new("Foto PIC:").font(semibold(11.0)).color(t.text));
-                                    if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_pic_photo)).changed() {
-                                        card.settings.insert("pic_photo".into(), card.cover_pic_photo.clone());
-                                    }
-                                    ui.end_row();
-
-                                    ui.label(RichText::new("Telepon PIC:").font(semibold(11.0)).color(t.text));
-                                    if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_pic_phone)).changed() {
-                                        card.settings.insert("pic_phone".into(), card.cover_pic_phone.clone());
-                                    }
-                                    ui.end_row();
-
-                                    ui.label(RichText::new("Email PIC:").font(semibold(11.0)).color(t.text));
-                                    if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_pic_email)).changed() {
-                                        card.settings.insert("pic_email".into(), card.cover_pic_email.clone());
-                                    }
-                                    ui.end_row();
-                                });
-                            } else {
-                                ui.label(RichText::new("Seluruh Kunci & Nilai Lembar COV:").font(semibold(11.0)).color(t.text_strong));
-                                ui.add_space(4.0);
-                                egui::ScrollArea::vertical().id_salt("cov_kv_scroll").max_height(280.0).show(ui, |ui| {
-                                    egui::Grid::new("cov_kv_grid").striped(true).num_columns(2).spacing(vec2(12.0, 4.0)).show(ui, |ui| {
-                                        ui.label(RichText::new("Kunci (Key)").font(semibold(11.0)).color(t.text_dim));
-                                        ui.label(RichText::new("Nilai (Value)").font(semibold(11.0)).color(t.text_dim));
-                                        ui.end_row();
-
-                                        let mut keys_to_update: Vec<(String, String)> = Vec::new();
-                                        for (k, v) in &card.settings {
-                                            ui.label(RichText::new(k).font(FontId::monospace(10.5)).color(t.accent));
-                                            let mut val_buf = v.clone();
-                                            if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut val_buf)).changed() {
-                                                keys_to_update.push((k.clone(), val_buf));
-                                            }
-                                            ui.end_row();
-                                        }
-                                        for (k, v) in keys_to_update {
-                                            card.settings.insert(k, v);
-                                        }
-                                    });
-                                });
-                            }
-                        });
-                    }
-                    CardKind::Table => {
-                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                            ui.label(RichText::new("Aturan Ingest & Format Tabel (Table Rules):").font(semibold(11.0)).color(t.text_strong));
-                            ui.checkbox(&mut card.table_first_row_header, crate::i18n::tr(lang, "First row as table header"));
-                            ui.checkbox(&mut card.table_col_numbers, crate::i18n::tr(lang, "Show column numbers (1)(2)..."));
-                            ui.checkbox(&mut card.table_footer, crate::i18n::tr(lang, "Table footer (notes & source)"));
-                            ui.checkbox(&mut card.table_row_conditions, crate::i18n::tr(lang, "Zebra striping"));
-
-                            ui.separator();
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr(lang, "Table Style:")).font(semibold(11.0)));
-                                craft_ui::ComboBox::from_id_salt("table_style_select")
-                                    .selected_text(&card.table_style)
-                                    .width(180.0)
-                                    .show_ui(ui, |ui| {
-                                        for s in ["Basic Grid", "Corporate Navy", "Minimalist", "Horizontal Rules", "BRS6 Standard"] {
-                                            if ui.selectable_label(card.table_style == s, s).clicked() {
-                                                card.table_style = s.into();
-                                            }
-                                        }
-                                    });
-                            });
-
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr(lang, "Table Theme:")).font(semibold(11.0)));
-                                craft_ui::ComboBox::from_id_salt("table_theme_select")
-                                    .selected_text(&card.table_theme)
-                                    .width(180.0)
-                                    .show_ui(ui, |ui| {
-                                        for th in ["BPS Blue", "Corporate", "Emerald", "Crimson", "Slate"] {
-                                            if ui.selectable_label(card.table_theme == th, th).clicked() {
-                                                card.table_theme = th.into();
-                                            }
-                                        }
-                                    });
-                            });
-
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr(lang, "Table Layout:")).font(semibold(11.0)));
-                                craft_ui::ComboBox::from_id_salt("table_layout_select")
-                                    .selected_text(&card.table_layout_preset)
-                                    .width(180.0)
-                                    .show_ui(ui, |ui| {
-                                        for lp in ["Standard", "Compact", "Expanded"] {
-                                            if ui.selectable_label(card.table_layout_preset == lp, lp).clicked() {
-                                                card.table_layout_preset = lp.into();
-                                            }
-                                        }
-                                    });
-                            });
-
-                            if ui.button(crate::i18n::tr(lang, "Apply to All Tables")).clicked() {
-                                apply_all_tables = true;
-                            }
-                        });
-                    }
-                    CardKind::Chart => {
-                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                            ui.label(RichText::new(crate::i18n::tr(lang, "Chart Visualisation Settings:")).font(semibold(11.0)).color(t.text_strong));
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr(lang, "Chart Type:")).font(semibold(11.0)));
-                                craft_ui::ComboBox::from_id_salt("chart_type_select")
-                                    .selected_text(&card.chart_type)
-                                    .width(200.0)
-                                    .show_ui(ui, |ui| {
-                                        for ct in ["Bar", "Line", "Donut", "Area", "Pie", "Scatter"] {
-                                            if ui.selectable_label(card.chart_type == ct, ct).clicked() {
-                                                card.chart_type = ct.into();
-                                            }
-                                        }
-                                    });
-                            });
-                        });
-                    }
-                    CardKind::MapChart => {
-                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                            ui.label(RichText::new(crate::i18n::tr(lang, "Thematic Map Settings (Choropleth & Spatial Map):")).font(semibold(11.0)).color(t.text_strong));
-
-                            // Pilihan GeoJSON (Stock vs Custom)
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr(lang, "GeoJSON Source:")).font(semibold(11.0)));
-                                if ui.selectable_label(!card.map_is_custom, crate::i18n::tr(lang, "Stock Map (@assets/pubgen/maps)")).clicked() {
-                                    card.map_is_custom = false;
-                                    if card.map_stock_name.is_empty() {
-                                        card.map_stock_name = "CILAMAYA_WETAN".into();
-                                    }
-                                    card.source = format!("assets/pubgen/maps/{}_DESA.geojson", card.map_stock_name.trim_end_matches("_DESA").to_uppercase().replace([' ', '-'], "_"));
-                                }
-                                if ui.selectable_label(card.map_is_custom, crate::i18n::tr(lang, "Custom GeoJSON (File Link)")).clicked() {
-                                    card.map_is_custom = true;
-                                    if !card.map_custom_geojson.is_empty() {
-                                        card.source = card.map_custom_geojson.clone();
-                                    }
-                                }
-                            });
-
-                            if !card.map_is_custom {
+                    match state.card_edit_tab {
+                        CardEditTab::KontenSumber => {
+                            // Section 1: Cakupan & Jenis Konten (Scope & Content Type)
+                            egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
                                 ui.horizontal(|ui| {
-                                    ui.label(RichText::new(crate::i18n::tr(lang, "Region Map Picker:")).font(semibold(11.0)));
-                                    let mut stock_maps = super::charts::stock_maps::list_stock_map_charts();
-                                    if stock_maps.is_empty() {
-                                        stock_maps = vec![
-                                            super::charts::stock_maps::StockMapEntry {
-                                                id: "CILAMAYA_WETAN".into(),
-                                                display_name: "Cilamaya Wetan (Desa)".into(),
-                                                path: std::path::PathBuf::from("assets/pubgen/maps/CILAMAYA_WETAN_DESA.geojson"),
-                                            },
-                                            super::charts::stock_maps::StockMapEntry {
-                                                id: "KARAWANG_TIMUR".into(),
-                                                display_name: "Karawang Timur (Desa)".into(),
-                                                path: std::path::PathBuf::from("assets/pubgen/maps/KARAWANG_TIMUR_DESA.geojson"),
-                                            },
-                                        ];
+                                    ui.label(RichText::new(crate::i18n::tr(lang, "Scope:")).font(semibold(11.0)).color(t.text_strong));
+                                    let is_np = card.scope_new_page;
+                                    if ui.selectable_label(is_np, crate::i18n::tr(lang, "New Page")).clicked() {
+                                        card.scope_new_page = true;
+                                        card.tag2 = "Halaman Baru".into();
                                     }
-                                    let current_norm = card.map_stock_name.trim_end_matches("_DESA").to_uppercase().replace([' ', '-'], "_");
-                                    let selected_display = stock_maps
-                                        .iter()
-                                        .find(|m| m.id == current_norm || m.id == card.map_stock_name.to_uppercase() || m.display_name.eq_ignore_ascii_case(&card.map_stock_name))
-                                        .map(|m| m.display_name.clone())
-                                        .unwrap_or_else(|| {
-                                            if !card.map_stock_name.is_empty() {
-                                                format!("{} (Desa)", card.map_stock_name)
-                                            } else {
-                                                crate::i18n::tr(lang, "Pick a region map…").to_string()
-                                            }
-                                        });
-
-                                    craft_ui::ComboBox::from_id_salt("map_stock_select")
-                                        .selected_text(&selected_display)
-                                        .width(260.0)
-                                        .show_ui(ui, |ui| {
-                                            for m in &stock_maps {
-                                                let is_sel = m.id == current_norm || m.display_name == selected_display;
-                                                if ui.selectable_label(is_sel, &m.display_name).clicked() {
-                                                    card.map_stock_name = m.id.clone();
-                                                    card.source = format!("assets/pubgen/maps/{}_DESA.geojson", m.id);
-                                                }
-                                            }
-                                        });
-                                });
-                            } else {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new(crate::i18n::tr(lang, "GeoJSON file:")).font(semibold(11.0)));
-                                    let edit = ui.add(
-                                        egui::TextEdit::singleline(&mut card.map_custom_geojson)
-                                            .desired_width(220.0)
-                                            .hint_text("Contoh: maps/wilayah.geojson"),
-                                    );
-                                    if edit.changed() {
-                                        card.source = card.map_custom_geojson.clone();
-                                    }
-                                    if ui.button("Buka...").clicked() {
-                                        let ctx = ui.ctx().clone();
-                                        let _ = app.ask_open("geojson", crate::app::file_dialogs::Bound::App, move |_app, path| {
-                                            let mut st = get_state(&ctx);
-                                            if let Some(idx) = st.editing_card_idx {
-                                                if let Some(c) = st.cards.get_mut(idx) {
-                                                    c.map_custom_geojson = path.clone();
-                                                    c.source = path;
-                                                    c.map_is_custom = true;
-                                                }
-                                            }
-                                            set_state(&ctx, st);
-                                            ctx.request_repaint();
-                                            Ok(serde_json::Value::Null)
-                                        });
+                                    if ui.selectable_label(!is_np, crate::i18n::tr(lang, "New Object")).clicked() {
+                                        card.scope_new_page = false;
+                                        card.tag2 = "Objek Baru".into();
                                     }
                                 });
-                            }
 
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new("Data Matriks (CSV):").font(semibold(11.0)));
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut card.map_data_csv)
-                                        .desired_width(220.0)
-                                        .hint_text("Contoh: maps/contoh.csv"),
-                                );
-                            });
-
-                            ui.separator();
-
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr(lang, "Map Type:")).font(semibold(11.0)));
-                                craft_ui::ComboBox::from_id_salt("map_type_select")
-                                    .selected_text(&card.map_chart_type)
-                                    .width(220.0)
-                                    .show_ui(ui, |ui| {
-                                        for mt in ["Choropleth", "Bubble Map", "Boundary Map"] {
-                                            if ui.selectable_label(card.map_chart_type == mt, mt).clicked() {
-                                                card.map_chart_type = mt.into();
-                                            }
-                                        }
-                                    });
-                            });
-
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr(lang, "Classification:")).font(semibold(11.0)));
-                                craft_ui::ComboBox::from_id_salt("map_class_select")
-                                    .selected_text(&card.map_classification)
-                                    .width(220.0)
-                                    .show_ui(ui, |ui| {
-                                        for cl in ["Quantile (4 kelas)", "Equal Interval (5 kelas)", "Jenks Natural Breaks"] {
-                                            if ui.selectable_label(card.map_classification == cl, cl).clicked() {
-                                                card.map_classification = cl.into();
-                                            }
-                                        }
-                                    });
-                            });
-
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr(lang, "Color Palette:")).font(semibold(11.0)));
-                                craft_ui::ComboBox::from_id_salt("map_palette_select")
-                                    .selected_text(&card.map_color_palette)
-                                    .width(220.0)
-                                    .show_ui(ui, |ui| {
-                                        for pal in ["BPS Biru-Teal", "Oranye Statistik", "Hijau Gradasi", "Ungu-Magenta", "Merah-Kuning-Hijau"] {
-                                            if ui.selectable_label(card.map_color_palette == pal, pal).clicked() {
-                                                card.map_color_palette = pal.into();
-                                            }
-                                        }
-                                    });
-                            });
-
-                            ui.checkbox(&mut card.map_show_labels, crate::i18n::tr(lang, "Show Region Labels"));
-                            ui.checkbox(&mut card.map_show_legend, crate::i18n::tr(lang, "Show Legend"));
-                        });
-                    }
-                    CardKind::Image => {
-                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                            ui.label(RichText::new(crate::i18n::tr(lang, "Image & Illustration Settings:")).font(semibold(11.0)).color(t.text_strong));
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr(lang, "Placement Area:")).font(semibold(11.0)));
-                                craft_ui::ComboBox::from_id_salt("image_area_select")
-                                    .selected_text(&card.image_area)
-                                    .width(200.0)
-                                    .show_ui(ui, |ui| {
-                                        for area in ["Area Margin", "Full Bleed", "Hero", "Kolom Ganda"] {
-                                            if ui.selectable_label(card.image_area == area, area).clicked() {
-                                                card.image_area = area.into();
-                                            }
-                                        }
-                                    });
-                            });
-                        });
-                    }
-                    CardKind::Toc => {
-                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                            ui.label(RichText::new(crate::i18n::tr(lang, "Table of Contents (TOC) Settings:")).font(semibold(11.0)).color(t.text_strong));
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr(lang, "TOC Style:")).font(semibold(11.0)));
-                                craft_ui::ComboBox::from_id_salt(("toc_style_select", card.page, card.chapter_id.as_str()))
-                                    .selected_text(&card.toc_style)
-                                    .width(200.0)
-                                    .show_ui(ui, |ui| {
-                                        for (s, default_title_id, default_title_bilingual) in [
-                                            ("TOC Paragraph", "Daftar Isi", "Daftar Isi / Table of Contents"),
-                                            ("TOC Table", "Daftar Tabel", "Daftar Tabel / List of Tables"),
-                                            ("TOC Chart", "Daftar Grafik", "Daftar Grafik / List of Charts"),
-                                            ("TOC Entry", "Daftar Isi", "Daftar Isi / Table of Contents"),
-                                        ] {
-                                            if ui.selectable_value(&mut card.toc_style, s.to_string(), s).clicked() {
-                                                card.settings.insert("toc_style".into(), s.to_string());
-                                                state.is_dirty = true;
-                                                // Auto-fill Title if empty or matches standard title
-                                                let target_title = if is_bilingual { default_title_bilingual } else { default_title_id };
-                                                card.title = target_title.into();
-                                            }
-                                        }
-                                    });
-                            });
-
-                            // Rules summary text per chosen TOC Style
-                            let rule_desc = match card.toc_style.as_str() {
-                                "TOC Paragraph" => "Aturan: Menyusun daftar bab narasi (RXX/BXX/BAB) dan sub-heading level 1 & 2 secara bersarang.",
-                                "TOC Table" => "Aturan: Hanya menyusun halaman tabel yang diawali 'Tabel' atau 'Table' (halaman landscape 'L' otomatis dikecualikan).",
-                                "TOC Chart" => "Aturan: Hanya menyusun halaman grafik atau gambar yang diawali 'Grafik', 'Chart', atau 'Gambar'.",
-                                _ => "Aturan: Mengumpulkan semua halaman dengan style 'TOC Entry' dan halaman narasi.",
-                            };
-                            ui.label(RichText::new(rule_desc).font(FontId::proportional(11.0)).color(t.text_dim));
-
-                            if card.toc_style == "TOC Table" || card.toc_style == "TOC Chart" {
                                 ui.horizontal(|ui| {
-                                    ui.label(RichText::new(crate::i18n::tr(lang, "Tata Letak (Layout):")).font(semibold(11.0)));
-                                    let layouts = ["Standard", "TablePage (BPS Catalog)"];
-                                    let cur_layout = layouts.get(card.toc_layout_style).copied().unwrap_or(layouts[0]);
-                                    craft_ui::ComboBox::from_id_salt(("toc_layout_style_select", card.page, card.chapter_id.as_str()))
-                                        .selected_text(cur_layout)
+                                    ui.label(RichText::new(crate::i18n::tr(lang, "Content Type:")).font(semibold(11.0)).color(t.text_strong));
+                                    craft_ui::ComboBox::from_id_salt("card_edit_kind_select")
+                                        .selected_text(format!("{} {}", card.kind.icon(), card.kind.label(lang)))
                                         .width(180.0)
                                         .show_ui(ui, |ui| {
-                                            for (idx, l) in layouts.iter().enumerate() {
-                                                if ui.selectable_value(&mut card.toc_layout_style, idx, *l).clicked() {
-                                                    card.settings.insert("toc_layout_style".into(), idx.to_string());
-                                                    state.is_dirty = true;
+                                            for k in CardKind::ALL {
+                                                if ui.selectable_label(card.kind == k, format!("{} {}", k.icon(), k.label(lang))).clicked() {
+                                                    card.kind = k;
+                                                    card.tag1 = match k {
+                                                        CardKind::Cover => "Sampul".into(),
+                                                        CardKind::Narrative => "Paragraf".into(),
+                                                        CardKind::Chart => "Grafik".into(),
+                                                        CardKind::MapChart => "Peta Tematik".into(),
+                                                        CardKind::Table => "Tabel".into(),
+                                                        CardKind::Image => "Gambar".into(),
+                                                        CardKind::Toc => "Daftar Isi".into(),
+                                                        CardKind::Divider => "Pembatas".into(),
+                                                    };
                                                 }
                                             }
                                         });
                                 });
+                            });
+
+                            // Section 2: Identitas & Sumber Data (Identity & Binding)
+                            if card.kind != CardKind::Cover {
+                                egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                                    ui.label(RichText::new(crate::i18n::tr(lang, "Publication Title")).font(semibold(11.0)).color(t.text_strong));
+                                    ui.add_sized([ui.available_width(), 22.0], egui::TextEdit::singleline(&mut card.title));
+
+                                    if show_title_en {
+                                        ui.label(RichText::new(crate::i18n::tr(lang, "Title EN:")).font(semibold(11.0)).color(t.text_strong));
+                                        ui.add_sized([ui.available_width(), 22.0], egui::TextEdit::singleline(&mut card.title_en));
+                                    }
+
+                                    let show_chapter = matches!(card.kind, CardKind::Narrative | CardKind::Table | CardKind::Chart | CardKind::MapChart | CardKind::Divider);
+                                    if show_chapter {
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(crate::i18n::tr(lang, "Chapter / Section ID:")).font(semibold(11.0)).color(t.text_strong));
+                                            ui.add(egui::TextEdit::singleline(&mut card.chapter_id).desired_width(120.0).hint_text("Contoh: Bab 1"));
+                                        });
+                                    }
+
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new(crate::i18n::tr(lang, "Source:")).font(semibold(11.0)).color(t.text_strong));
+                                        craft_ui::ComboBox::from_id_salt("card_source_select_box")
+                                            .selected_text(if card.source.is_empty() { "Tanpa sumber" } else { &card.source })
+                                            .width(240.0)
+                                            .show_ui(ui, |ui| {
+                                                if ui.selectable_label(card.source == "Tanpa sumber", "Tanpa sumber").clicked() {
+                                                    card.source = "Tanpa sumber".into();
+                                                }
+                                                for f in &state.content_files {
+                                                    if ui.selectable_label(card.source == f.path, &f.path).clicked() {
+                                                        card.source = f.path.clone();
+                                                    }
+                                                }
+                                            });
+                                    });
+                                });
                             }
 
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new("Kolom:").font(semibold(11.0)));
-                                if ui.selectable_label(card.toc_columns == "1 Kolom", "1 Kolom").clicked() {
-                                    card.toc_columns = "1 Kolom".into();
-                                    card.settings.insert("toc_columns".into(), "1 Kolom".into());
-                                    state.is_dirty = true;
-                                }
-                                if ui.selectable_label(card.toc_columns == "2 Kolom", "2 Kolom").clicked() {
-                                    card.toc_columns = "2 Kolom".into();
-                                    card.settings.insert("toc_columns".into(), "2 Kolom".into());
-                                    state.is_dirty = true;
-                                }
-                            });
-                            if ui.checkbox(&mut card.toc_hanging_indent, crate::i18n::tr(lang, "Hanging Indent")).changed() {
-                                card.settings.insert("toc_hanging_indent".into(), card.toc_hanging_indent.to_string());
-                                state.is_dirty = true;
-                            }
-                            if ui.checkbox(&mut card.toc_include_self, crate::i18n::tr(lang, "Include Self")).changed() {
-                                card.settings.insert("toc_include_self".into(), card.toc_include_self.to_string());
-                                state.is_dirty = true;
-                            }
-                            if is_bilingual && ui.checkbox(&mut card.toc_pair_bilingual, crate::i18n::tr(lang, "Pair Bilingual")).changed() {
-                                card.settings.insert("toc_pair_bilingual".into(), card.toc_pair_bilingual.to_string());
-                                state.is_dirty = true;
-                            }
-                        });
-                    }
-                    CardKind::Narrative => {
-                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                            ui.label(RichText::new(crate::i18n::tr(lang, "Text & Paragraph Format Settings:")).font(semibold(11.0)).color(t.text_strong));
-                            ui.label(RichText::new("Teks narasi di-parse secara otomatis dari dokumen RTF yang terhubung. Perataan paragraf, indentasi, heading, dan quote dipertahankan sesuai stylesheet BPS.").font(FontId::proportional(11.0)).color(t.text_dim));
-                        });
-                    }
-                    CardKind::Divider => {
-                        egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                            ui.label(RichText::new(crate::i18n::tr(lang, "Chapter Divider Settings:")).font(semibold(11.0)).color(t.text_strong));
-                            ui.label(RichText::new("Pembatas bab A4 full bleed dengan judul dwibahasa, ornamen grafis batik atau minimalis, dan penomoran bab otomatis.").font(FontId::proportional(11.0)).color(t.text_dim));
-                        });
-                    }
-                }
+                            // Section 3: Rule-Based Form Sections per CardKind
+                            match card.kind {
+                                CardKind::Cover => {
+                                    egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(crate::i18n::tr(lang, "Source:")).font(semibold(11.0)).color(t.text_strong));
+                                            craft_ui::ComboBox::from_id_salt("cover_source_select_box")
+                                                .selected_text(if card.source.is_empty() { "Tanpa sumber" } else { &card.source })
+                                                .width(220.0)
+                                                .show_ui(ui, |ui| {
+                                                    if ui.selectable_label(card.source == "Tanpa sumber", "Tanpa sumber").clicked() {
+                                                        card.source = "Tanpa sumber".into();
+                                                    }
+                                                    for f in &state.content_files {
+                                                        if ui.selectable_label(card.source == f.path, &f.path).clicked() {
+                                                            card.source = f.path.clone();
+                                                        }
+                                                    }
+                                                });
+                                        });
+                                        ui.add_space(4.0);
 
-                // Section 4: Penomoran Halaman & Seksi (Halaman Baru)
-                if card.scope_new_page {
-                    egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                        ui.label(
-                            RichText::new(crate::i18n::tr(lang, "Page & Section Numbering Options:"))
-                                .font(semibold(11.0))
-                                .color(t.text_strong),
-                        );
-                        ui.checkbox(&mut card.section_start, crate::i18n::tr(lang, "Start Section"));
-                        if card.section_start {
-                            ui.horizontal(|ui| {
-                                if ui.selectable_label(card.automatic_numbering, crate::i18n::tr(lang, "Automatic Numbering")).clicked() {
-                                    card.automatic_numbering = true;
-                                }
-                                if ui.selectable_label(!card.automatic_numbering, crate::i18n::tr(lang, "Start at Page:")).clicked() {
-                                    card.automatic_numbering = false;
-                                }
-                                if !card.automatic_numbering {
-                                    ui.add(egui::DragValue::new(&mut card.start_page_number).range(1..=999));
-                                }
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(crate::i18n::tr(lang, "Section Prefix:")).font(semibold(11.0)));
-                                ui.add(egui::TextEdit::singleline(&mut card.section_prefix).desired_width(80.0));
-                                ui.label(RichText::new(crate::i18n::tr(lang, "Numbering Style:")).font(semibold(11.0)));
-                                craft_ui::ComboBox::from_id_salt("num_style_select")
-                                    .selected_text(&card.numbering_style)
-                                    .width(100.0)
-                                    .show_ui(ui, |ui| {
-                                        for ns in ["1, 2, 3...", "i, ii, iii...", "A, B, C...", "Tidak bernomor"] {
-                                            if ui.selectable_label(card.numbering_style == ns, ns).clicked() {
-                                                card.numbering_style = ns.into();
-                                            }
+                                        ui.horizontal(|ui| {
+                                            ui.selectable_value(&mut card.cover_tab, 0, RichText::new("Desain Sampul").font(semibold(11.0)));
+                                            ui.selectable_value(&mut card.cover_tab, 1, RichText::new("Metadata Rilis & PIC").font(semibold(11.0)));
+                                            ui.selectable_value(&mut card.cover_tab, 2, RichText::new("Kunci & Nilai Lembar COV").font(semibold(11.0)));
+                                        });
+                                        ui.separator();
+
+                                        if card.cover_tab == 0 {
+                                            let ctx = ui.ctx().clone();
+                                            super::with_state(&ctx, |pubgen_st| {
+                                                super::widgets::card_cover_body_ui(app, ui, pubgen_st, t);
+                                                let new_title = pubgen_st.cover_title.trim();
+                                                if !new_title.is_empty() {
+                                                    card.title = format!("Sampul Rilis: {new_title}");
+                                                    card.settings.insert("title".into(), new_title.to_string());
+                                                }
+                                                card.title_en = pubgen_st.cover_title_en.clone();
+                                                card.settings.insert("title_en".into(), pubgen_st.cover_title_en.clone());
+                                                card.cover_title2 = pubgen_st.cover_title2.clone();
+                                                card.settings.insert("title2".into(), pubgen_st.cover_title2.clone());
+                                                card.cover_year = pubgen_st.cover_year.clone();
+                                                card.settings.insert("year".into(), pubgen_st.cover_year.clone());
+                                                card.cover_volume = pubgen_st.cover_volume.clone();
+                                                card.settings.insert("volume".into(), pubgen_st.cover_volume.clone());
+                                                card.cover_catalogue = pubgen_st.cover_catalogue.clone();
+                                                card.settings.insert("catalogue".into(), pubgen_st.cover_catalogue.clone());
+                                                card.cover_code_num = pubgen_st.cover_code_num.clone();
+                                                card.settings.insert("code".into(), pubgen_st.cover_code_num.clone());
+                                                card.cover_pub_office = pubgen_st.cover_agency_text.clone();
+                                                card.settings.insert("pub_office".into(), pubgen_st.cover_agency_text.clone());
+                                                card.settings.insert("agency".into(), pubgen_st.cover_agency_text.clone());
+                                                card.cover_office_address = pubgen_st.cover_office_address.clone();
+                                                card.settings.insert("office_address".into(), pubgen_st.cover_office_address.clone());
+                                                card.cover_style_idx = pubgen_st.cover_style;
+                                                card.cover_add_map = pubgen_st.cover_add_map;
+                                                card.cover_inside_back = pubgen_st.cover_include_inside_back;
+                                            });
+                                        } else if card.cover_tab == 1 {
+                                            egui::Grid::new("cover_release_pic_grid").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
+                                                ui.label(RichText::new("Nomor Rilis:").font(semibold(11.0)).color(t.text));
+                                                if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_release_no)).changed() {
+                                                    card.settings.insert("release_no".into(), card.cover_release_no.clone());
+                                                    state.meta_release_no = card.cover_release_no.clone();
+                                                }
+                                                ui.end_row();
+
+                                                ui.label(RichText::new("Tanggal Rilis:").font(semibold(11.0)).color(t.text));
+                                                if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_release_date)).changed() {
+                                                    card.settings.insert("release_date".into(), card.cover_release_date.clone());
+                                                    state.meta_release_date = card.cover_release_date.clone();
+                                                }
+                                                ui.end_row();
+
+                                                ui.label(RichText::new("Bulan Rilis:").font(semibold(11.0)).color(t.text));
+                                                if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_release_month)).changed() {
+                                                    card.settings.insert("release_month".into(), card.cover_release_month.clone());
+                                                    state.meta_release_month = card.cover_release_month.clone();
+                                                }
+                                                ui.end_row();
+
+                                                ui.label(RichText::new("Instansi Publikasi:").font(semibold(11.0)).color(t.text));
+                                                if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_pub_office)).changed() {
+                                                    card.settings.insert("pub_office".into(), card.cover_pub_office.clone());
+                                                    card.settings.insert("agency".into(), card.cover_pub_office.clone());
+                                                    state.meta_agency = card.cover_pub_office.clone();
+                                                }
+                                                ui.end_row();
+
+                                                ui.label(RichText::new("Nama PIC / Kontak:").font(semibold(11.0)).color(t.text));
+                                                if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_pic_name)).changed() {
+                                                    card.settings.insert("pic_name".into(), card.cover_pic_name.clone());
+                                                }
+                                                ui.end_row();
+
+                                                ui.label(RichText::new("Foto PIC:").font(semibold(11.0)).color(t.text));
+                                                if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_pic_photo)).changed() {
+                                                    card.settings.insert("pic_photo".into(), card.cover_pic_photo.clone());
+                                                }
+                                                ui.end_row();
+
+                                                ui.label(RichText::new("Telepon PIC:").font(semibold(11.0)).color(t.text));
+                                                if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_pic_phone)).changed() {
+                                                    card.settings.insert("pic_phone".into(), card.cover_pic_phone.clone());
+                                                }
+                                                ui.end_row();
+
+                                                ui.label(RichText::new("Email PIC:").font(semibold(11.0)).color(t.text));
+                                                if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut card.cover_pic_email)).changed() {
+                                                    card.settings.insert("pic_email".into(), card.cover_pic_email.clone());
+                                                }
+                                                ui.end_row();
+                                            });
+                                        } else {
+                                            ui.label(RichText::new("Seluruh Kunci & Nilai Lembar COV:").font(semibold(11.0)).color(t.text_strong));
+                                            ui.add_space(4.0);
+                                            egui::ScrollArea::vertical().id_salt("cov_kv_scroll").max_height(280.0).show(ui, |ui| {
+                                                egui::Grid::new("cov_kv_grid").striped(true).num_columns(2).spacing(vec2(12.0, 4.0)).show(ui, |ui| {
+                                                    ui.label(RichText::new("Kunci (Key)").font(semibold(11.0)).color(t.text_dim));
+                                                    ui.label(RichText::new("Nilai (Value)").font(semibold(11.0)).color(t.text_dim));
+                                                    ui.end_row();
+
+                                                    let mut keys_to_update: Vec<(String, String)> = Vec::new();
+                                                    for (k, v) in &card.settings {
+                                                        ui.label(RichText::new(k).font(FontId::monospace(10.5)).color(t.accent));
+                                                        let mut val_buf = v.clone();
+                                                        if ui.add_sized([ui.available_width(), crate::widgets::FIELD_H], egui::TextEdit::singleline(&mut val_buf)).changed() {
+                                                            keys_to_update.push((k.clone(), val_buf));
+                                                        }
+                                                        ui.end_row();
+                                                    }
+                                                    for (k, v) in keys_to_update {
+                                                        card.settings.insert(k, v);
+                                                    }
+                                                });
+                                            });
                                         }
                                     });
-                            });
+                                }
+                                CardKind::Table => {
+                                    egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                                        ui.label(RichText::new("Aturan Ingest & Format Tabel (Table Rules):").font(semibold(11.0)).color(t.text_strong));
+                                        ui.checkbox(&mut card.table_first_row_header, crate::i18n::tr(lang, "First row as table header"));
+                                        ui.checkbox(&mut card.table_col_numbers, crate::i18n::tr(lang, "Show column numbers (1)(2)..."));
+                                        ui.checkbox(&mut card.table_footer, crate::i18n::tr(lang, "Table footer (notes & source)"));
+                                        ui.checkbox(&mut card.table_row_conditions, crate::i18n::tr(lang, "Zebra striping"));
+
+                                        ui.separator();
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(crate::i18n::tr(lang, "Table Style:")).font(semibold(11.0)));
+                                            craft_ui::ComboBox::from_id_salt("table_style_select")
+                                                .selected_text(&card.table_style)
+                                                .width(180.0)
+                                                .show_ui(ui, |ui| {
+                                                    for s in ["Basic Grid", "Corporate Navy", "Minimalist", "Horizontal Rules", "BRS6 Standard"] {
+                                                        if ui.selectable_label(card.table_style == s, s).clicked() {
+                                                            card.table_style = s.into();
+                                                        }
+                                                    }
+                                                });
+                                        });
+
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(crate::i18n::tr(lang, "Table Theme:")).font(semibold(11.0)));
+                                            craft_ui::ComboBox::from_id_salt("table_theme_select")
+                                                .selected_text(&card.table_theme)
+                                                .width(180.0)
+                                                .show_ui(ui, |ui| {
+                                                    for th in ["BPS Blue", "Corporate", "Emerald", "Crimson", "Slate"] {
+                                                        if ui.selectable_label(card.table_theme == th, th).clicked() {
+                                                            card.table_theme = th.into();
+                                                        }
+                                                    }
+                                                });
+                                        });
+
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(crate::i18n::tr(lang, "Table Layout:")).font(semibold(11.0)));
+                                            craft_ui::ComboBox::from_id_salt("table_layout_select")
+                                                .selected_text(&card.table_layout_preset)
+                                                .width(180.0)
+                                                .show_ui(ui, |ui| {
+                                                    for lp in ["Standard", "Compact", "Expanded"] {
+                                                        if ui.selectable_label(card.table_layout_preset == lp, lp).clicked() {
+                                                            card.table_layout_preset = lp.into();
+                                                        }
+                                                    }
+                                                });
+                                        });
+
+                                        if ui.button(crate::i18n::tr(lang, "Apply to All Tables")).clicked() {
+                                            apply_all_tables = true;
+                                        }
+                                    });
+                                }
+                                CardKind::Chart => {
+                                    egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                                        ui.label(RichText::new(crate::i18n::tr(lang, "Chart Visualisation Settings:")).font(semibold(11.0)).color(t.text_strong));
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(crate::i18n::tr(lang, "Chart Type:")).font(semibold(11.0)));
+                                            craft_ui::ComboBox::from_id_salt("chart_type_select")
+                                                .selected_text(&card.chart_type)
+                                                .width(200.0)
+                                                .show_ui(ui, |ui| {
+                                                    for ct in ["Bar", "Line", "Donut", "Area", "Pie", "Scatter"] {
+                                                        if ui.selectable_label(card.chart_type == ct, ct).clicked() {
+                                                            card.chart_type = ct.into();
+                                                        }
+                                                    }
+                                                });
+                                        });
+                                    });
+                                }
+                                CardKind::MapChart => {
+                                    egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                                        ui.label(RichText::new(crate::i18n::tr(lang, "Thematic Map Settings (Choropleth & Spatial Map):")).font(semibold(11.0)).color(t.text_strong));
+
+                                        // Pilihan GeoJSON (Stock vs Custom)
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(crate::i18n::tr(lang, "GeoJSON Source:")).font(semibold(11.0)));
+                                            if ui.selectable_label(!card.map_is_custom, crate::i18n::tr(lang, "Stock Map (@assets/pubgen/maps)")).clicked() {
+                                                card.map_is_custom = false;
+                                                if card.map_stock_name.is_empty() {
+                                                    card.map_stock_name = "CILAMAYA_WETAN".into();
+                                                }
+                                                card.source = format!("assets/pubgen/maps/{}_DESA.geojson", card.map_stock_name.trim_end_matches("_DESA").to_uppercase().replace([' ', '-'], "_"));
+                                            }
+                                            if ui.selectable_label(card.map_is_custom, crate::i18n::tr(lang, "Custom GeoJSON (File Link)")).clicked() {
+                                                card.map_is_custom = true;
+                                                if !card.map_custom_geojson.is_empty() {
+                                                    card.source = card.map_custom_geojson.clone();
+                                                }
+                                            }
+                                        });
+
+                                        if !card.map_is_custom {
+                                            ui.horizontal(|ui| {
+                                                ui.label(RichText::new(crate::i18n::tr(lang, "Region Map Picker:")).font(semibold(11.0)));
+                                                let mut stock_maps = super::charts::stock_maps::list_stock_map_charts();
+                                                if stock_maps.is_empty() {
+                                                    stock_maps = vec![
+                                                        super::charts::stock_maps::StockMapEntry {
+                                                            id: "CILAMAYA_WETAN".into(),
+                                                            display_name: "Cilamaya Wetan (Desa)".into(),
+                                                            path: std::path::PathBuf::from("assets/pubgen/maps/CILAMAYA_WETAN_DESA.geojson"),
+                                                        },
+                                                        super::charts::stock_maps::StockMapEntry {
+                                                            id: "KARAWANG_TIMUR".into(),
+                                                            display_name: "Karawang Timur (Desa)".into(),
+                                                            path: std::path::PathBuf::from("assets/pubgen/maps/KARAWANG_TIMUR_DESA.geojson"),
+                                                        },
+                                                    ];
+                                                }
+                                                let current_norm = card.map_stock_name.trim_end_matches("_DESA").to_uppercase().replace([' ', '-'], "_");
+                                                let selected_display = stock_maps
+                                                    .iter()
+                                                    .find(|m| m.id == current_norm || m.id == card.map_stock_name.to_uppercase() || m.display_name.eq_ignore_ascii_case(&card.map_stock_name))
+                                                    .map(|m| m.display_name.clone())
+                                                    .unwrap_or_else(|| {
+                                                        if !card.map_stock_name.is_empty() {
+                                                            format!("{} (Desa)", card.map_stock_name)
+                                                        } else {
+                                                            crate::i18n::tr(lang, "Pick a region map…").to_string()
+                                                        }
+                                                    });
+
+                                                craft_ui::ComboBox::from_id_salt("map_stock_select")
+                                                    .selected_text(&selected_display)
+                                                    .width(260.0)
+                                                    .show_ui(ui, |ui| {
+                                                        for m in &stock_maps {
+                                                            let is_sel = m.id == current_norm || m.display_name == selected_display;
+                                                            if ui.selectable_label(is_sel, &m.display_name).clicked() {
+                                                                card.map_stock_name = m.id.clone();
+                                                                card.source = format!("assets/pubgen/maps/{}_DESA.geojson", m.id);
+                                                            }
+                                                        }
+                                                    });
+                                            });
+                                        } else {
+                                            ui.horizontal(|ui| {
+                                                ui.label(RichText::new(crate::i18n::tr(lang, "GeoJSON file:")).font(semibold(11.0)));
+                                                let edit = ui.add(
+                                                    egui::TextEdit::singleline(&mut card.map_custom_geojson)
+                                                        .desired_width(220.0)
+                                                        .hint_text("Contoh: maps/wilayah.geojson"),
+                                                );
+                                                if edit.changed() {
+                                                    card.source = card.map_custom_geojson.clone();
+                                                }
+                                                if ui.button("Buka...").clicked() {
+                                                    let ctx = ui.ctx().clone();
+                                                    let _ = app.ask_open("geojson", crate::app::file_dialogs::Bound::App, move |_app, path| {
+                                                        let mut st = get_state(&ctx);
+                                                        if let Some(idx) = st.editing_card_idx {
+                                                            if let Some(c) = st.cards.get_mut(idx) {
+                                                                c.map_custom_geojson = path.clone();
+                                                                c.source = path;
+                                                                c.map_is_custom = true;
+                                                            }
+                                                        }
+                                                        set_state(&ctx, st);
+                                                        ctx.request_repaint();
+                                                        Ok(serde_json::Value::Null)
+                                                    });
+                                                }
+                                            });
+                                        }
+
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new("Data Matriks (CSV):").font(semibold(11.0)));
+                                            ui.add(
+                                                egui::TextEdit::singleline(&mut card.map_data_csv)
+                                                    .desired_width(220.0)
+                                                    .hint_text("Contoh: maps/contoh.csv"),
+                                            );
+                                        });
+
+                                        ui.separator();
+
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(crate::i18n::tr(lang, "Map Type:")).font(semibold(11.0)));
+                                            craft_ui::ComboBox::from_id_salt("map_type_select")
+                                                .selected_text(&card.map_chart_type)
+                                                .width(220.0)
+                                                .show_ui(ui, |ui| {
+                                                    for mt in ["Choropleth", "Bubble Map", "Boundary Map"] {
+                                                        if ui.selectable_label(card.map_chart_type == mt, mt).clicked() {
+                                                            card.map_chart_type = mt.into();
+                                                        }
+                                                    }
+                                                });
+                                        });
+
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(crate::i18n::tr(lang, "Classification:")).font(semibold(11.0)));
+                                            craft_ui::ComboBox::from_id_salt("map_class_select")
+                                                .selected_text(&card.map_classification)
+                                                .width(220.0)
+                                                .show_ui(ui, |ui| {
+                                                    for cl in ["Quantile (4 kelas)", "Equal Interval (5 kelas)", "Jenks Natural Breaks"] {
+                                                        if ui.selectable_label(card.map_classification == cl, cl).clicked() {
+                                                            card.map_classification = cl.into();
+                                                        }
+                                                    }
+                                                });
+                                        });
+
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(crate::i18n::tr(lang, "Color Palette:")).font(semibold(11.0)));
+                                            craft_ui::ComboBox::from_id_salt("map_palette_select")
+                                                .selected_text(&card.map_color_palette)
+                                                .width(220.0)
+                                                .show_ui(ui, |ui| {
+                                                    for pal in ["BPS Biru-Teal", "Oranye Statistik", "Hijau Gradasi", "Ungu-Magenta", "Merah-Kuning-Hijau"] {
+                                                        if ui.selectable_label(card.map_color_palette == pal, pal).clicked() {
+                                                            card.map_color_palette = pal.into();
+                                                        }
+                                                    }
+                                                });
+                                        });
+
+                                        ui.checkbox(&mut card.map_show_labels, crate::i18n::tr(lang, "Show Region Labels"));
+                                        ui.checkbox(&mut card.map_show_legend, crate::i18n::tr(lang, "Show Legend"));
+                                    });
+                                }
+                                CardKind::Image => {
+                                    egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                                        ui.label(RichText::new(crate::i18n::tr(lang, "Image & Illustration Settings:")).font(semibold(11.0)).color(t.text_strong));
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(crate::i18n::tr(lang, "Placement Area:")).font(semibold(11.0)));
+                                            craft_ui::ComboBox::from_id_salt("image_area_select")
+                                                .selected_text(&card.image_area)
+                                                .width(200.0)
+                                                .show_ui(ui, |ui| {
+                                                    for area in ["Area Margin", "Full Bleed", "Hero", "Kolom Ganda"] {
+                                                        if ui.selectable_label(card.image_area == area, area).clicked() {
+                                                            card.image_area = area.into();
+                                                        }
+                                                    }
+                                                });
+                                        });
+                                    });
+                                }
+                                CardKind::Toc => {
+                                    egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                                        ui.label(RichText::new(crate::i18n::tr(lang, "Table of Contents (TOC) Settings:")).font(semibold(11.0)).color(t.text_strong));
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(crate::i18n::tr(lang, "TOC Style:")).font(semibold(11.0)));
+                                            craft_ui::ComboBox::from_id_salt(("toc_style_select", card.page, card.chapter_id.as_str()))
+                                                .selected_text(&card.toc_style)
+                                                .width(200.0)
+                                                .show_ui(ui, |ui| {
+                                                    for (s, default_title_id, default_title_bilingual) in [
+                                                        ("TOC Paragraph", "Daftar Isi", "Daftar Isi / Table of Contents"),
+                                                        ("TOC Table", "Daftar Tabel", "Daftar Tabel / List of Tables"),
+                                                        ("TOC Chart", "Daftar Grafik", "Daftar Grafik / List of Charts"),
+                                                        ("TOC Entry", "Daftar Isi", "Daftar Isi / Table of Contents"),
+                                                    ] {
+                                                        if ui.selectable_value(&mut card.toc_style, s.to_string(), s).clicked() {
+                                                            card.settings.insert("toc_style".into(), s.to_string());
+                                                            state.is_dirty = true;
+                                                            // Auto-fill Title if empty or matches standard title
+                                                            let target_title = if is_bilingual { default_title_bilingual } else { default_title_id };
+                                                            card.title = target_title.into();
+                                                        }
+                                                    }
+                                                });
+                                        });
+
+                                        // Rules summary text per chosen TOC Style
+                                        let rule_desc = match card.toc_style.as_str() {
+                                            "TOC Paragraph" => "Aturan: Menyusun daftar bab narasi (RXX/BXX/BAB) dan sub-heading level 1 & 2 secara bersarang.",
+                                            "TOC Table" => "Aturan: Hanya menyusun halaman tabel yang diawali 'Tabel' atau 'Table' (halaman landscape 'L' otomatis dikecualikan).",
+                                            "TOC Chart" => "Aturan: Hanya menyusun halaman grafik atau gambar yang diawali 'Grafik', 'Chart', atau 'Gambar'.",
+                                            _ => "Aturan: Mengumpulkan semua halaman dengan style 'TOC Entry' dan halaman narasi.",
+                                        };
+                                        ui.label(RichText::new(rule_desc).font(FontId::proportional(11.0)).color(t.text_dim));
+
+                                        if card.toc_style == "TOC Table" || card.toc_style == "TOC Chart" {
+                                            ui.horizontal(|ui| {
+                                                ui.label(RichText::new(crate::i18n::tr(lang, "Tata Letak (Layout):")).font(semibold(11.0)));
+                                                let layouts = ["Standard", "TablePage (BPS Catalog)"];
+                                                let cur_layout = layouts.get(card.toc_layout_style).copied().unwrap_or(layouts[0]);
+                                                craft_ui::ComboBox::from_id_salt(("toc_layout_style_select", card.page, card.chapter_id.as_str()))
+                                                    .selected_text(cur_layout)
+                                                    .width(180.0)
+                                                    .show_ui(ui, |ui| {
+                                                        for (idx, l) in layouts.iter().enumerate() {
+                                                            if ui.selectable_value(&mut card.toc_layout_style, idx, *l).clicked() {
+                                                                card.settings.insert("toc_layout_style".into(), idx.to_string());
+                                                                state.is_dirty = true;
+                                                            }
+                                                        }
+                                                    });
+                                            });
+                                        }
+
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new("Kolom:").font(semibold(11.0)));
+                                            if ui.selectable_label(card.toc_columns == "1 Kolom", "1 Kolom").clicked() {
+                                                card.toc_columns = "1 Kolom".into();
+                                                card.settings.insert("toc_columns".into(), "1 Kolom".into());
+                                                state.is_dirty = true;
+                                            }
+                                            if ui.selectable_label(card.toc_columns == "2 Kolom", "2 Kolom").clicked() {
+                                                card.toc_columns = "2 Kolom".into();
+                                                card.settings.insert("toc_columns".into(), "2 Kolom".into());
+                                                state.is_dirty = true;
+                                            }
+                                        });
+                                        if ui.checkbox(&mut card.toc_hanging_indent, crate::i18n::tr(lang, "Hanging Indent")).changed() {
+                                            card.settings.insert("toc_hanging_indent".into(), card.toc_hanging_indent.to_string());
+                                            state.is_dirty = true;
+                                        }
+                                        if ui.checkbox(&mut card.toc_include_self, crate::i18n::tr(lang, "Include Self")).changed() {
+                                            card.settings.insert("toc_include_self".into(), card.toc_include_self.to_string());
+                                            state.is_dirty = true;
+                                        }
+                                        if is_bilingual && ui.checkbox(&mut card.toc_pair_bilingual, crate::i18n::tr(lang, "Pair Bilingual")).changed() {
+                                            card.settings.insert("toc_pair_bilingual".into(), card.toc_pair_bilingual.to_string());
+                                            state.is_dirty = true;
+                                        }
+                                    });
+                                }
+                                CardKind::Narrative => {
+                                    egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                                        ui.label(RichText::new(crate::i18n::tr(lang, "Text & Paragraph Format Settings:")).font(semibold(11.0)).color(t.text_strong));
+                                        ui.label(RichText::new("Teks narasi di-parse secara otomatis dari dokumen RTF yang terhubung. Perataan paragraf, indentasi, heading, dan quote dipertahankan sesuai stylesheet BPS.").font(FontId::proportional(11.0)).color(t.text_dim));
+                                    });
+                                }
+                                CardKind::Divider => {
+                                    egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                                        ui.label(RichText::new(crate::i18n::tr(lang, "Chapter Divider Settings:")).font(semibold(11.0)).color(t.text_strong));
+                                        ui.label(RichText::new("Pembatas bab A4 full bleed dengan judul dwibahasa, ornamen grafis batik atau minimalis, dan penomoran bab otomatis.").font(FontId::proportional(11.0)).color(t.text_dim));
+                                    });
+                                }
+                            }
                         }
-                    });
-                }
-
-                // Section 5: Pengaturan Header & Footer (Header-Footer Setup for this publication page)
-                if card.kind != CardKind::Cover {
-                    let card_page = card.page.max(1);
-                    egui::Frame::NONE
-                        .fill(t.panel)
-                        .stroke(Stroke::new(1.0, t.field_border))
-                        .corner_radius(CornerRadius::same(t.radius))
-                        .inner_margin(Margin::same(8))
-                        .show(ui, |ui| {
-                            ui.label(RichText::new(crate::i18n::tr(lang, "Header & Footer Settings:")).font(semibold(11.0)).color(t.text_strong));
-                            ui.add_space(3.0);
-
-                            let ctx = ui.ctx().clone();
-                            super::with_state(&ctx, |pubgen_st| {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new(crate::i18n::tr(lang, "Apply Option:")).font(semibold(11.0)).color(t.text_strong));
-                                    let is_forward = card.hf_scope_forward;
-                                    if ui.selectable_label(!is_forward, crate::i18n::tr(lang, "Apply for this page only")).clicked() {
-                                        card.hf_scope_forward = false;
-                                        pubgen_st.hf_scope = 3;
-                                        pubgen_st.hf_scope_start = card_page;
-                                        pubgen_st.hf_scope_end = card_page;
-                                    }
-                                    if ui.selectable_label(is_forward, crate::i18n::tr(lang, "Apply from this page forward")).clicked() {
-                                        card.hf_scope_forward = true;
-                                        pubgen_st.hf_scope = 4;
-                                        pubgen_st.hf_scope_start = card_page;
+                        CardEditTab::TataLetakSeksi => {
+                            // Section 4: Penomoran Halaman & Seksi (Halaman Baru)
+                            if card.scope_new_page {
+                                egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                                    ui.label(
+                                        RichText::new(crate::i18n::tr(lang, "Page & Section Numbering Options:"))
+                                            .font(semibold(11.0))
+                                            .color(t.text_strong),
+                                    );
+                                    ui.checkbox(&mut card.section_start, crate::i18n::tr(lang, "Start Section"));
+                                    if card.section_start {
+                                        ui.horizontal(|ui| {
+                                            if ui.selectable_label(card.automatic_numbering, crate::i18n::tr(lang, "Automatic Numbering")).clicked() {
+                                                card.automatic_numbering = true;
+                                            }
+                                            if ui.selectable_label(!card.automatic_numbering, crate::i18n::tr(lang, "Start at Page:")).clicked() {
+                                                card.automatic_numbering = false;
+                                            }
+                                            if !card.automatic_numbering {
+                                                ui.add(egui::DragValue::new(&mut card.start_page_number).range(1..=999));
+                                            }
+                                        });
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(crate::i18n::tr(lang, "Section Prefix:")).font(semibold(11.0)));
+                                            ui.add(egui::TextEdit::singleline(&mut card.section_prefix).desired_width(80.0));
+                                            ui.label(RichText::new(crate::i18n::tr(lang, "Numbering Style:")).font(semibold(11.0)));
+                                            craft_ui::ComboBox::from_id_salt("num_style_select")
+                                                .selected_text(&card.numbering_style)
+                                                .width(100.0)
+                                                .show_ui(ui, |ui| {
+                                                    for ns in ["1, 2, 3...", "i, ii, iii...", "A, B, C...", "Tidak bernomor"] {
+                                                        if ui.selectable_label(card.numbering_style == ns, ns).clicked() {
+                                                            card.numbering_style = ns.into();
+                                                        }
+                                                    }
+                                                });
+                                        });
                                     }
                                 });
+                            } else {
+                                egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
+                                    ui.label(RichText::new(crate::i18n::tr(lang, "Card Scope:")).font(semibold(11.0)).color(t.text_strong));
+                                    ui.label(RichText::new("Kartu ini berstatus 'Objek Baru' (mengalir di halaman yang sama). Opsi penomoran seksi hanya berlaku untuk item yang berstatus 'Halaman Baru'.").font(FontId::proportional(11.0)).color(t.text_dim));
+                                    ui.add_space(4.0);
+                                    if ui.button(crate::i18n::tr(lang, "Ubah Menjadi Halaman Baru")).clicked() {
+                                        card.scope_new_page = true;
+                                        card.tag2 = "Halaman Baru".into();
+                                    }
+                                });
+                            }
+                        }
+                        CardEditTab::HeaderFooter => {
+                            // Section 5: Pengaturan Header & Footer (Header-Footer Setup for this publication page)
+                            if card.kind != CardKind::Cover {
+                                let card_page = card.page.max(1);
+                                egui::Frame::NONE
+                                    .fill(t.panel)
+                                    .stroke(Stroke::new(1.0, t.field_border))
+                                    .corner_radius(CornerRadius::same(t.radius))
+                                    .inner_margin(Margin::same(8))
+                                    .show(ui, |ui| {
+                                        ui.label(RichText::new(crate::i18n::tr(lang, "Header & Footer Settings:")).font(semibold(11.0)).color(t.text_strong));
+                                        ui.add_space(3.0);
 
-                                // Keep pubgen_st scope synchronized with card's page
-                                if pubgen_st.hf_scope == 3 {
-                                    pubgen_st.hf_scope_start = card_page;
-                                    pubgen_st.hf_scope_end = card_page;
-                                } else if pubgen_st.hf_scope == 4 {
-                                    pubgen_st.hf_scope_start = card_page;
-                                }
+                                        let ctx = ui.ctx().clone();
+                                        super::with_state(&ctx, |pubgen_st| {
+                                            ui.horizontal(|ui| {
+                                                ui.label(RichText::new(crate::i18n::tr(lang, "Apply Option:")).font(semibold(11.0)).color(t.text_strong));
+                                                let is_forward = card.hf_scope_forward;
+                                                if ui.selectable_label(!is_forward, crate::i18n::tr(lang, "Apply for this page only")).clicked() {
+                                                    card.hf_scope_forward = false;
+                                                    pubgen_st.hf_scope = 3;
+                                                    pubgen_st.hf_scope_start = card_page;
+                                                    pubgen_st.hf_scope_end = card_page;
+                                                }
+                                                if ui.selectable_label(is_forward, crate::i18n::tr(lang, "Apply from this page forward")).clicked() {
+                                                    card.hf_scope_forward = true;
+                                                    pubgen_st.hf_scope = 4;
+                                                    pubgen_st.hf_scope_start = card_page;
+                                                }
+                                            });
 
-                                ui.add_space(4.0);
-                                super::header_footer::card_header_footer_body_ui(app, ui, pubgen_st, t);
+                                            // Keep pubgen_st scope synchronized with card's page
+                                            if pubgen_st.hf_scope == 3 {
+                                                pubgen_st.hf_scope_start = card_page;
+                                                pubgen_st.hf_scope_end = card_page;
+                                            } else if pubgen_st.hf_scope == 4 {
+                                                pubgen_st.hf_scope_start = card_page;
+                                            }
 
-                                // Sync values back to card
-                                card.hf_enabled = true;
-                                card.hf_scope_forward = pubgen_st.hf_scope == 4;
-                                card.hf_style = pubgen_st.hf_style.clone();
-                                card.hf_sided = pubgen_st.hf_sided;
-                                card.hf_header_single = pubgen_st.hf_header_single.clone();
-                                card.hf_header_left = pubgen_st.hf_header_left.clone();
-                                card.hf_header_right = pubgen_st.hf_header_right.clone();
-                                card.hf_footer_single = pubgen_st.hf_footer_single.clone();
-                                card.hf_footer_left = pubgen_st.hf_footer_left.clone();
-                                card.hf_footer_right = pubgen_st.hf_footer_right.clone();
-                                card.hf_header_rule = pubgen_st.hf_header_rule;
-                                card.hf_footer_rule = pubgen_st.hf_footer_rule;
-                                card.hf_header_offset = pubgen_st.hf_header_offset;
-                                card.hf_footer_offset = pubgen_st.hf_footer_offset;
-                            });
-                        });
-                }
-            });
+                                            ui.add_space(4.0);
+                                            super::header_footer::card_header_footer_body_ui(app, ui, pubgen_st, t);
+
+                                            // Sync values back to card
+                                            card.hf_enabled = true;
+                                            card.hf_scope_forward = pubgen_st.hf_scope == 4;
+                                            card.hf_style = pubgen_st.hf_style.clone();
+                                            card.hf_sided = pubgen_st.hf_sided;
+                                            card.hf_header_single = pubgen_st.hf_header_single.clone();
+                                            card.hf_header_left = pubgen_st.hf_header_left.clone();
+                                            card.hf_header_right = pubgen_st.hf_header_right.clone();
+                                            card.hf_footer_single = pubgen_st.hf_footer_single.clone();
+                                            card.hf_footer_left = pubgen_st.hf_footer_left.clone();
+                                            card.hf_footer_right = pubgen_st.hf_footer_right.clone();
+                                            card.hf_header_rule = pubgen_st.hf_header_rule;
+                                            card.hf_footer_rule = pubgen_st.hf_footer_rule;
+                                            card.hf_header_offset = pubgen_st.hf_header_offset;
+                                            card.hf_footer_offset = pubgen_st.hf_footer_offset;
+                                        });
+                                    });
+                            }
+                        }
+                    }
+                });
 
             ui.separator();
 
@@ -5234,6 +5358,7 @@ mod tests {
 
         // 2. Non-cover card (e.g. card idx 1, Narrative):
         state.editing_card_idx = Some(1);
+        state.card_edit_tab = CardEditTab::HeaderFooter;
         let mut output2 = ctx.run_ui(Default::default(), |ctx| {
             render_card_edit_modal(&mut app, ctx, &mut state, &t, "en");
         });
@@ -5252,6 +5377,7 @@ mod tests {
         state.last_editing_card_idx = None;
         state.cards[1].hf_scope_forward = true;
         state.editing_card_idx = Some(1);
+        state.card_edit_tab = CardEditTab::HeaderFooter;
         let mut output3 = ctx.run_ui(Default::default(), |ctx| {
             render_card_edit_modal(&mut app, ctx, &mut state, &t, "en");
         });
