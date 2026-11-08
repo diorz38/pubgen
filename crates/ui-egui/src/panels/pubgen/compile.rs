@@ -20,7 +20,7 @@ use serde_json::Value;
 use super::{
     PubgenState, TOC_NARRATIVE_STYLE, TocPlan, apply_excel_cover, execute_convert_excel, execute_generate_back_cover, execute_generate_front_cover,
     execute_generate_inside_cover, execute_generate_pages, generate_toc, is_chart_type, is_divider_type, is_ulasan_type, load_card1_csv,
-    toc_kind_title, toc_story_page,
+    rebuild_all_tocs, toc_kind_title, toc_story_page,
 };
 use crate::DesignApp;
 use crate::theme::Tokens;
@@ -1833,6 +1833,14 @@ pub(crate) fn compile_project(app: &mut DesignApp, p: &Value) -> Result<Value, S
     Ok(serde_json::json!({"started": true, "path": path}))
 }
 
+/// Rebuild all tables of contents in the active document.
+pub(crate) fn rebuild_project_tocs(app: &mut DesignApp, _p: &Value) -> Result<Value, String> {
+    let state_id = egui::Id::unique(super::PANEL_ID);
+    let st = app.egui_ctx.as_ref().and_then(|ctx| ctx.data(|d| d.get_temp::<PubgenState>(state_id))).unwrap_or_default();
+    let msg = rebuild_all_tocs(app, &st)?;
+    Ok(serde_json::json!({"rebuilt": true, "message": msg}))
+}
+
 /// Create a blank new publication project workspace tab.
 pub(crate) fn new_project(app: &mut DesignApp, _p: &Value) -> Result<Value, String> {
     if let Some(ctx) = app.egui_ctx.clone() {
@@ -2661,6 +2669,7 @@ pub(crate) fn compile_card_ui(app: &mut DesignApp, ui: &mut Ui, st: &mut PubgenS
     }
 
     let running = st.compile_job.is_some();
+    let has_doc = app.session.active().is_some();
     ui.horizontal(|ui| {
         let compile = ui.add_enabled(!running && !path.is_empty(), egui::Button::new(crate::i18n::tr(&lang, "Compile")));
         if compile.clicked() {
@@ -2671,6 +2680,22 @@ pub(crate) fn compile_card_ui(app: &mut DesignApp, ui: &mut Ui, st: &mut PubgenS
             && let Some(job) = &st.compile_job
         {
             job.cancel();
+        }
+        if !running && has_doc {
+            if ui
+                .button(crate::i18n::tr(&lang, "Rebuild TOC"))
+                .on_hover_text(crate::i18n::tr(&lang, "Rebuild all tables of contents in the active document without recompiling chapters"))
+                .clicked()
+            {
+                match rebuild_all_tocs(app, st) {
+                    Ok(msg) if !msg.is_empty() => st.compile_status = Some((msg, true)),
+                    Ok(_) => {
+                        st.compile_status =
+                            Some((crate::i18n::tr(&lang, "No Table of Contents found to rebuild in the active document").to_string(), false))
+                    }
+                    Err(e) => st.compile_status = Some((e, false)),
+                }
+            }
         }
     });
 
@@ -3658,6 +3683,14 @@ Grafik,01.02,Kepadatan,
         for key in ["path", "sync", "pdf"] {
             assert!(params.contains(key), "params doc names `{key}`: {params}");
         }
+    }
+
+    #[test]
+    fn the_rebuild_toc_command_is_registered() {
+        let entry = crate::menus::UI_COMMANDS.iter().find(|c| c.0 == "pubgen.rebuildToc");
+        let (_, label, shortcut, _) = entry.expect("pubgen.rebuildToc must be a UI command");
+        assert_eq!(*label, "Rebuild Table of Contents");
+        assert_eq!(*shortcut, None);
     }
 
     #[test]

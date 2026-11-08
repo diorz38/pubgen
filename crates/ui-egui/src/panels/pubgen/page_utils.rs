@@ -36,13 +36,7 @@ pub fn detect_document_margins(doc: &designcraft_doc::Document) -> designcraft_d
     }
 
     // 3. Look for any parent page with valid margins
-    if let Some(m) = doc
-        .parents
-        .iter()
-        .flat_map(|sp| &sp.pages)
-        .find(|pg| pg.margins.top > 0.0 && pg.margins.bottom > 0.0)
-        .map(|pg| pg.margins)
-    {
+    if let Some(m) = doc.parents.iter().flat_map(|sp| &sp.pages).find(|pg| pg.margins.top > 0.0 && pg.margins.bottom > 0.0).map(|pg| pg.margins) {
         return m;
     }
 

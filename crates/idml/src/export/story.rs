@@ -1,8 +1,8 @@
 use super::common::{anchor_self, bool_s, change_type, topic_self, uid, with_props, xref_format_self};
 use super::graphics::graphic_layer_attribute_name;
 use super::{
-    BTreeMap, CHAR_BUILTINS, CharFormat, El, Ex, ListType, NO_CHAR_ID, Node, PARA_BUILTINS, ParaAttrs, ParaFormat, Story, names, num,
-    st, toc_style_id,
+    BTreeMap, CHAR_BUILTINS, CharFormat, El, Ex, ListType, NO_CHAR_ID, Node, PARA_BUILTINS, ParaAttrs, ParaFormat, Story, names, num, st,
+    toc_style_id,
 };
 
 impl<'a> Ex<'a> {

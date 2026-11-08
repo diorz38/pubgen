@@ -488,7 +488,8 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
                         egui::WidgetInfo::selected(egui::Role::Button, true, selected, format!("Page {}", app.session.page_label(abs)))
                     });
                     let tint = if selected { SELECTED_TINT } else { Color32::WHITE };
-                    match thumbnails.then(|| thumb(app, ui.ctx(), ThumbOf::Page(abs), th)).flatten() {
+                    let visible = ui.is_rect_visible(pr);
+                    match (thumbnails && visible).then(|| thumb(app, ui.ctx(), ThumbOf::Page(abs), th)).flatten() {
                         Some(tex) => {
                             ui.painter().image(tex.id(), pr, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), tint);
                         }

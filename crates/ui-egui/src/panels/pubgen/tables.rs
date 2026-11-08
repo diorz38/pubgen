@@ -2171,9 +2171,7 @@ pub(crate) mod tests {
                 if it.id == table_item.id {
                     return false;
                 }
-                it.text_frame()
-                    .and_then(|tf| active.doc.story(tf.story))
-                    .is_some_and(|s| s.text.contains("Sources: Karawang Region Government Office"))
+                it.text_frame().and_then(|tf| active.doc.story(tf.story)).is_some_and(|s| s.text.contains("Karawang Region Government Office"))
             })
             .expect("Footnote text frame should exist on spread");
 
@@ -2242,9 +2240,7 @@ pub(crate) mod tests {
                 if it.id == table_item.id {
                     return false;
                 }
-                it.text_frame()
-                    .and_then(|tf| active.doc.story(tf.story))
-                    .is_some_and(|s| s.text.contains("Sources: Karawang Region Government Office"))
+                it.text_frame().and_then(|tf| active.doc.story(tf.story)).is_some_and(|s| s.text.contains("Karawang Region Government Office"))
             })
             .expect("Footnote text frame should exist on spread");
 

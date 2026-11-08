@@ -731,7 +731,7 @@ Caf\'e9 \u8364? price\tab tab\line next\par
         assert!(sample.is_file());
         let bytes = std::fs::read(sample).unwrap();
         let imp = crate::import("G02.rtf", &bytes).unwrap();
-        eprintln!("SINGLE_LANG G02 imported text starts with: {:?}", &imp.story.text.chars().take(200).collect::<String>());
+        eprintln!("SINGLE_LANG G02 imported text starts with: {:?}", imp.story.text.chars().take(200).collect::<String>());
         assert!(!imp.story.text.contains("Toc234493584"), "G02 should not contain Toc234493584 bookmark debris!");
     }
 

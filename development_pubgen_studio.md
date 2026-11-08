@@ -81,42 +81,44 @@ pubgen/
 
 ## 4. Cara Menjalankan dalam Mode Development (Dev Mode)
 
-Pastikan Anda berada di direktori `e:\Github\pubgen`:
+> **Catatan Package Name:** Nama paket crate untuk Pubgen Studio di dalam workspace adalah **`pgs`** (didefinisikan di `apps/pubgen-studio/Cargo.toml`). Binary yang dihasilkan bernama `pgs.exe`.
+
+Pastikan Anda berada di direktori root repository (`pubgen` / `pubgen-extra-chart`):
 
 ### A. Menjalankan Mode Standar (Orchestrator Kosong)
 ```powershell
-cargo run -p pubgen-studio
+cargo run -p pgs
 ```
 
 ### B. Menjalankan dan Membuka Proyek `.pubgen`
 Aplikasi akan langsung membuka proyek dan masuk ke **📊 Orchestrator Mode**:
 ```powershell
-cargo run -p pubgen-studio -- "path/ke/proyek.pubgen"
+cargo run -p pgs -- "path/ke/proyek.pubgen"
 ```
 
 ### C. Menjalankan dan Membuka Dokumen Layout `.designcraft`
 Aplikasi akan langsung memuat dokumen ke kanvas dan masuk ke **🎨 DesignCraft Mode**:
 ```powershell
-cargo run -p pubgen-studio -- "path/ke/dokumen.designcraft"
+cargo run -p pgs -- "path/ke/dokumen.designcraft"
 ```
 
 ### D. Menjalankan dengan Logging Debug Aktif
 Membantu melihat pesan error internal, trace rendering wgpu, dan proses compiler:
 ```powershell
 $env:RUST_LOG="info"
-cargo run -p pubgen-studio
+cargo run -p pgs
 ```
 
 ### E. Menjalankan Unit Test
 ```powershell
-cargo test -p pubgen-studio
+cargo test -p pgs
 ```
 
 ### F. Build Binary Release
 ```powershell
-cargo build --release -p pubgen-studio
+cargo build --release -p pgs
 ```
-Binary hasil kompilasi akan berada di `target/release/pubgen-studio.exe`.
+Binary hasil kompilasi akan berada di `target/release/pgs.exe`.
 
 ---
 

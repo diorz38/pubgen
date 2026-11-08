@@ -133,6 +133,13 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ),
     #[cfg(feature = "pubgen")]
     (
+        "pubgen.rebuildToc",
+        "Rebuild Table of Contents",
+        None,
+        "{} — rebuild all tables of contents in the active document without recompiling chapters",
+    ),
+    #[cfg(feature = "pubgen")]
+    (
         "pubgen.chartDialog",
         "Chart Options…",
         None,

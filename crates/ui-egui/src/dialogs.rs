@@ -3022,8 +3022,8 @@ pub fn show(app: &mut DesignApp, ctx: &egui::Context) {
         let available = (ctx.content_rect().size() - frame_margin - egui::vec2(16.0, 16.0)).max(egui::Vec2::splat(1.0));
         let preferred_width: f32 = match d.id.as_str() {
             "alert" => 440.0,
-            "closeDocument" | "closeWorkspace" | "updateLink" | "deletePages" | "newWorkspace" | "pagesPanelOptions" | "parentOptions" | "insertTable"
-            | "convertTableToText" => 380.0,
+            "closeDocument" | "closeWorkspace" | "updateLink" | "deletePages" | "newWorkspace" | "pagesPanelOptions" | "parentOptions"
+            | "insertTable" | "convertTableToText" => 380.0,
             "insertPages" => 440.0,
             "convertTextToTable" => 420.0,
             "newDocument" => 960.0,

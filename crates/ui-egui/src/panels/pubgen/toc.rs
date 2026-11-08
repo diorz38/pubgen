@@ -43,9 +43,9 @@ pub fn toc_kind_title(kind: usize, bilingual: bool) -> Option<&'static str> {
 /// The TOC style a stored table of contents was generated with: its entry's `pageTitle` filter.
 pub fn toc_kind_of_words(words: &[String]) -> usize {
     let has = |w: &str| words.iter().any(|x| x.eq_ignore_ascii_case(w));
-    if has("bab") {
+    if has("bab") || has("chapter") {
         3
-    } else if has("grafik") || has("chart") {
+    } else if has("grafik") || has("chart") || has("gambar") || has("figure") {
         2
     } else if has("tabel") || has("table") {
         1
@@ -212,11 +212,112 @@ pub(crate) fn is_toc_header_line(line: &str) -> bool {
     ["Tabel\t", "Table\t", "Grafik\t", "Chart\t"].iter().any(|p| line.starts_with(p))
 }
 
+/// Normalize a dot-separated TOC number (e.g. "02" -> "2", "02.01" -> "2.1", "02.01.01" -> "2.1.1").
+pub fn normalize_toc_number(num_str: &str) -> String {
+    let clean = num_str.trim().trim_end_matches('.');
+    let parts: Vec<&str> = clean.split('.').collect();
+    if parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit())) {
+        let norm_parts: Vec<String> = parts
+            .iter()
+            .map(|p| {
+                let trimmed = p.trim_start_matches('0');
+                if trimmed.is_empty() { "0".to_string() } else { trimmed.to_string() }
+            })
+            .collect();
+        norm_parts.join(".")
+    } else {
+        clean.to_string()
+    }
+}
+
+pub(crate) fn strip_section_keywords(s: &str) -> &str {
+    let t = s.trim();
+    for kw in &["tabel", "table", "bab", "chapter", "bagian", "section", "subbab", "sub-bab", "subtitle", "subjudul"] {
+        if let Some(rest) = t.strip_prefix(kw) {
+            if rest.is_empty() || rest.starts_with(char::is_whitespace) || rest.starts_with(':') || rest.starts_with('.') {
+                return rest.trim_start_matches(|c: char| c.is_whitespace() || c == ':' || c == '.');
+            }
+        }
+        if t.len() >= kw.len() && t[..kw.len()].eq_ignore_ascii_case(kw) {
+            let rest = &t[kw.len()..];
+            if rest.is_empty() || rest.starts_with(char::is_whitespace) || rest.starts_with(':') || rest.starts_with('.') {
+                return rest.trim_start_matches(|c: char| c.is_whitespace() || c == ':' || c == '.');
+            }
+        }
+    }
+    t
+}
+
+/// Format Chapter and Subtitle section headers for Table of Contents, pairing bilingual text
+/// (e.g. "Tabel 2 PEMERINTAHAN" + "Table 2 GOVERNMENT" -> "2\tPEMERINTAHAN/GOVERNMENT").
+pub fn format_toc_section_header(id_raw: &str, en_raw_opt: Option<&str>) -> Option<String> {
+    let id_trimmed = id_raw.trim();
+    if id_trimmed.is_empty() {
+        return None;
+    }
+
+    let id_after_kw = strip_section_keywords(id_trimmed);
+
+    let (num, id_text) = if let Some((first, rest)) = id_after_kw.split_once(char::is_whitespace) {
+        let first_clean = first.trim_end_matches(['.', ':', ',']);
+        if first_clean.chars().all(|c| c.is_ascii_digit() || c == '.') && first_clean.chars().any(|c| c.is_ascii_digit()) {
+            (normalize_toc_number(first_clean), rest.trim())
+        } else {
+            (String::new(), id_after_kw)
+        }
+    } else {
+        let first_clean = id_after_kw.trim_end_matches(['.', ':', ',']);
+        if first_clean.chars().all(|c| c.is_ascii_digit() || c == '.') && first_clean.chars().any(|c| c.is_ascii_digit()) {
+            (normalize_toc_number(first_clean), "")
+        } else {
+            (String::new(), id_after_kw)
+        }
+    };
+
+    let en_text = if let Some(en_raw) = en_raw_opt {
+        let en_trimmed = en_raw.trim();
+        if en_trimmed.is_empty() {
+            String::new()
+        } else {
+            let en_after_kw = strip_section_keywords(en_trimmed);
+            if let Some((first, rest)) = en_after_kw.split_once(char::is_whitespace) {
+                let first_clean = first.trim_end_matches(['.', ':', ',']);
+                if first_clean.chars().all(|c| c.is_ascii_digit() || c == '.') && first_clean.chars().any(|c| c.is_ascii_digit()) {
+                    rest.trim().to_string()
+                } else {
+                    en_after_kw.to_string()
+                }
+            } else {
+                let first_clean = en_after_kw.trim_end_matches(['.', ':', ',']);
+                if first_clean.chars().all(|c| c.is_ascii_digit() || c == '.') && first_clean.chars().any(|c| c.is_ascii_digit()) {
+                    String::new()
+                } else {
+                    en_after_kw.to_string()
+                }
+            }
+        }
+    } else {
+        String::new()
+    };
+
+    let combined_text = if !id_text.is_empty() && !en_text.is_empty() {
+        format!("{id_text}/{en_text}")
+    } else if !id_text.is_empty() {
+        id_text.to_string()
+    } else if !en_text.is_empty() {
+        en_text
+    } else {
+        return None;
+    };
+    let combined_text = if !num.is_empty() && !num.contains('.') { combined_text.to_uppercase() } else { combined_text };
+
+    if !num.is_empty() { Some(format!("{num}\t{combined_text}")) } else { Some(format!("\t{combined_text}")) }
+}
+
 /// Detect whether a record represents a Section header (e.g. "Bab 4", "4.3 Perumahan", or "Section 2")
 /// which in TablePage layout does not receive a page number or dot leaders.
-/// Lists of tables (kind 1) or charts (kind 2) never contain section headers.
 pub(crate) fn is_section_header(toc_kind: usize, r_type: &str, num_str: &str, title: &str) -> bool {
-    if toc_kind != 0 {
+    if toc_kind != 0 && toc_kind != 1 {
         return false;
     }
     let t_lower = r_type.trim().to_lowercase();
@@ -496,6 +597,21 @@ pub(crate) fn enrich_toc_story(
             c_idx += 1;
         }
 
+        let mut last_emitted_chapter: Option<String> = None;
+        let mut last_emitted_section: Option<String> = None;
+
+        let file_col_idx = st.card1_headers.iter().position(|h| h.eq_ignore_ascii_case("file")).unwrap_or(3);
+        let chapter_col_idx = st.card1_headers.iter().position(|h| h.eq_ignore_ascii_case("chapter") || h.eq_ignore_ascii_case("chapter_title"));
+        let chapter_en_col_idx =
+            st.card1_headers.iter().position(|h| h.eq_ignore_ascii_case("chapter_en") || h.eq_ignore_ascii_case("chapter_title_en"));
+        let section_col_idx = st
+            .card1_headers
+            .iter()
+            .position(|h| h.eq_ignore_ascii_case("section") || h.eq_ignore_ascii_case("section_title") || h.eq_ignore_ascii_case("subtitle"));
+        let section_en_col_idx = st.card1_headers.iter().position(|h| {
+            h.eq_ignore_ascii_case("section_en") || h.eq_ignore_ascii_case("section_title_en") || h.eq_ignore_ascii_case("subtitle_en")
+        });
+
         for (raw_title, page_part) in coalesced {
             // Check if this line is an existing TOC self-entry
             let is_self_entry = raw_title.eq_ignore_ascii_case("contents")
@@ -520,6 +636,7 @@ pub(crate) fn enrich_toc_story(
             let mut matched_num = String::new();
             let mut clean_title = raw_title.clone();
             let mut matched_record = false;
+            let mut matched_row: Option<&Vec<String>> = None;
 
             // 1. Try matching against records in st.card1_records
             for (r_idx, row) in st.card1_records.iter().enumerate() {
@@ -548,7 +665,33 @@ pub(crate) fn enrich_toc_story(
                     if let Some(used) = used_records.get_mut(r_idx) {
                         *used = true;
                     }
+                    matched_row = Some(row);
                     break;
+                }
+            }
+
+            // Rule for TOC Paragraph (Daftar Isi): exclude table and chart pages/titles completely!
+            if plan.kind() == 3 {
+                let t_lower = raw_title.trim().to_lowercase();
+                if t_lower.starts_with("tabel")
+                    || t_lower.starts_with("table")
+                    || t_lower.starts_with("grafik")
+                    || t_lower.starts_with("chart")
+                    || t_lower.starts_with("gambar")
+                    || t_lower.starts_with("peta")
+                    || t_lower.contains("subtitle")
+                {
+                    changed = true;
+                    continue;
+                }
+            }
+
+            // Exception rule for TOC Table: if XLSX sheet name has suffix "L", exclude that page from TOC
+            if is_table_page || plan.kind() == 1 {
+                let r_file = matched_row.and_then(|r| r.get(file_col_idx)).map(String::as_str).unwrap_or("");
+                if !r_file.is_empty() && excel::is_table_sheet_landscape(r_file) {
+                    changed = true;
+                    continue;
                 }
             }
 
@@ -614,10 +757,44 @@ pub(crate) fn enrich_toc_story(
                     let entry = if !clean_num.is_empty() { format!("{clean_num}\t{clean_title}") } else { clean_title };
                     new_lines.push(entry);
                 } else {
+                    if plan.kind() == 1 || is_table_page {
+                        if let Some(row) = matched_row {
+                            let ch_opt = chapter_col_idx.and_then(|idx| row.get(idx)).map(String::as_str).filter(|s| !s.trim().is_empty());
+                            let ch_en_opt = chapter_en_col_idx.and_then(|idx| row.get(idx)).map(String::as_str).filter(|s| !s.trim().is_empty());
+                            if let Some(ch_str) = ch_opt {
+                                if let Some(ch_header) = format_toc_section_header(ch_str, ch_en_opt) {
+                                    if last_emitted_chapter.as_deref() != Some(&ch_header) {
+                                        new_lines.push(ch_header.clone());
+                                        last_emitted_chapter = Some(ch_header);
+                                        last_emitted_section = None;
+                                    }
+                                }
+                            }
+
+                            let sec_opt = section_col_idx.and_then(|idx| row.get(idx)).map(String::as_str).filter(|s| !s.trim().is_empty());
+                            let sec_en_opt = section_en_col_idx.and_then(|idx| row.get(idx)).map(String::as_str).filter(|s| !s.trim().is_empty());
+                            if let Some(sec_str) = sec_opt {
+                                if let Some(sec_header) = format_toc_section_header(sec_str, sec_en_opt) {
+                                    if last_emitted_section.as_deref() != Some(&sec_header) {
+                                        new_lines.push(sec_header.clone());
+                                        last_emitted_section = Some(sec_header);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let has_meta =
+                        chapter_col_idx.and_then(|idx| matched_row.and_then(|r| r.get(idx))).map(|s| !s.trim().is_empty()).unwrap_or(false)
+                            || section_col_idx.and_then(|idx| matched_row.and_then(|r| r.get(idx))).map(|s| !s.trim().is_empty()).unwrap_or(false);
+
+                    let display_num =
+                        if clean_num.split('.').count() >= 3 || has_meta { normalize_toc_number(clean_num) } else { clean_num.to_string() };
+
                     let wrapped =
                         if plan.hanging { wrap_tablepage_title(&clean_title, width, hanging_indent, page_part.as_deref()) } else { clean_title };
                     let entry = if let Some(p_str) = &page_part {
-                        if !clean_num.is_empty() { format!("{clean_num}\t{wrapped}\t{p_str}") } else { format!("{wrapped}\t{p_str}") }
+                        if !display_num.is_empty() { format!("{display_num}\t{wrapped}\t{p_str}") } else { format!("{wrapped}\t{p_str}") }
                     } else {
                         wrapped
                     };
@@ -626,6 +803,35 @@ pub(crate) fn enrich_toc_story(
                 changed = true;
             } else {
                 // Standard mode
+                if plan.kind() == 1 {
+                    if let Some(row) = matched_row {
+                        let ch_opt = chapter_col_idx.and_then(|idx| row.get(idx)).map(String::as_str).filter(|s| !s.trim().is_empty());
+                        let ch_en_opt = chapter_en_col_idx.and_then(|idx| row.get(idx)).map(String::as_str).filter(|s| !s.trim().is_empty());
+                        if let Some(ch_str) = ch_opt {
+                            if let Some(ch_header) = format_toc_section_header(ch_str, ch_en_opt) {
+                                let std_header = ch_header.replace('\t', " ");
+                                if last_emitted_chapter.as_deref() != Some(&std_header) {
+                                    new_lines.push(std_header.clone());
+                                    last_emitted_chapter = Some(std_header);
+                                    last_emitted_section = None;
+                                }
+                            }
+                        }
+
+                        let sec_opt = section_col_idx.and_then(|idx| row.get(idx)).map(String::as_str).filter(|s| !s.trim().is_empty());
+                        let sec_en_opt = section_en_col_idx.and_then(|idx| row.get(idx)).map(String::as_str).filter(|s| !s.trim().is_empty());
+                        if let Some(sec_str) = sec_opt {
+                            if let Some(sec_header) = format_toc_section_header(sec_str, sec_en_opt) {
+                                let std_header = sec_header.replace('\t', " ");
+                                if last_emitted_section.as_deref() != Some(&std_header) {
+                                    new_lines.push(std_header.clone());
+                                    last_emitted_section = Some(std_header);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 let mut prefix_opt = None;
                 let expected_prefix =
                     [&matched_type, &matched_num].into_iter().filter(|s| !s.is_empty()).map(|s| s.as_str()).collect::<Vec<_>>().join(" ");
@@ -1146,6 +1352,28 @@ pub(crate) fn apply_toc_post_process(
                             f.over.font_style = Some("Italic".to_string());
                         });
                     }
+                } else if style_name == "TOC Section Header" {
+                    if let Some(slash_idx) = story.text[r.clone()].find('/') {
+                        let en_start = r.start + slash_idx;
+                        let en_end = r.end;
+                        if en_start < en_end {
+                            story.format_chars(en_start..en_end, |f| {
+                                f.style = "TOC English".to_string();
+                                f.over.font_style = Some("Bold Italic".to_string());
+                            });
+                        }
+                    }
+                } else if style_name == entry_style
+                    && let Some(pos) = story.text[r.clone()].find(designcraft_doc::story::FORCED_LINE_BREAK)
+                {
+                    let second_line_start = r.start + pos + designcraft_doc::story::FORCED_LINE_BREAK.len_utf8();
+                    let second_line_end = r.end;
+                    if second_line_start < second_line_end {
+                        story.format_chars(second_line_start..second_line_end, |f| {
+                            f.style = "TOC English".to_string();
+                            f.over.font_style = Some("Italic".to_string());
+                        });
+                    }
                 }
             }
         }
@@ -1400,8 +1628,33 @@ pub(crate) fn document_uses_style(app: &DesignApp, style: &str) -> bool {
 }
 
 pub(crate) fn generate_toc(app: &mut DesignApp, st: &PubgenState, page: usize, plan: &TocPlan, replace: bool) -> Result<(u64, u64), String> {
+    // Ensure the TOC page carries document margins (BPS A4 facing margins), rather than
+    // uninitialized or 0-pt margins inherited from an adjacent full-bleed cover/divider page.
+    let doc_m = {
+        let active = app.session.active().ok_or("No active document")?;
+        super::detect_document_margins(&active.doc)
+    };
+    let _ = app.session.edit(|doc, _| {
+        if let Some((si, pi)) = doc.page_loc(page)
+            && let Some(sp) = doc.spreads.get_mut(si)
+        {
+            let sp = std::sync::Arc::make_mut(sp);
+            if let Some(pg) = sp.pages.get_mut(pi) {
+                pg.margins = doc_m;
+                pg.local_margins = true;
+            }
+            sp.relayout();
+        }
+        Ok(serde_json::Value::Null)
+    });
+
     let width = page_margin_width(app, page)?;
     let hanging_indent = toc_hanging_indent(st, plan.layout);
+
+    let margin_rect = app.session.active().and_then(|a| {
+        let (si, pi) = a.doc.page_loc(page)?;
+        Some(a.doc.spreads.get(si)?.pages.get(pi)?.margin_rect())
+    });
 
     // A document whose pages were made before the narrative style existed still lists its
     // chapters, rather than coming up empty until its pages are generated again.
@@ -1414,16 +1667,18 @@ pub(crate) fn generate_toc(app: &mut DesignApp, st: &PubgenState, page: usize, p
     }
     ensure_toc_entry_style(app, width, plan.hanging, hanging_indent, plan.layout, plan.entry_prefix());
 
-    let res = app.run(
-        "toc.generate",
-        json!({
-            "page": page + 1,
-            "title": plan.title_or_contents(),
-            "entries": plan.entries_json(),
-            "replace": replace,
-            "autoflow": true
-        }),
-    )?;
+    let mut gen_params = json!({
+        "page": page + 1,
+        "title": plan.title_or_contents(),
+        "entries": plan.entries_json(),
+        "replace": replace,
+        "autoflow": true
+    });
+    if let Some(m) = margin_rect {
+        gen_params["rect"] = json!([m.x0, m.y0, m.x1, m.y1]);
+    }
+
+    let res = app.run("toc.generate", gen_params)?;
 
     let count = res.get("entries").and_then(Value::as_u64).unwrap_or(0);
     let pages_added = res.get("pagesAdded").and_then(Value::as_u64).unwrap_or(0);
@@ -2339,6 +2594,143 @@ pub(crate) mod tests {
         assert!(text.contains("4.3.1\tBanyaknya Desa Menurut Penerangan Jalan\t3"), "Table entry must have page number: {text}");
 
         // 4. Styles
+        assert!(active.doc.styles.para("TOC Section Header").is_some());
+    }
+
+    #[test]
+    fn test_format_toc_section_header_and_normalize_number() {
+        assert_eq!(normalize_toc_number("02"), "2");
+        assert_eq!(normalize_toc_number("02.01"), "2.1");
+        assert_eq!(normalize_toc_number("02.01.01"), "2.1.1");
+        assert_eq!(normalize_toc_number("2.1.1"), "2.1.1");
+
+        let ch = format_toc_section_header("Tabel 2 PEMERINTAHAN", Some("Table 2 GOVERNMENT"));
+        assert_eq!(ch.as_deref(), Some("2\tPEMERINTAHAN/GOVERNMENT"));
+
+        let sec = format_toc_section_header("Tabel 02.01 Wilayah Administratif", Some("Table 02.01 Administrative Area"));
+        assert_eq!(sec.as_deref(), Some("2.1\tWilayah Administratif/Administrative Area"));
+
+        let empty = format_toc_section_header("", None);
+        assert_eq!(empty, None);
+
+        let id_only = format_toc_section_header("Tabel 2 PEMERINTAHAN", None);
+        assert_eq!(id_only.as_deref(), Some("2\tPEMERINTAHAN"));
+    }
+
+    #[test]
+    fn test_toc_table_exclude_landscape_sheet_and_auto_section_headers() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+
+        let mut st = PubgenState {
+            card1_headers: vec![
+                "type".into(),
+                "number".into(),
+                "title".into(),
+                "file".into(),
+                "chapter".into(),
+                "chapter_en".into(),
+                "section".into(),
+                "section_en".into(),
+            ],
+            card1_records: vec![
+                // 1. Table 02.01.01 in Chapter 2, Section 2.1
+                vec![
+                    "Tabel".into(),
+                    "02.01.01".into(),
+                    "Jumlah Rukun Warga (RW) dan Rukun Tetangga (RT)".into(),
+                    "02_01_01".into(),
+                    "Tabel 2 PEMERINTAHAN".into(),
+                    "Table 2 GOVERNMENT".into(),
+                    "Tabel 02.01 Wilayah Administratif".into(),
+                    "Table 02.01 Administrative Area".into(),
+                ],
+                // 2. Landscape continuation sheet (suffix "L") -> must be excluded from TOC Table!
+                vec![
+                    "Tabel".into(),
+                    "02.01.01".into(),
+                    "Jumlah Rukun Warga (RW) Lanjutan".into(),
+                    "02_01_01_L".into(),
+                    "Tabel 2 PEMERINTAHAN".into(),
+                    "Table 2 GOVERNMENT".into(),
+                    "Tabel 02.01 Wilayah Administratif".into(),
+                    "Table 02.01 Administrative Area".into(),
+                ],
+                // 3. Table 02.01.02 in same Chapter 2, Section 2.1 -> should NOT repeat 2 or 2.1
+                vec![
+                    "Tabel".into(),
+                    "02.01.02".into(),
+                    "Luas Wilayah Menurut Desa".into(),
+                    "02_01_02".into(),
+                    "Tabel 2 PEMERINTAHAN".into(),
+                    "Table 2 GOVERNMENT".into(),
+                    "Tabel 02.01 Wilayah Administratif".into(),
+                    "Table 02.01 Administrative Area".into(),
+                ],
+                // 4. Table 02.02.01 in same Chapter 2, NEW Section 2.2 -> should emit 2.2 but not 2
+                vec![
+                    "Tabel".into(),
+                    "02.02.01".into(),
+                    "Jumlah Pegawai Negeri Sipil".into(),
+                    "02_02_01".into(),
+                    "Tabel 2 PEMERINTAHAN".into(),
+                    "Table 2 GOVERNMENT".into(),
+                    "Tabel 02.02 Sumber Daya Manusia".into(),
+                    "Table 02.02 Human Resources".into(),
+                ],
+                // 5. Table 03.01 without chapter or section metadata -> no extra header rows
+                vec!["Tabel".into(), "03.01".into(), "Populasi Ternak".into(), "03_01".into(), "".into(), "".into(), "".into(), "".into()],
+            ],
+            toc_kind: 1, // TOC Table
+            toc_style: "TOC Entry".into(),
+            toc_title: "Daftar Tabel".into(),
+            toc_layout_style: 1, // TablePage mode
+            ..Default::default()
+        };
+
+        // Generate pages
+        execute_generate_pages(&mut app, &st).unwrap();
+
+        // Insert blank page for TOC at page 0
+        app.run("layout.pages.insert", json!({"count": 1})).unwrap();
+
+        let res = execute_add_toc(&mut app, &mut st);
+        assert!(res.is_ok(), "execute_add_toc should succeed: {res:?}");
+
+        let active = app.session.active().unwrap();
+        let toc = active.doc.tocs.last().unwrap();
+        let story = active.doc.story(toc.story).unwrap();
+        let text = &story.text;
+
+        // 1. Title and header line
+        assert!(text.contains("Daftar Tabel"), "TOC must contain title");
+        assert!(text.contains("Tabel\thalaman"), "TOC must contain TablePage header line");
+
+        // 2. Chapter header 2 without page number
+        assert!(text.contains("2\tPEMERINTAHAN/GOVERNMENT\n"), "TOC must contain Chapter 2 header without page number: {text}");
+
+        // 3. Section header 2.1 without page number
+        assert!(text.contains("2.1\tWilayah Administratif/Administrative Area\n"), "TOC must contain Section 2.1 header without page number: {text}");
+
+        // 4. Table 2.1.1 with page number
+        assert!(text.contains("2.1.1\tJumlah Rukun Warga (RW) dan Rukun Tetangga (RT)\t"), "Table 2.1.1 must appear with page number: {text}");
+
+        // 5. Landscape continuation sheet 02_01_01_L must be EXCLUDED!
+        assert!(!text.contains("Jumlah Rukun Warga (RW) Lanjutan"), "Landscape continuation sheet must be excluded from TOC Table: {text}");
+
+        // 6. Table 2.1.2 appears under 2.1 without duplicating Chapter 2 or Section 2.1
+        assert_eq!(text.matches("2\tPEMERINTAHAN/GOVERNMENT").count(), 1, "Chapter 2 must appear only once");
+        assert_eq!(text.matches("2.1\tWilayah Administratif/Administrative Area").count(), 1, "Section 2.1 must appear only once");
+        assert!(text.contains("2.1.2\tLuas Wilayah Menurut Desa\t"), "Table 2.1.2 must appear with page number: {text}");
+
+        // 7. Section header 2.2 without page number
+        assert!(text.contains("2.2\tSumber Daya Manusia/Human Resources\n"), "TOC must contain Section 2.2 header: {text}");
+        assert!(text.contains("2.2.1\tJumlah Pegawai Negeri Sipil\t"), "Table 2.2.1 must appear with page number: {text}");
+
+        // 8. Table 03.01 appears with its own number, no extra header
+        assert!(text.contains("03.01\tPopulasi Ternak\t"), "Table 03.01 must appear without extra section header: {text}");
+
+        // 9. TOC Section Header style was created and used
         assert!(active.doc.styles.para("TOC Section Header").is_some());
     }
 

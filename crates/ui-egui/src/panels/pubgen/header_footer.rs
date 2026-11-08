@@ -73,16 +73,11 @@ pub fn resolve_dda_footer_lines(st: &PubgenState) -> (String, String) {
         (st.cover_title.as_str(), st.cover_title2.as_str(), st.cover_title_en.as_str(), st.cover_year.as_str(), "", "")
     };
 
-    let clean_single_line = |s: &str| -> String {
-        s.lines().next().unwrap_or("").trim().to_string()
-    };
+    let clean_single_line = |s: &str| -> String { s.lines().next().unwrap_or("").trim().to_string() };
 
     let title1 = clean_single_line(raw_title);
-    let title2 = if raw_title2.contains('\n') || raw_title2.to_lowercase().contains("statistik") {
-        String::new()
-    } else {
-        clean_single_line(raw_title2)
-    };
+    let title2 =
+        if raw_title2.contains('\n') || raw_title2.to_lowercase().contains("statistik") { String::new() } else { clean_single_line(raw_title2) };
     let title_en = clean_single_line(raw_title_en);
 
     // Line 1: Indonesian Title
