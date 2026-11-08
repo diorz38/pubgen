@@ -308,11 +308,12 @@ mod tests {
 
     #[test]
     fn empty_or_whitespace_glossary_terms_are_ignored() {
-        // Before the guard these hung: a zero-length match at a non-word char
-        // pushed "[[n]]" forever without advancing.
+        // Before the guard the empty term matched at position 0 (first char is
+        // non-word) with length 0, so `i` never advanced and mask() looped
+        // forever pushing "[[n]]".
         let g = vec![("".into(), "X".into()), ("  ".into(), "Y".into())];
-        let m = mask("Kecamatan Karawang", &g);
-        assert_eq!(m.text, "Kecamatan Karawang");
+        let m = mask("— Kecamatan", &g);
+        assert_eq!(m.text, "— Kecamatan");
         assert!(m.tokens.is_empty());
     }
 
