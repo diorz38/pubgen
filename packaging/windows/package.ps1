@@ -63,14 +63,14 @@ if (-not $SkipBuild) {
   [Environment]::SetEnvironmentVariable($flagVar, '-C target-feature=+crt-static')
   # Fail the build (rather than warn) if the icon/VERSIONINFO can't be embedded.
   $env:DESIGNCRAFT_REQUIRE_WINRES = '1'
-  Invoke-Native "cargo build ($Target)" { cargo build --release --locked -p designcraft -p designcraft-cli --features designcraft/pubgen --target $Target }
+  Invoke-Native "cargo build ($Target)" { cargo build --release --locked -p pgs -p pubgen-cli -p designcraft-cli --target $Target }
 }
 
 $Bin = Join-Path $TargetDir "$Target\release"
 
-# Check both binaries' PE headers before packaging. Machine (COFF header) must match -Arch, so an
+# Check binaries' PE headers before packaging. Machine (COFF header) must match -Arch, so an
 # x64 build can never ship labelled arm64. Subsystem (optional header): 2 = Windows GUI, 3 = console.
-# The app must be GUI (no console window opens with it); the CLI must stay console so its output
+# The app must be GUI (no console window opens with it); CLI binaries must stay console so their output
 # reaches the terminal.
 function Get-PeHeader([string] $Path) {
   $bytes = [System.IO.File]::ReadAllBytes($Path)
@@ -78,18 +78,35 @@ function Get-PeHeader([string] $Path) {
   return @{ Machine = [BitConverter]::ToUInt16($bytes, $pe + 4); Subsystem = [BitConverter]::ToUInt16($bytes, $pe + 0x5C) }
 }
 $Machine = switch ($Arch) { 'x64' { 0x8664 } 'x86' { 0x14C } 'arm64' { 0xAA64 } }
-foreach ($check in @(@('designcraft.exe', 2), @('designcraft-cli.exe', 3))) {
-  $h = Get-PeHeader (Join-Path $Bin $check[0])
-  if ($h.Machine -ne $Machine) { throw "$($check[0]) is for machine 0x$('{0:X}' -f $h.Machine), expected 0x$('{0:X}' -f $Machine) ($Arch)" }
-  if ($h.Subsystem -ne $check[1]) { throw "$($check[0]) has PE subsystem $($h.Subsystem), expected $($check[1])" }
-  Write-Output "ok $($check[0]): $Arch, PE subsystem $($h.Subsystem)"
+$BinChecks = @(
+  @('pgs.exe', 2),
+  @('pgs-cli.exe', 3),
+  @('pgs-export.exe', 3),
+  @('designcraft-cli.exe', 3)
+)
+foreach ($check in $BinChecks) {
+  $exePath = Join-Path $Bin $check[0]
+  if (Test-Path $exePath) {
+    $h = Get-PeHeader $exePath
+    if ($h.Machine -ne $Machine) { throw "$($check[0]) is for machine 0x$('{0:X}' -f $h.Machine), expected 0x$('{0:X}' -f $Machine) ($Arch)" }
+    if ($h.Subsystem -ne $check[1]) { throw "$($check[0]) has PE subsystem $($h.Subsystem), expected $($check[1])" }
+    Write-Output "ok $($check[0]): $Arch, PE subsystem $($h.Subsystem)"
+  }
 }
 $Stage = Join-Path $TargetDir "windows-package\$Arch"
 Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Stage | Out-Null
-Copy-Item (Join-Path $Bin 'designcraft.exe'), (Join-Path $Bin 'designcraft-cli.exe') $Stage
+foreach ($check in $BinChecks) {
+  $exePath = Join-Path $Bin $check[0]
+  if (Test-Path $exePath) {
+    Copy-Item $exePath $Stage
+  }
+}
 
-& (Join-Path $PSScriptRoot 'sign.ps1') (Join-Path $Stage 'designcraft.exe') (Join-Path $Stage 'designcraft-cli.exe')
+$StageExes = Get-ChildItem -Path $Stage -Filter '*.exe' | ForEach-Object { $_.FullName }
+if ($StageExes) {
+  & (Join-Path $PSScriptRoot 'sign.ps1') @StageExes
+}
 
 # Required embedded-font notices ship independently of optional font inputs.
 Copy-Item -LiteralPath (Join-Path $Root 'NOTICE') -Destination $Stage
@@ -131,8 +148,8 @@ Copy-Item (Join-Path $Stage '*.exe') $Portable
 # The marker that makes DesignCraft keep its data in .\DesignCraftData next to the exe instead of
 # %APPDATA% (#574; see apps/designcraft/src/profile.rs).
 Set-Content -Encoding ascii -Path (Join-Path $Portable 'portable.txt') -Value @(
-  'DesignCraft portable: preferences, logs and crash recovery are kept in the DesignCraftData folder',
-  'next to designcraft.exe. Delete this file to use %APPDATA%\DesignCraft instead.'
+  'Publication Generator Studio (PGS) portable: preferences, logs and crash recovery are kept in the DesignCraftData folder',
+  'next to pgs.exe. Delete this file to use %APPDATA%\DesignCraft instead.'
 )
 foreach ($f in 'README.md', 'LICENSE', 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE') {
   $p = Join-Path $Root $f
@@ -151,34 +168,31 @@ if (Test-Path $AssetsSrc) {
   Copy-Item -Recurse -Force $AssetsSrc $Portable
 }
 
-# Pubgen samples: include DUAL_LANG, SINGLE_LANG, and BRS sample files, excluding *.csv and *.zip
+# Pubgen samples: include all files from plan/pubgen/samples, excluding book_cover folder, and excluding *.csv and *.zip
 $SamplesSrc = Join-Path $Root 'plan\pubgen\samples'
 $SamplesDest = Join-Path $Portable 'samples'
-foreach ($folder in 'DUAL_LANG', 'SINGLE_LANG', 'brs') {
-  $srcDir = Join-Path $SamplesSrc $folder
-  if (Test-Path $srcDir) {
-    $destDir = Join-Path $SamplesDest $folder
-    New-Item -ItemType Directory -Force -Path $destDir | Out-Null
-    Get-ChildItem -Path $srcDir -Recurse | Where-Object {
-      -not $_.PSIsContainer -and $_.Extension -ne '.csv' -and $_.Extension -ne '.zip'
-    } | ForEach-Object {
-      $relative = $_.FullName.Substring($srcDir.Length).TrimStart('\', '/')
-      $targetFile = Join-Path $destDir $relative
-      $targetParent = Split-Path -Parent $targetFile
-      if (-not (Test-Path $targetParent)) {
-        New-Item -ItemType Directory -Force -Path $targetParent | Out-Null
-      }
-      Copy-Item -LiteralPath $_.FullName -Destination $targetFile -Force
+if (Test-Path $SamplesSrc) {
+  New-Item -ItemType Directory -Force -Path $SamplesDest | Out-Null
+  $canonicalSamplesSrc = (Resolve-Path $SamplesSrc).Path
+  Get-ChildItem -Path $SamplesSrc -Recurse | Where-Object {
+    if ($_.PSIsContainer) { return $false }
+    $relative = $_.FullName.Substring($canonicalSamplesSrc.Length).TrimStart('\', '/')
+    if ($relative.StartsWith("book_cover\") -or $relative.StartsWith("book_cover/") -or $relative -eq "book_cover") {
+      return $false
     }
+    if ($_.Extension -eq '.csv' -or $_.Extension -eq '.zip') {
+      return $false
+    }
+    return $true
+  } | ForEach-Object {
+    $relative = $_.FullName.Substring($canonicalSamplesSrc.Length).TrimStart('\', '/')
+    $targetFile = Join-Path $SamplesDest $relative
+    $targetParent = Split-Path -Parent $targetFile
+    if (-not (Test-Path $targetParent)) {
+      New-Item -ItemType Directory -Force -Path $targetParent | Out-Null
+    }
+    Copy-Item -LiteralPath $_.FullName -Destination $targetFile -Force
   }
-}
-
-# Specifically include DUAL_LANG/maps sample folder (including contoh.csv and CONTOH_DESA.geojson)
-$DualLangMapsSrc = Join-Path $SamplesSrc 'DUAL_LANG\maps'
-if (Test-Path $DualLangMapsSrc) {
-  $DualLangMapsDest = Join-Path $SamplesDest 'DUAL_LANG\maps'
-  New-Item -ItemType Directory -Force -Path $DualLangMapsDest | Out-Null
-  Copy-Item -Recurse -Force "$DualLangMapsSrc\*" $DualLangMapsDest
 }
 
 # Exclude sensitive stock maps from loose assets directory since they are embedded into the exe
