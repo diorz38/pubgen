@@ -5016,6 +5016,7 @@ dependencies = [
 name = "pubgen-cli"
 version = "0.18.0-pgs.0.9.0"
 dependencies = [
+ "designcraft-translate",
  "pubgen-core",
  "serde",
  "serde_json",

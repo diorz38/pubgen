@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 
 use designcraft_translate::mask::{mask as mask_text, number_census, unmask};
 use designcraft_translate::{Lang, OnlineTranslator};
+use pubgen_core::glossary_fix;
 use pubgen_core::translation::{TmEntry, TmOrigin, TranslationMemory, now_stamp};
 use pubgen_core::translation_units::{TransUnit, collect_units};
 use pubgen_core::workspace::Glossary;
@@ -418,14 +419,18 @@ pub fn run_translate(args: &TranslateArgs) -> Result<TranslateReport, String> {
             report.reused += 1;
         } else if let Some(english) = glossary_lookup(&draft.glossary, &unit.text) {
             // Deterministic English: never sent to the provider, entered into the memory below.
-            report.skipped += 1;
-            tm.insert(TmEntry {
+            let inserted = tm.insert(TmEntry {
                 source: unit.text.clone(),
                 target: english.to_string(),
                 origin: TmOrigin::Imported,
                 role: unit.role.as_str().into(),
                 updated: now_stamp(),
             });
+            if inserted {
+                report.skipped += 1;
+            } else {
+                report.failed.push((unit.key.clone(), "translation memory is full".into()));
+            }
         } else {
             misses.push(unit);
         }
@@ -459,6 +464,7 @@ pub fn run_translate(args: &TranslateArgs) -> Result<TranslateReport, String> {
         if outputs.len() != misses.len() {
             return Err(format!("provider returned {} results for {} units", outputs.len(), misses.len()));
         }
+        let entries = enforce_entries(&pairs);
         for ((unit, masked), output) in misses.iter().zip(masked.iter()).zip(outputs.iter()) {
             let restored = match unmask(output, masked) {
                 Ok(restored) => restored,
@@ -467,21 +473,24 @@ pub fn run_translate(args: &TranslateArgs) -> Result<TranslateReport, String> {
                     continue;
                 }
             };
-            let target = restored.trim();
+            // Same order as the GUI stage: unmask, enforce the official terms, then the census.
+            let target = enforce_target(restored.trim(), &entries);
             if target.is_empty() {
                 report.failed.push((unit.key.clone(), "model returned an empty translation".into()));
-            } else if number_census(&unit.text) != number_census(target) {
+            } else if number_census(&unit.text) != number_census(&target) {
                 // The guard that makes statistical tables safe: a changed number is a failure.
                 report.failed.push((unit.key.clone(), format!("number changed in translation: {target}")));
-            } else {
-                tm.insert(TmEntry {
-                    source: unit.text.clone(),
-                    target: target.to_string(),
-                    origin: TmOrigin::Ai,
-                    role: unit.role.as_str().into(),
-                    updated: now_stamp(),
-                });
+            } else if tm.insert(TmEntry {
+                source: unit.text.clone(),
+                target: target.clone(),
+                origin: TmOrigin::Ai,
+                role: unit.role.as_str().into(),
+                updated: now_stamp(),
+            }) {
                 report.translated += 1;
+            } else {
+                // The entry was not persisted, so the report must not count it as done.
+                report.failed.push((unit.key.clone(), "translation memory is full".into()));
             }
         }
     }
@@ -511,6 +520,25 @@ fn glossary_pairs(glossary: &Glossary) -> Vec<(String, String)> {
         .filter(|entry| !entry.source.trim().is_empty() && !entry.target.trim().is_empty())
         .map(|entry| (entry.source.trim().to_string(), entry.target.trim().to_string()))
         .collect()
+}
+
+/// The same pairs as `glossary_fix` entries: the official English the prompt asked for, applied
+/// to a target the model may have written differently (mirrors the GUI's stage).
+fn enforce_entries(pairs: &[(String, String)]) -> Vec<glossary_fix::Entry> {
+    pairs
+        .iter()
+        .map(|(term, replacement)| glossary_fix::Entry {
+            term: term.clone(),
+            replacement: replacement.clone(),
+            do_not_translate: false,
+            case_preserve: true,
+        })
+        .collect()
+}
+
+/// Glossary enforcement on an unmasked target, before the number census writes anything.
+fn enforce_target(target: &str, entries: &[glossary_fix::Entry]) -> String {
+    glossary_fix::enforce(target, entries).0
 }
 
 /// Print the JSON report and turn a non-empty `failed` list into a non-zero exit.
@@ -649,6 +677,26 @@ mod tests {
         assert!(report.units > 0);
         assert_eq!(report.translated, 0, "a dry run must not call the provider");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The headless path applies the official wording to an AI target before the census and the
+    /// memory write (the GUI's ordering), so a model that echoed a lowercase term cannot persist
+    /// it as `TmOrigin::Ai`.
+    #[test]
+    fn enforce_target_applies_the_official_glossary_wording() {
+        use pubgen_core::workspace::GlossaryEntry;
+        let glossary = Glossary {
+            entries: vec![
+                GlossaryEntry { source: "Kecamatan".into(), target: "Subdistrict".into() },
+                GlossaryEntry { source: "Luas Wilayah".into(), target: "Area (km2)".into() },
+                GlossaryEntry { source: "".into(), target: "ignored".into() },
+            ],
+        };
+        let entries = enforce_entries(&glossary_pairs(&glossary));
+        assert_eq!(entries.len(), 2, "a one-sided entry must not become an enforcement rule");
+        assert_eq!(enforce_target("Area by kecamatan", &entries), "Area by Subdistrict");
+        assert_eq!(enforce_target("luas wilayah and Kecamatan", &entries), "Area (km2) and Subdistrict");
+        assert_eq!(enforce_target("nothing to fix", &entries), "nothing to fix");
     }
 
     #[test]
