@@ -18,6 +18,19 @@ use designcraft_translate as translate;
 
 pub const PROVIDER_OFFLINE: usize = 0;
 pub const PROVIDER_GROQ: usize = 1;
+pub const PROVIDER_CUSTOM: usize = 2;
+pub const PROVIDER_LOCAL: usize = 3;
+
+/// The user-facing name of a provider id ("groq"/"custom"/"local"): status lines and
+/// the quota popup say which backend actually ran.
+pub(crate) fn provider_label(provider: &str) -> &'static str {
+    match provider {
+        "groq" => "Groq",
+        "custom" => "Custom API",
+        "local" => "Local AI",
+        _ => "AI",
+    }
+}
 
 pub(crate) const DIALOG_TAB_SETUP: usize = 0;
 pub(crate) const DIALOG_TAB_TERMINOLOGY: usize = 1;
@@ -34,7 +47,15 @@ pub struct AiSetupDialog {
     pub groq_model: String,
     pub groq_models: Vec<String>,
     pub groq_models_error: Option<String>,
-    pub offline_available: bool,
+    pub custom_base_url: String,
+    pub custom_key: String,
+    pub custom_model: String,
+    pub custom_models: Vec<String>,
+    pub custom_models_error: Option<String>,
+    pub local_base_url: String,
+    pub local_model: String,
+    pub local_models: Vec<String>,
+    pub local_models_error: Option<String>,
     pub mem: Option<translate::system::MemoryInfo>,
     pub cores: usize,
     pub error: Option<String>,
@@ -57,12 +78,29 @@ impl AiSetupDialog {
         let groq_model =
             if prefs.translation_groq_model.trim().is_empty() { "llama-3.3-70b-versatile".to_string() } else { prefs.translation_groq_model.clone() };
         Self {
-            provider: if prefs.translation_provider == "groq" { PROVIDER_GROQ } else { PROVIDER_OFFLINE },
+            provider: match prefs.translation_provider.as_str() {
+                "groq" => PROVIDER_GROQ,
+                "custom" => PROVIDER_CUSTOM,
+                "local" => PROVIDER_LOCAL,
+                _ => PROVIDER_OFFLINE,
+            },
             groq_key: prefs.translation_groq_api_key.clone(),
             groq_model,
             groq_models: Vec::new(),
             groq_models_error: None,
-            offline_available: translate::is_available(),
+            custom_base_url: prefs.translation_custom_base_url.clone(),
+            custom_key: prefs.translation_custom_api_key.clone(),
+            custom_model: prefs.translation_custom_model.clone(),
+            custom_models: Vec::new(),
+            custom_models_error: None,
+            local_base_url: if prefs.translation_local_base_url.trim().is_empty() {
+                "http://localhost:11434/v1".to_string()
+            } else {
+                prefs.translation_local_base_url.clone()
+            },
+            local_model: prefs.translation_local_model.clone(),
+            local_models: Vec::new(),
+            local_models_error: None,
             mem: translate::system::memory_info(),
             cores: translate::system::cpu_cores(),
             error: None,
@@ -95,6 +133,40 @@ impl AiSetupDialog {
         }
     }
 
+    /// The model list of a custom OpenAI-compatible endpoint (base URL + optional key).
+    pub fn refresh_custom_models(&mut self) {
+        self.custom_models_error = None;
+        let base = self.custom_base_url.trim().trim_end_matches('/');
+        let t = translate::OnlineTranslator::with_endpoint(self.custom_key.trim(), &self.custom_model, base);
+        match t.list_models() {
+            Ok(models) => {
+                let capable: Vec<String> = models.into_iter().filter(|m| translation_capable(m)).collect();
+                if self.custom_model.is_empty() || !capable.iter().any(|m| m == &self.custom_model) {
+                    self.custom_model = capable.first().cloned().unwrap_or_default();
+                }
+                self.custom_models = capable;
+            }
+            Err(e) => self.custom_models_error = Some(e.to_string()),
+        }
+    }
+
+    /// The model list of the local server (Ollama / LM Studio / llama.cpp): no key.
+    pub fn refresh_local_models(&mut self) {
+        self.local_models_error = None;
+        let base = self.local_base_url.trim().trim_end_matches('/');
+        let t = translate::OnlineTranslator::with_endpoint("", &self.local_model, base);
+        match t.list_models() {
+            Ok(models) => {
+                let capable: Vec<String> = models.into_iter().filter(|m| translation_capable(m)).collect();
+                if self.local_model.is_empty() || !capable.iter().any(|m| m == &self.local_model) {
+                    self.local_model = capable.first().cloned().unwrap_or_default();
+                }
+                self.local_models = capable;
+            }
+            Err(e) => self.local_models_error = Some(e.to_string()),
+        }
+    }
+
     /// Prove the setup against the provider with one tiny real request (validates the
     /// key AND the model id), then persist through prefs.set and arm the panel.
     /// Returns false (with self.error set) when the check fails — the dialog stays
@@ -102,23 +174,77 @@ impl AiSetupDialog {
     pub fn verify_and_accept_groq(&mut self, app: &mut DesignApp, st: &mut PubgenState) -> bool {
         self.error = None;
         let mut t = translate::OnlineTranslator::new(self.groq_key.trim(), self.groq_model.trim());
+        self.verify_and_accept_with(
+            app,
+            st,
+            &mut t,
+            json!({
+                "translationProvider": "groq",
+                "translationGroqApiKey": self.groq_key.trim(),
+                "translationGroqModel": self.groq_model.trim(),
+            }),
+            "fix the key or model",
+        )
+    }
+
+    /// Same live check against the custom OpenAI-compatible endpoint, then persist the
+    /// three custom fields.
+    pub fn verify_and_accept_custom(&mut self, app: &mut DesignApp, st: &mut PubgenState) -> bool {
+        self.error = None;
+        let base = self.custom_base_url.trim().trim_end_matches('/');
+        let mut t = translate::OnlineTranslator::with_endpoint(self.custom_key.trim(), self.custom_model.trim(), base);
+        self.verify_and_accept_with(
+            app,
+            st,
+            &mut t,
+            json!({
+                "translationProvider": "custom",
+                "translationCustomBaseUrl": base,
+                "translationCustomApiKey": self.custom_key.trim(),
+                "translationCustomModel": self.custom_model.trim(),
+            }),
+            "fix the base URL, key or model",
+        )
+    }
+
+    /// Same live check against the local server (no key), then persist the two local fields.
+    pub fn verify_and_accept_local(&mut self, app: &mut DesignApp, st: &mut PubgenState) -> bool {
+        self.error = None;
+        let base = self.local_base_url.trim().trim_end_matches('/');
+        let mut t = translate::OnlineTranslator::with_endpoint("", self.local_model.trim(), base);
+        self.verify_and_accept_with(
+            app,
+            st,
+            &mut t,
+            json!({
+                "translationProvider": "local",
+                "translationLocalBaseUrl": base,
+                "translationLocalModel": self.local_model.trim(),
+            }),
+            "fix the base URL or model (is the server running?)",
+        )
+    }
+
+    /// The shared accept path of every online provider: one tiny live request, then the
+    /// prefs write and the armed flag. `hint` names what to fix in the error line.
+    fn verify_and_accept_with(
+        &mut self,
+        app: &mut DesignApp,
+        st: &mut PubgenState,
+        t: &mut translate::OnlineTranslator,
+        prefs: Value,
+        hint: &str,
+    ) -> bool {
         let cancel = AtomicBool::new(false);
         match t.translate(&["tes".into()], translate::Lang::Indonesian, translate::Lang::English, None, &cancel, &mut |_, _tot| {}) {
             Ok(_) => {
-                let _ = app.run(
-                    "prefs.set",
-                    json!({
-                        "translationProvider": "groq",
-                        "translationGroqApiKey": self.groq_key.trim(),
-                        "translationGroqModel": self.groq_model.trim(),
-                    }),
-                );
+                let _ = app.run("prefs.set", prefs);
                 st.ai_setup_done = true;
                 self.close_requested = true;
                 true
             }
             Err(e) => {
-                self.error = Some(format!("Setup check failed: {e} — fix the key or model and try again."));
+                self.error = Some(format!("Setup check failed: {e} — {hint} and try again."));
                 false
             }
         }
@@ -181,7 +307,109 @@ fn groq_pane(app: &mut DesignApp, st: &mut PubgenState, dialog: &mut AiSetupDial
     }
 }
 
-fn offline_pane(app: &mut DesignApp, st: &mut PubgenState, dialog: &mut AiSetupDialog, ui: &mut egui::Ui) {
+/// A custom OpenAI-compatible endpoint: base URL (scheme required, never guessed),
+/// optional key, model — mirrored from `groq_pane` with the endpoint field added.
+fn custom_pane(app: &mut DesignApp, st: &mut PubgenState, dialog: &mut AiSetupDialog, ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        ui.label("Base URL:");
+        ui.add(egui::TextEdit::singleline(&mut dialog.custom_base_url).hint_text("https://api.example.com/v1").desired_width(220.0))
+            .accessible_name("Custom API base URL");
+    });
+    ui.label(RichText::new("Any OpenAI-compatible chat endpoint. The http:// or https:// scheme is required — it is never guessed.").size(10.0));
+    ui.horizontal(|ui| {
+        ui.label("API key:");
+        ui.add(egui::TextEdit::singleline(&mut dialog.custom_key).password(true).hint_text("sk-… (empty if none)").desired_width(220.0));
+        if ui.button("Refresh models").clicked() {
+            dialog.refresh_custom_models();
+        }
+    });
+    ui.label(RichText::new("Key is stored locally in DesignCraft settings.").size(10.0));
+
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label("Model:");
+        if dialog.custom_models.is_empty() {
+            ui.add(egui::TextEdit::singleline(&mut dialog.custom_model).hint_text("e.g. gpt-4o-mini").desired_width(220.0));
+        } else {
+            craft_ui::ComboBox::from_id_salt("pubgen_ai_custom_model")
+                .selected_text(if dialog.custom_model.is_empty() { "Pick a model" } else { dialog.custom_model.as_str() })
+                .width(280.0)
+                .show_ui(ui, |ui| {
+                    for m in &dialog.custom_models {
+                        ui.selectable_value(&mut dialog.custom_model, m.clone(), m);
+                    }
+                });
+        }
+    });
+    if let Some(err) = &dialog.custom_models_error {
+        ui.label(RichText::new(err).size(10.0).color(Color32::from_rgb(220, 120, 60)));
+    }
+    ui.add_space(4.0);
+    ui.label(RichText::new("Catalog text is sent to this endpoint's server.").size(10.0));
+
+    ui.add_space(6.0);
+    let base = dialog.custom_base_url.trim();
+    let scheme_ok = base.starts_with("http://") || base.starts_with("https://");
+    let can_use = scheme_ok && !dialog.custom_model.trim().is_empty();
+    if ui.add_enabled(can_use, egui::Button::new("Use AI")).clicked() {
+        dialog.verify_and_accept_custom(app, st);
+    }
+    if let Some(err) = &dialog.error {
+        ui.add_space(4.0);
+        ui.label(RichText::new(err).size(10.5).color(Color32::from_rgb(220, 80, 80)));
+    }
+}
+
+/// A local OpenAI-compatible server — Ollama (default), LM Studio, llama.cpp: base URL
+/// and model only, no key.
+fn local_pane(app: &mut DesignApp, st: &mut PubgenState, dialog: &mut AiSetupDialog, ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        ui.label("Base URL:");
+        ui.add(egui::TextEdit::singleline(&mut dialog.local_base_url).hint_text("http://localhost:11434/v1").desired_width(220.0))
+            .accessible_name("Local AI base URL");
+        if ui.button("Refresh models").clicked() {
+            dialog.refresh_local_models();
+        }
+    });
+    ui.label(RichText::new("Works with Ollama (default), LM Studio, llama.cpp — any local OpenAI-compatible /v1 endpoint. No API key needed; text never leaves this computer.").size(10.0));
+
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label("Model:");
+        if dialog.local_models.is_empty() {
+            ui.add(egui::TextEdit::singleline(&mut dialog.local_model).hint_text("e.g. qwen2.5:7b (ollama pull …)").desired_width(220.0));
+        } else {
+            craft_ui::ComboBox::from_id_salt("pubgen_ai_local_model")
+                .selected_text(if dialog.local_model.is_empty() { "Pick a model" } else { dialog.local_model.as_str() })
+                .width(280.0)
+                .show_ui(ui, |ui| {
+                    for m in &dialog.local_models {
+                        ui.selectable_value(&mut dialog.local_model, m.clone(), m);
+                    }
+                });
+        }
+    });
+    if let Some(err) = &dialog.local_models_error {
+        ui.label(RichText::new(err).size(10.0).color(Color32::from_rgb(220, 120, 60)));
+    }
+
+    ui.add_space(6.0);
+    let base = dialog.local_base_url.trim();
+    let scheme_ok = base.starts_with("http://") || base.starts_with("https://");
+    let can_use = scheme_ok && !dialog.local_model.trim().is_empty();
+    if ui.add_enabled(can_use, egui::Button::new("Use AI")).clicked() {
+        dialog.verify_and_accept_local(app, st);
+    }
+    if let Some(err) = &dialog.error {
+        ui.add_space(4.0);
+        ui.label(RichText::new(err).size(10.5).color(Color32::from_rgb(220, 80, 80)));
+    }
+}
+
+fn offline_pane(_app: &mut DesignApp, _st: &mut PubgenState, dialog: &mut AiSetupDialog, ui: &mut egui::Ui) {
+    // Honest heading (Task 6): the NLLB offline path is a stub in every build, so this
+    // pane is informational only — pick Groq, a custom endpoint, or a local server.
+    ui.label(RichText::new("Local model (NLLB) — not available in this build").strong());
     match dialog.mem {
         Some(mem) => {
             ui.label(format!("RAM      {:.1} GB available of {:.1} GB", mem.available as f64 / 1e9, mem.total as f64 / 1e9));
@@ -193,24 +421,11 @@ fn offline_pane(app: &mut DesignApp, st: &mut PubgenState, dialog: &mut AiSetupD
         }
     }
     ui.add_space(4.0);
-    if !dialog.offline_available {
-        ui.label(
-            RichText::new("This build has no offline model compiled in. Use the Groq tab, or run DesignCraft with --features ai-translate.")
-                .size(10.5)
-                .color(Color32::from_rgb(220, 120, 60)),
-        );
-    } else {
-        if ui.button("Use Offline Model").clicked() {
-            let _ = app.run(
-                "prefs.set",
-                json!({
-                    "translationProvider": "offline",
-                }),
-            );
-            st.ai_setup_done = true;
-            dialog.close_requested = true;
-        }
-    }
+    ui.label(
+        RichText::new("The offline model cannot run in this build. Use Groq, a custom OpenAI-compatible API, or a local server (Ollama).")
+            .size(10.5)
+            .color(Color32::from_rgb(220, 120, 60)),
+    );
 
     for opt in translate::models::MODEL_OPTIONS {
         ui.add_space(2.0);
@@ -426,8 +641,8 @@ pub fn fill_blank_drafts(app: &DesignApp, st: &mut PubgenState, ctx: egui::Conte
     if st.translate_job.as_ref().is_some_and(|j| !j.finished) {
         return None;
     }
-    let Some((provider, key, model)) = backend_from_prefs(app) else {
-        return Some(("Configure the AI provider first: click 'AI Translator' to set up your Groq key.".into(), false));
+    let Some(config) = backend_config_from_prefs(app) else {
+        return Some(("Configure the AI provider first: click 'AI Translator' to set one up.".into(), false));
     };
     let blanks: Vec<String> = st
         .glossary
@@ -444,7 +659,7 @@ pub fn fill_blank_drafts(app: &DesignApp, st: &mut PubgenState, ctx: egui::Conte
     let remaining = blanks.len().saturating_sub(200);
     let more = if remaining > 0 { format!(" ({remaining} more after this)") } else { String::new() };
     let msg = format!("Requesting AI drafts for {requested} term(s){more}…");
-    st.translate_job = Some(TranslateJob::spawn_drafts(&provider, &key, &model, units, st.glossary.prompt_pairs(), ctx));
+    st.translate_job = Some(TranslateJob::spawn_drafts(&config, units, st.glossary.prompt_pairs(), ctx));
     st.header_status = Some((msg.clone(), true));
     Some((msg, true))
 }
@@ -476,14 +691,20 @@ pub fn dialog_ui(app: &mut DesignApp, st: &mut PubgenState, ui: &mut egui::Ui) {
 
         ui.horizontal(|ui| {
             ui.radio_value(&mut dialog.provider, PROVIDER_GROQ, "Online — Groq (free account)");
+            ui.radio_value(&mut dialog.provider, PROVIDER_CUSTOM, "Custom API (OpenAI-compatible)");
+        });
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut dialog.provider, PROVIDER_LOCAL, "Local AI (Ollama, LM Studio…)");
             ui.radio_value(&mut dialog.provider, PROVIDER_OFFLINE, "Offline on this computer");
         });
         ui.separator();
 
-        if dialog.provider == PROVIDER_GROQ {
-            groq_pane(app, st, &mut dialog, ui);
-        } else {
-            offline_pane(app, st, &mut dialog, ui);
+        // Exhaustive dispatch: a new provider can never silently fall into the offline pane.
+        match dialog.provider {
+            PROVIDER_GROQ => groq_pane(app, st, &mut dialog, ui),
+            PROVIDER_CUSTOM => custom_pane(app, st, &mut dialog, ui),
+            PROVIDER_LOCAL => local_pane(app, st, &mut dialog, ui),
+            _ => offline_pane(app, st, &mut dialog, ui),
         }
 
         ui.separator();
@@ -534,53 +755,50 @@ enum JobMsg {
 }
 
 impl TranslateJob {
-    /// Spawn the worker for \`units\` (key = Indonesian source text). Native only: on wasm
-    /// the AI features are off and the header button stays disabled.
+    /// Spawn the worker for \`units\` (key = Indonesian source text) against the resolved
+    /// backend. Native only: on wasm the AI features are off and the header button stays
+    /// disabled.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn spawn(provider: &str, key: &str, model: &str, units: Vec<(String, String)>, glossary: Vec<(String, String)>, ctx: egui::Context) -> Self {
+    pub fn spawn(config: &BackendConfig, units: Vec<(String, String)>, glossary: Vec<(String, String)>, ctx: egui::Context) -> Self {
         let (tx, rx) = std::sync::mpsc::channel::<JobMsg>();
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_thread = cancel.clone();
         let total = units.len();
-        let provider = provider.to_string();
-        let key = key.to_string();
-        let model = model.to_string();
+        let config = config.clone();
         let tx_thread = tx.clone();
         // Batch-by-batch from the worker: whatever finished before a Cancel or an
         // error is kept and reported, so a re-run only translates the rest.
         let spawned = std::thread::Builder::new().name("designcraft-translate".into()).spawn(move || {
             let mut done_pairs: Vec<(String, String)> = Vec::new();
-            let outcome: Result<(), translate::TranslateError> = if provider == "groq" {
-                let mut t = translate::OnlineTranslator::new(&key, &model);
-                let mut err = None;
-                for chunk in units.chunks(BATCH_UNITS) {
-                    if cancel_thread.load(std::sync::atomic::Ordering::Relaxed) {
-                        err = Some(translate::TranslateError::Cancelled);
+            // Every provider (Groq, custom endpoint, local server) speaks the same
+            // OpenAI-compatible chat API; only the endpoint differs.
+            let mut t = translate::OnlineTranslator::with_endpoint(&config.key, &config.model, &config.base_url);
+            let mut err = None;
+            for chunk in units.chunks(BATCH_UNITS) {
+                if cancel_thread.load(std::sync::atomic::Ordering::Relaxed) {
+                    err = Some(translate::TranslateError::Cancelled);
+                    break;
+                }
+                let sources: Vec<String> = chunk.iter().map(|(_, s)| s.clone()).collect();
+                match t.translate(
+                    &sources,
+                    translate::Lang::Indonesian,
+                    translate::Lang::English,
+                    Some(glossary.as_slice()),
+                    &cancel_thread,
+                    &mut |_, _| {},
+                ) {
+                    Ok(out) => {
+                        done_pairs.extend(chunk.iter().map(|(k, _)| k.clone()).zip(out));
+                        let _ = tx_thread.send(JobMsg::Progress(done_pairs.len(), units.len()));
+                    }
+                    Err(e) => {
+                        err = Some(e);
                         break;
                     }
-                    let sources: Vec<String> = chunk.iter().map(|(_, s)| s.clone()).collect();
-                    match t.translate(
-                        &sources,
-                        translate::Lang::Indonesian,
-                        translate::Lang::English,
-                        Some(glossary.as_slice()),
-                        &cancel_thread,
-                        &mut |_, _| {},
-                    ) {
-                        Ok(out) => {
-                            done_pairs.extend(chunk.iter().map(|(k, _)| k.clone()).zip(out));
-                            let _ = tx_thread.send(JobMsg::Progress(done_pairs.len(), units.len()));
-                        }
-                        Err(e) => {
-                            err = Some(e);
-                            break;
-                        }
-                    }
                 }
-                err.map_or(Ok(()), Err)
-            } else {
-                Err(translate::TranslateError::Unavailable)
-            };
+            }
+            let outcome = err.map_or(Ok(()), Err);
             let _ = match outcome {
                 Ok(()) => tx_thread.send(JobMsg::Done(done_pairs)),
                 Err(e) => tx_thread.send(JobMsg::Failed(e.to_string(), done_pairs)),
@@ -602,41 +820,20 @@ impl TranslateJob {
     /// Draft mode: the units are glossary terms (Indonesian → English) and the results
     /// fill the glossary's AI English column, not the page-translation cache.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn spawn_drafts(
-        provider: &str,
-        key: &str,
-        model: &str,
-        mut units: Vec<(String, String)>,
-        glossary: Vec<(String, String)>,
-        ctx: egui::Context,
-    ) -> Self {
-        let mut job = Self::spawn(provider, key, model, std::mem::take(&mut units), glossary, ctx);
+    pub fn spawn_drafts(config: &BackendConfig, units: Vec<(String, String)>, glossary: Vec<(String, String)>, ctx: egui::Context) -> Self {
+        let mut job = Self::spawn(config, units, glossary, ctx);
         job.drafts = true;
         job
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub fn spawn(
-        _provider: &str,
-        _key: &str,
-        _model: &str,
-        _units: Vec<(String, String)>,
-        _glossary: Vec<(String, String)>,
-        _ctx: egui::Context,
-    ) -> Self {
+    pub fn spawn(_config: &BackendConfig, _units: Vec<(String, String)>, _glossary: Vec<(String, String)>, _ctx: egui::Context) -> Self {
         Self { drafts: false, done: 0, total: 0, finished: true }
     }
 
     /// Draft mode on the web build: nothing can run, so report the job as already finished.
     #[cfg(target_arch = "wasm32")]
-    pub fn spawn_drafts(
-        _provider: &str,
-        _key: &str,
-        _model: &str,
-        _units: Vec<(String, String)>,
-        _glossary: Vec<(String, String)>,
-        _ctx: egui::Context,
-    ) -> Self {
+    pub fn spawn_drafts(_config: &BackendConfig, _units: Vec<(String, String)>, _glossary: Vec<(String, String)>, _ctx: egui::Context) -> Self {
         Self { drafts: true, done: 0, total: 0, finished: true }
     }
 
@@ -1300,45 +1497,91 @@ pub fn slice_signature(st: &PubgenState) -> String {
 
 /// " · Groq: ~N requests left today" when the last Groq response reported its
 /// rate-limit header this session; empty string otherwise (offline provider, or
-/// a build without `ai-translate-online`).
-pub fn groq_quota_suffix() -> String {
+/// a build without `ai-translate-online`). `provider` names the configured backend
+/// so a custom or local run says which one it was.
+pub fn groq_quota_suffix(provider: &str) -> String {
     match translate::remaining_requests() {
-        Some(n) => format!(" · Groq: ~{n} requests left today"),
+        Some(n) => format!(" · {}: ~{n} requests left today", provider_label(provider)),
         None => String::new(),
     }
 }
 
-/// Queue the usage popup after a Groq-backed AI operation completes: Groq's own
-/// rate-limit header (per key, server-computed), or an explicit "unavailable"
-/// line so the user always gets feedback that AI ran.
-pub(crate) fn push_groq_quota_popup(st: &mut PubgenState) {
+/// Queue the usage popup after an AI operation completes: the provider's own
+/// rate-limit header (per key, server-computed; only Groq reports one), or an explicit
+/// "unavailable" line so the user always gets feedback that AI ran.
+pub(crate) fn push_groq_quota_popup(st: &mut PubgenState, provider: &str) {
+    let label = provider_label(provider);
     let line = match translate::remaining_requests() {
-        Some(n) => format!("Groq AI: ~{n} requests left today"),
-        None => "Groq AI: rate-limit info unavailable this session".to_string(),
+        Some(n) => format!("{label} AI: ~{n} requests left today"),
+        None => format!("{label} AI: rate-limit info unavailable this session"),
     };
     st.ai_quota_popup = Some(vec![line]);
 }
 
-/// Build the backend the panel should use right now from the persisted prefs.
-pub fn backend_from_prefs(app: &DesignApp) -> Option<(String, String, String)> {
-    let prefs = &app.session.prefs;
-    if prefs.translation_provider == "groq" && !prefs.translation_groq_api_key.trim().is_empty() {
-        let model = if prefs.translation_groq_model.trim().is_empty() {
-            "llama-3.3-70b-versatile".to_string()
-        } else {
-            prefs.translation_groq_model.trim().to_string()
-        };
-        return Some((String::from("groq"), prefs.translation_groq_api_key.trim().to_string(), model));
-    } else if prefs.translation_provider == "offline" && translate::is_available() {
-        return Some((String::from("offline"), prefs.translation_model_dir.clone(), prefs.translation_model_id.clone()));
+/// The backend the panel should use right now: the provider id, its credentials and
+/// the endpoint every provider speaks (OpenAI-compatible chat completions). Owned by
+/// the job, so it derives `Clone`.
+#[derive(Clone, Debug)]
+pub struct BackendConfig {
+    pub provider: String,
+    pub key: String,
+    pub model: String,
+    pub base_url: String,
+}
+
+/// The backend the panel should use right now from the persisted prefs. `None` when
+/// the selected provider is not configured; never falls back to a different provider.
+pub fn backend_config_from_prefs(app: &DesignApp) -> Option<BackendConfig> {
+    let p = &app.session.prefs;
+    let cfg = match p.translation_provider.as_str() {
+        "groq" => BackendConfig {
+            provider: "groq".into(),
+            key: p.translation_groq_api_key.trim().to_string(),
+            model: if p.translation_groq_model.trim().is_empty() {
+                "llama-3.3-70b-versatile".to_string()
+            } else {
+                p.translation_groq_model.trim().to_string()
+            },
+            base_url: "https://api.groq.com/openai/v1".into(),
+        },
+        "custom" => BackendConfig {
+            provider: "custom".into(),
+            key: p.translation_custom_api_key.trim().to_string(),
+            model: p.translation_custom_model.trim().to_string(),
+            base_url: p.translation_custom_base_url.trim().trim_end_matches('/').to_string(),
+        },
+        "local" => BackendConfig {
+            provider: "local".into(),
+            key: String::new(),
+            model: p.translation_local_model.trim().to_string(),
+            base_url: if p.translation_local_base_url.trim().is_empty() {
+                "http://localhost:11434/v1".to_string()
+            } else {
+                p.translation_local_base_url.trim().trim_end_matches('/').to_string()
+            },
+        },
+        // NLLB is a stub; resolving it would promise a backend that cannot run.
+        _ => return None,
+    };
+    if cfg.model.is_empty() || cfg.base_url.is_empty() {
+        return None;
     }
-    None
+    if !cfg.base_url.starts_with("http://") && !cfg.base_url.starts_with("https://") {
+        return None;
+    }
+    if cfg.provider == "groq" && cfg.key.is_empty() {
+        return None;
+    }
+    if !translate::online_available() {
+        return None;
+    }
+    Some(cfg)
 }
 
 /// Compact status row (armed state): provider, Configure…, progress, Cancel.
 pub fn header_status_row(app: &DesignApp, st: &mut PubgenState, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
-        let provider = if app.session.prefs.translation_provider == "groq" { "Groq" } else { "offline" };
+        let provider = provider_label(&app.session.prefs.translation_provider);
         ui.add(egui::Label::new(RichText::new(format!("Translate with AI ({provider}) — ready")).size(10.5)).wrap());
         if let Some(job) = &st.translate_job
             && !job.finished
@@ -2139,11 +2382,11 @@ pub fn execute_translate_selected_page(app: &mut DesignApp, st: &mut PubgenState
     if let Some(target) = table_target {
         let mut units = collect_table_page_units(app, &target, &st.glossary);
         units.retain(|(k, _)| !st.translations.contains_key(k));
-        if let Some((provider, key, model)) = backend_from_prefs(app) {
+        if let Some(config) = backend_config_from_prefs(app) {
             if !units.is_empty() {
                 st.ai_table_target = Some(target);
                 let terms = st.glossary.prompt_pairs();
-                st.translate_job = Some(TranslateJob::spawn(&provider, &key, &model, units, terms, ctx));
+                st.translate_job = Some(TranslateJob::spawn(&config, units, terms, ctx));
                 st.header_status = Some(("Translating table page with AI…".into(), true));
             } else {
                 apply_table_page_result(app, st, &target);
@@ -2158,10 +2401,10 @@ pub fn execute_translate_selected_page(app: &mut DesignApp, st: &mut PubgenState
     } else if let Some(target) = review_target {
         let mut units = collect_page_units(app, &target);
         units.retain(|(k, _)| !st.translations.contains_key(k));
-        if let Some((provider, key, model)) = backend_from_prefs(app) {
+        if let Some(config) = backend_config_from_prefs(app) {
             st.ai_page_target = Some(target.clone());
             let terms = st.glossary.prompt_pairs();
-            st.translate_job = Some(TranslateJob::spawn(&provider, &key, &model, units, terms, ctx));
+            st.translate_job = Some(TranslateJob::spawn(&config, units, terms, ctx));
             st.header_status = Some(("Translating review page with AI…".into(), true));
         } else if units.is_empty() {
             apply_page_result(app, st, &target);
@@ -2194,11 +2437,11 @@ pub fn execute_translate_table_range(app: &mut DesignApp, st: &mut PubgenState, 
     all_units.sort_by(|a, b| a.0.cmp(&b.0));
     all_units.dedup_by(|a, b| a.0 == b.0);
 
-    if let Some((provider, key, model)) = backend_from_prefs(app) {
+    if let Some(config) = backend_config_from_prefs(app) {
         if !all_units.is_empty() {
             st.ai_table_targets_batch = targets;
             let terms = st.glossary.prompt_pairs();
-            st.translate_job = Some(TranslateJob::spawn(&provider, &key, &model, all_units, terms, ctx));
+            st.translate_job = Some(TranslateJob::spawn(&config, all_units, terms, ctx));
             st.header_status = Some(("Translating table pages with AI…".into(), true));
         } else {
             let mut count = 0;
@@ -2281,10 +2524,57 @@ mod tests {
     #[test]
     fn quota_popup_always_reports_something_after_a_groq_operation() {
         let mut st = PubgenState::default();
-        push_groq_quota_popup(&mut st);
+        push_groq_quota_popup(&mut st, "groq");
         let lines = st.ai_quota_popup.expect("popup queued");
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert!(lines[0].starts_with("Groq AI: "), "{lines:?}");
+    }
+
+    #[test]
+    fn backend_config_resolves_each_provider() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.session.prefs.translation_provider = "custom".into();
+        app.session.prefs.translation_custom_base_url = "https://api.example.com/v1/".into();
+        app.session.prefs.translation_custom_api_key = "k".into();
+        app.session.prefs.translation_custom_model = "gpt-4o-mini".into();
+        let cfg = backend_config_from_prefs(&app).expect("custom configured");
+        assert_eq!(cfg.provider, "custom");
+        assert_eq!(cfg.base_url, "https://api.example.com/v1", "trailing slash trimmed");
+        assert_eq!(cfg.model, "gpt-4o-mini");
+
+        app.session.prefs.translation_provider = "local".into();
+        app.session.prefs.translation_local_model = "qwen2.5:7b".into();
+        let cfg = backend_config_from_prefs(&app).expect("local configured");
+        assert_eq!(cfg.provider, "local");
+        assert_eq!(cfg.base_url, "http://localhost:11434/v1");
+        assert!(cfg.key.is_empty(), "a local server needs no key");
+    }
+
+    #[test]
+    fn an_unconfigured_provider_yields_none() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.session.prefs.translation_provider = "groq".into();
+        app.session.prefs.translation_groq_api_key = "  ".into();
+        assert!(backend_config_from_prefs(&app).is_none());
+        app.session.prefs.translation_provider = "custom".into();
+        assert!(backend_config_from_prefs(&app).is_none(), "no base URL");
+    }
+
+    #[test]
+    fn a_custom_endpoint_requires_a_scheme() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.session.prefs.translation_provider = "custom".into();
+        app.session.prefs.translation_custom_base_url = "api.example.com/v1".into();
+        app.session.prefs.translation_custom_model = "m".into();
+        assert!(backend_config_from_prefs(&app).is_none(), "must not guess a scheme");
+    }
+
+    #[test]
+    fn the_legacy_offline_provider_is_not_silently_groq() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.session.prefs.translation_provider = "offline".into();
+        // NLLB is a stub; it must not resolve to a working backend.
+        assert!(backend_config_from_prefs(&app).is_none());
     }
 
     #[test]

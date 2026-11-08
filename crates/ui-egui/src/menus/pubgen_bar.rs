@@ -463,7 +463,7 @@ fn submenu_items(app: &mut DesignApp, ui: &mut egui::Ui, lang: &str, label: &str
 
 /// Submenu of AI translation actions for the current page.
 fn ai_translate(app: &mut DesignApp, ui: &mut egui::Ui, lang: &str, has_doc: bool) {
-    let backend_ready = crate::dock::pubgen::ai::backend_from_prefs(app).is_some();
+    let backend_ready = crate::dock::pubgen::ai::backend_config_from_prefs(app).is_some();
     let is_bilingual = crate::dock::pubgen::with_state(ui.ctx(), |st| st.bilingual_output);
     let cur_page = app.session.active().and_then(|s| s.selection.page).or_else(|| crate::canvas::current_page(app));
     let review_target = cur_page.and_then(|p| crate::dock::pubgen::ai::detect_page_target(app, p));

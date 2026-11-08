@@ -131,5 +131,31 @@ impl eframe::App for PubgenStudioApp {
         }
 
         self.app.show_file_dialogs(Some(&*frame));
+
+        // The setup dialog accepts through the engine's prefs; Studio keeps its own
+        // settings.json so the provider config survives restart. Save on change.
+        self.sync_provider_settings();
+    }
+}
+
+impl PubgenStudioApp {
+    /// Mirror the engine's translation prefs into `settings.json` when they change
+    /// (accepting the setup dialog is what changes them).
+    fn sync_provider_settings(&mut self) {
+        let p = &self.app.session.prefs;
+        let current = crate::settings::ProviderSettings {
+            provider: p.translation_provider.clone(),
+            groq_key: p.translation_groq_api_key.clone(),
+            groq_model: p.translation_groq_model.clone(),
+            custom_base_url: p.translation_custom_base_url.clone(),
+            custom_key: p.translation_custom_api_key.clone(),
+            custom_model: p.translation_custom_model.clone(),
+            local_base_url: p.translation_local_base_url.clone(),
+            local_model: p.translation_local_model.clone(),
+        };
+        if current != self.settings {
+            self.settings = current;
+            let _ = self.settings.save();
+        }
     }
 }

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 pub const DEFAULT_LOCAL_BASE_URL: &str = "http://localhost:11434/v1";
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ProviderSettings {
     pub provider: String,

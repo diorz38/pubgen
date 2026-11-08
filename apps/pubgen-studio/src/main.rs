@@ -85,6 +85,23 @@ fn main() -> eframe::Result<()> {
             app.custom_titlebar = cfg!(target_os = "windows");
             app.services.window_frame = window_frame::service(cc, app.custom_titlebar);
 
+            // Seed the engine's provider prefs from Studio's own settings.json so the
+            // AI setup dialog opens with the endpoint configured on a previous run.
+            let provider_settings = settings::ProviderSettings::load();
+            let _ = app.run(
+                "prefs.set",
+                serde_json::json!({
+                    "translationProvider": provider_settings.provider,
+                    "translationGroqApiKey": provider_settings.groq_key,
+                    "translationGroqModel": provider_settings.groq_model,
+                    "translationCustomBaseUrl": provider_settings.custom_base_url,
+                    "translationCustomApiKey": provider_settings.custom_key,
+                    "translationCustomModel": provider_settings.custom_model,
+                    "translationLocalBaseUrl": provider_settings.local_base_url,
+                    "translationLocalModel": provider_settings.local_model,
+                }),
+            );
+
             // Sync initial mode with pubgen_bar switcher
             let is_orch = initial_mode == StudioMode::Orchestrator;
             designcraft_ui_egui::menus::pubgen_bar::set_orchestrator_mode(&cc.egui_ctx, is_orch);
@@ -111,7 +128,7 @@ fn main() -> eframe::Result<()> {
                 }
             }
 
-            Ok(Box::new(PubgenStudioApp::new(app, initial_mode, project_path, container, settings::ProviderSettings::load())))
+            Ok(Box::new(PubgenStudioApp::new(app, initial_mode, project_path, container, provider_settings)))
         }),
     )
 }
