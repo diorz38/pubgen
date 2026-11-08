@@ -321,11 +321,19 @@ pub fn translated_body_rtf_bytes(source: &[u8], lookup: &dyn Fn(&str) -> Option<
     let mut translations: Vec<Option<String>> = Vec::new();
     let mut any = false;
     for range in story.para_ranges() {
-        let english = lookup(story.slice(range).trim()).map(|target| target.trim().to_string()).filter(|target| !target.is_empty());
+        let english = usable_target(lookup(story.slice(range).trim()));
         any |= english.is_some();
         translations.push(english);
     }
     any.then(|| render_body(&rebuilt_story(story, &translations)).into_bytes())
+}
+
+/// A target usable as one paragraph: trimmed, non-empty and a single line. A target carrying
+/// `\n` or `\r` would make `paragraphs.join("\n")` produce more paragraphs than `source.paras`,
+/// shifting every later paragraph format (and `Story::check` rejects such a story), so it counts
+/// as missing and the paragraph keeps its Indonesian text. The TM entry itself is never rewritten.
+fn usable_target(target: Option<String>) -> Option<String> {
+    target.map(|target| target.trim().to_string()).filter(|target| !target.is_empty() && !target.contains('\n') && !target.contains('\r'))
 }
 
 /// Mask and request every segment of every translatable paragraph, then rebuild the body by
@@ -393,7 +401,8 @@ fn translate_body_with(rtf: &[u8], glossary: &[(String, String)], provider: &dyn
         if translate::mask::number_census(source) != translate::mask::number_census(&joined) {
             continue; // statistics must not move
         }
-        translations[index] = Some(joined);
+        // A provider answer spanning lines is as unusable as a missing one (see `usable_target`).
+        translations[index] = usable_target(Some(joined));
     }
     Ok(render_body(&rebuilt_story(&story, &translations)).into_bytes())
 }
@@ -831,7 +840,8 @@ mod tests {
 
     #[test]
     fn narrative_paragraph_count_and_styles_survive_translation() {
-        let rtf = br"{\rtf1\ansi{\stylesheet{\s1\b\fs40 heading 1;}}\pard\plain \s1\qc Heading_one\par Body paragraph one.\par Body paragraph two.\par}";
+        let rtf =
+            br"{\rtf1\ansi{\stylesheet{\s1\b\fs40 heading 1;}}\pard\plain \s1\qc Heading_one\par Body paragraph one.\par Body paragraph two.\par}";
         let out = translate_narrative_with(rtf, &|texts| {
             // Canned provider: return one EN string per input paragraph.
             texts.iter().map(|t| format!("EN {t}")).collect()
@@ -853,11 +863,40 @@ mod tests {
 
     #[test]
     fn a_paragraph_the_model_dropped_keeps_its_indonesian_text() {
-        let rtf = br"{\rtf1\ansi Satu.\par Dua.\par}";
-        let out = translate_narrative_with(rtf, &|_texts| vec!["One.".to_string()]) // one short
-            .expect("must not fail the whole body");
+        let rtf = br"{\rtf1\ansi Satu.\par Dua.\par {\b Tiga.}\par}";
+        let out = translate_narrative_with(rtf, &|texts| {
+            // The model answers every paragraph except `Dua.` (an empty answer is dropped).
+            texts.iter().map(|t| if t == "Dua." { String::new() } else { format!("EN {t}") }).collect()
+        })
+        .expect("must not fail the whole body");
         let imported = designcraft_textimport::import("t.rtf", &out).expect("reimport");
         assert!(imported.story.text.contains("Dua."), "the untranslated paragraph must survive");
+        // The paragraph count and the formats after the Indonesian fallback must be untouched.
+        let ranges = imported.story.para_ranges();
+        assert_eq!(ranges.len(), 3, "the paragraph count is the source's");
+        let third = imported.story.slice(ranges[2].clone()).to_string();
+        assert!(third.contains("EN Tiga."), "the third paragraph translates: {third:?}");
+        let at = ranges[2].start + third.find("Tiga").expect("the third paragraph's text is there");
+        let (_, format) = imported.story.runs().find(|(run, _)| run.start <= at && at < run.end).expect("the third paragraph has a run");
+        assert_eq!(format.over.font_style.as_deref(), Some("Bold"), "the third paragraph stays bold after an Indonesian fallback");
+    }
+
+    /// A TM target is one paragraph. An embedded return would add a paragraph, push every later
+    /// paragraph onto the wrong format and make `Story::check` reject the body, so such a target
+    /// is treated as missing and that paragraph keeps its Indonesian text.
+    #[test]
+    fn a_translation_with_an_embedded_newline_keeps_its_indonesian_paragraph() {
+        let rtf = br"{\rtf1\ansi Satu.\par Dua.\par}";
+        let lookup = |paragraph: &str| match paragraph {
+            "Satu." => Some("One.\nInserted paragraph.".to_string()),
+            "Dua." => Some("Two.".to_string()),
+            _ => None,
+        };
+        let out = translated_body_rtf_bytes(&rtf[..], &lookup).expect("Dua. translates");
+        let imported = designcraft_textimport::import("t.rtf", &out).expect("reimport");
+        assert_eq!(imported.story.para_ranges().len(), 2, "a newline in a target must not add a paragraph");
+        assert!(imported.story.text.contains("Satu."), "the paragraph with the unusable target keeps its Indonesian text: {:?}", imported.story.text);
+        assert!(imported.story.text.contains("Two."), "{:?}", imported.story.text);
     }
 
     fn paragraph_count(story: &designcraft_doc::Story) -> usize {

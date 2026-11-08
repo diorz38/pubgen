@@ -289,13 +289,32 @@ fn narrative_paragraphs(draft: &WorkspaceDraft, card: &PublicationCard) -> Vec<S
     imported.story.text.lines().map(str::trim).filter(|line| !line.is_empty()).take(MAX_UNITS).map(str::to_string).collect()
 }
 
-/// The staged narrative bytes (`name`, bytes) for a card source: the exact staged name, or a
-/// staged name ending in `/<source>` (a package may stage `rtf/U5.rtf` under `text/rtf/U5.rtf`,
-/// the same aliases `WorkspaceDraft::validate` accepts).
+/// The staged narrative bytes (`name`, bytes) for a card source. The same aliases
+/// `WorkspaceDraft::validate` accepts: the exact staged name, a staged name ending in
+/// `/<source>`, or either side with a staging prefix (`csv/`, `text/`, `md/`, `rtf/`,
+/// `assets/`) stripped — a package may stage `rtf/R01.rtf` for a card source of
+/// `text/R01.rtf`, and a file that validates must not silently contribute no units.
 fn narrative_source<'a>(draft: &'a WorkspaceDraft, source: Option<&str>) -> Option<(&'a str, &'a [u8])> {
     let source = source?.replace('\\', "/");
-    let suffix = format!("/{source}");
-    draft.text.iter().find(|(name, _)| *name == source || name.ends_with(&suffix)).map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+    let stripped = STAGING_PREFIXES.iter().find_map(|prefix| source.strip_prefix(prefix)).unwrap_or(source.as_str());
+    draft
+        .text
+        .iter()
+        .find(|(name, _)| same_staged_file(name, &source) || same_staged_file(name, stripped))
+        .map(|(name, bytes)| (name.as_str(), bytes.as_slice()))
+}
+
+/// Staging prefixes `WorkspaceDraft::validate` strips from a card source (`workspace_validation.rs`).
+const STAGING_PREFIXES: [&str; 5] = ["csv/", "text/", "md/", "rtf/", "assets/"];
+
+/// `staged` and `candidate` name the same file when they are equal, or one is the other plus a
+/// leading directory (`text/rtf/R01.rtf` / `rtf/R01.rtf`). Never a bare string suffix, so
+/// `xtf/R01.rtf` does not match `rtf/R01.rtf`.
+fn same_staged_file(staged: &str, candidate: &str) -> bool {
+    fn ends_with_component(name: &str, tail: &str) -> bool {
+        name.strip_suffix(tail).is_some_and(|head| head.is_empty() || head.ends_with('/'))
+    }
+    ends_with_component(staged, candidate) || ends_with_component(candidate, staged)
 }
 
 fn header_indexes(rows: &[Vec<String>], names: &[&str]) -> Vec<usize> {
@@ -489,6 +508,19 @@ mod tests {
         let mut draft = draft();
         let rtf = br"{\rtf1\ansi Satu paragraf.}";
         draft.text.push(("text/rtf/R01.rtf".into(), rtf.to_vec()));
+        draft.metadata.cards.push(narrative_card("R01", "rtf/R01.rtf"));
+        let units = collect_units(&draft);
+        assert!(units.iter().any(|u| u.role == UnitRole::NarrativeBody && u.text == "Satu paragraf."), "{units:?}");
+    }
+
+    /// The card source and the staged name may carry *different* prefixes: validate strips
+    /// `rtf/`/`text/`, so `rtf/R01.rtf` staged as `text/R01.rtf` is a valid card and must not
+    /// silently contribute no body units.
+    #[test]
+    fn a_narrative_body_is_found_when_only_the_staging_prefix_differs() {
+        let mut draft = draft();
+        let rtf = br"{\rtf1\ansi Satu paragraf.}";
+        draft.text.push(("text/R01.rtf".into(), rtf.to_vec()));
         draft.metadata.cards.push(narrative_card("R01", "rtf/R01.rtf"));
         let units = collect_units(&draft);
         assert!(units.iter().any(|u| u.role == UnitRole::NarrativeBody && u.text == "Satu paragraf."), "{units:?}");
