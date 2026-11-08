@@ -38,8 +38,8 @@ pub mod workspace;
 pub(crate) mod compile;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) use compile::{
-    compile_card_ui, compile_project, export_xlsx, import_xlsx, new_project, open_project, poll_compile_job, save_package_as, save_project,
-    save_project_as,
+    compile_card_ui, compile_project, export_xlsx, import_xlsx, new_project, open_project, poll_compile_job, rebuild_project_tocs, save_package_as,
+    save_project, save_project_as,
 };
 mod cover_art;
 mod covers;
@@ -94,6 +94,11 @@ pub fn open_chart_dialog(app: &mut DesignApp, edit: bool) -> Result<(), String> 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn compile_project(_app: &mut DesignApp, _p: &Value) -> Result<Value, String> {
     Err("compiling a publication needs the desktop app".to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn rebuild_project_tocs(_app: &mut DesignApp, _p: &Value) -> Result<Value, String> {
+    Err("rebuilding project TOC needs the desktop app".to_string())
 }
 
 /// Saving a publication project writes a manifest file: the web build only explains why it can't.

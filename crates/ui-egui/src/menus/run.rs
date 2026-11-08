@@ -208,6 +208,8 @@ fn run_ui_part1(app: &mut DesignApp, id: &str, p: &Value) -> Option<Result<Value
         #[cfg(feature = "pubgen")]
         "pubgen.compileProject" => crate::dock::pubgen::compile_project(app, p),
         #[cfg(feature = "pubgen")]
+        "pubgen.rebuildToc" => crate::dock::pubgen::rebuild_project_tocs(app, p),
+        #[cfg(feature = "pubgen")]
         "pubgen.newProject" => crate::dock::pubgen::new_project(app, p),
         #[cfg(feature = "pubgen")]
         "pubgen.openProject" => crate::dock::pubgen::open_project(app, p),

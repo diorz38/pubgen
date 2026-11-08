@@ -8,12 +8,12 @@
 //! Both the left and right panels follow the exact visual styling and design tokens of DesignCraft's left panel.
 
 use egui::{
-    pos2, vec2, Align, Align2, Color32, CornerRadius, FontId, Layout, Margin, Rect, Response, RichText, ScrollArea, Sense, Stroke, StrokeKind, Ui,
+    Align, Align2, Color32, CornerRadius, FontId, Layout, Margin, Rect, Response, RichText, ScrollArea, Sense, Stroke, StrokeKind, Ui, pos2, vec2,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::theme::{semibold, Tokens};
 use crate::DesignApp;
+use crate::theme::{Tokens, semibold};
 
 const WORKSPACE_STATE_ID: &str = "pubgen_orchestrator_workspace_state";
 
@@ -173,6 +173,7 @@ pub struct PublicationCard {
     pub toc_hanging_indent: bool,
     pub toc_include_self: bool,
     pub toc_pair_bilingual: bool,
+    pub toc_layout_style: usize, // 0 Standard, 1 TablePage (BPS Catalog)
 
     // Section & Numbering specific
     pub section_start: bool,
@@ -255,11 +256,12 @@ impl Default for PublicationCard {
             map_custom_geojson: String::new(),
             map_data_csv: String::new(),
             image_area: "Area Margin".into(),
-            toc_style: "Standar".into(),
+            toc_style: "TOC Paragraph".into(),
             toc_columns: "1 Kolom".into(),
             toc_hanging_indent: true,
             toc_include_self: false,
             toc_pair_bilingual: true,
+            toc_layout_style: 0,
             section_start: false,
             automatic_numbering: true,
             start_page_number: 1,
@@ -377,6 +379,19 @@ pub struct OrchestratorWorkspaceState {
     // Re-compilation Safety Guard Dialog state
     pub show_guard_dialog: bool,
     pub guard_is_publish: bool,
+    // Generation & Thumbnail Pre-warm Progress Modal state
+    #[serde(skip)]
+    pub compile_progress: Option<CompileProgressState>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CompileProgressState {
+    pub is_publish: bool,
+    pub total_pages: usize,
+    pub current_page: usize,
+    pub status_text: String,
+    pub error_msg: Option<String>,
+    pub completed: bool,
 }
 
 impl Default for OrchestratorWorkspaceState {
@@ -561,6 +576,7 @@ impl Default for OrchestratorWorkspaceState {
             status_message: None,
             show_guard_dialog: false,
             guard_is_publish: false,
+            compile_progress: None,
         }
     }
 }
@@ -593,15 +609,42 @@ impl OrchestratorWorkspaceState {
             .enumerate()
             .map(|(idx, card)| {
                 let mut settings = std::collections::BTreeMap::new();
+                for (k, v) in &card.settings {
+                    settings.insert(k.clone(), serde_json::Value::String(v.clone()));
+                }
                 if !card.title_en.is_empty() {
                     settings.insert("title_en".into(), serde_json::Value::String(card.title_en.clone()));
                 } else if !card.subtitle.is_empty() {
                     settings.insert("title_en".into(), serde_json::Value::String(card.subtitle.clone()));
                 }
-                if card.kind == CardKind::Cover {
-                    for (k, v) in &card.settings {
-                        settings.insert(k.clone(), serde_json::Value::String(v.clone()));
+                if card.kind == CardKind::Toc {
+                    settings.insert("toc_style".into(), serde_json::Value::String(card.toc_style.clone()));
+                    settings.insert("toc_columns".into(), serde_json::Value::String(card.toc_columns.clone()));
+                    settings.insert("toc_layout_style".into(), serde_json::json!(card.toc_layout_style));
+                    settings.insert("toc_hanging_indent".into(), serde_json::Value::Bool(card.toc_hanging_indent));
+                    settings.insert("toc_include_self".into(), serde_json::Value::Bool(card.toc_include_self));
+                    settings.insert("toc_pair_bilingual".into(), serde_json::Value::Bool(card.toc_pair_bilingual));
+                }
+                if card.kind == CardKind::Table {
+                    if !card.table_style.is_empty() {
+                        settings.insert("table_style".into(), serde_json::Value::String(card.table_style.clone()));
                     }
+                    if !card.table_theme.is_empty() {
+                        settings.insert("table_theme".into(), serde_json::Value::String(card.table_theme.clone()));
+                    }
+                    if !card.table_layout_preset.is_empty() {
+                        settings.insert("table_layout_preset".into(), serde_json::Value::String(card.table_layout_preset.clone()));
+                    }
+                }
+                if card.kind == CardKind::Chart {
+                    if !card.chart_type.is_empty() {
+                        settings.insert("chart_type".into(), serde_json::Value::String(card.chart_type.clone()));
+                    }
+                    if !card.chart_image.is_empty() {
+                        settings.insert("chart_image".into(), serde_json::Value::String(card.chart_image.clone()));
+                    }
+                }
+                if card.kind == CardKind::Cover {
                     if !card.title.is_empty() {
                         let t = card.title.strip_prefix("Sampul Rilis: ").unwrap_or(&card.title);
                         settings.insert("title".into(), serde_json::Value::String(t.to_string()));
@@ -809,11 +852,7 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
     // sources at it, so a new prefix would orphan those sources.
     let norm = |prefix: &str, name: &str| {
         let n = name.replace('\\', "/");
-        if n.starts_with(prefix) || n.contains('/') {
-            n
-        } else {
-            format!("{prefix}/{n}")
-        }
+        if n.starts_with(prefix) || n.contains('/') { n } else { format!("{prefix}/{n}") }
     };
 
     // Narratives are RTF; a package written before that change still carries Markdown, whose
@@ -904,10 +943,155 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
                         pc.settings.insert(k.clone(), s.to_string());
                     } else if let Some(b) = v.as_bool() {
                         pc.settings.insert(k.clone(), b.to_string());
+                    } else if let Some(u) = v.as_u64() {
+                        pc.settings.insert(k.clone(), u.to_string());
                     } else if let Some(n) = v.as_i64() {
                         pc.settings.insert(k.clone(), n.to_string());
                     } else if let Some(f) = v.as_f64() {
                         pc.settings.insert(k.clone(), f.to_string());
+                    }
+                }
+                if pc.kind == CardKind::Toc {
+                    if let Some(s) = pc.settings.get("toc_style") {
+                        pc.toc_style = s.clone();
+                    } else {
+                        let t = pc.title.to_lowercase();
+                        if t.contains("tabel") || t.contains("table") {
+                            pc.toc_style = "TOC Table".into();
+                        } else if t.contains("grafik") || t.contains("chart") || t.contains("gambar") || t.contains("figure") {
+                            pc.toc_style = "TOC Chart".into();
+                        } else {
+                            pc.toc_style = "TOC Paragraph".into();
+                        }
+                    }
+                    if let Some(cols) = pc.settings.get("toc_columns") {
+                        pc.toc_columns = cols.clone();
+                    }
+                    if let Some(v) = card.settings.get("toc_layout_style") {
+                        if let Some(u) = v.as_u64() {
+                            pc.toc_layout_style = u as usize;
+                        } else if let Some(n) = v.as_i64() {
+                            pc.toc_layout_style = n as usize;
+                        } else if let Some(s) = v.as_str() {
+                            let lower = s.to_lowercase();
+                            if lower == "1" || lower.contains("tablepage") || lower.contains("bps") {
+                                pc.toc_layout_style = 1;
+                            } else {
+                                pc.toc_layout_style = 0;
+                            }
+                        }
+                    } else if let Some(val) = pc.settings.get("toc_layout_style") {
+                        let lower = val.to_lowercase();
+                        if lower == "1" || lower.contains("tablepage") || lower.contains("bps") {
+                            pc.toc_layout_style = 1;
+                        } else if let Ok(n) = val.parse::<usize>() {
+                            pc.toc_layout_style = n;
+                        }
+                    } else if (state.selected_profile == "bps_dda" || state.selected_profile.contains("dda"))
+                        && (pc.toc_style == "TOC Table" || pc.toc_style == "TOC Chart")
+                    {
+                        // Default to TablePage (BPS Catalog) layout for DDA catalog tables and charts
+                        pc.toc_layout_style = 1;
+                    }
+                    if let Some(hi) = pc.settings.get("toc_hanging_indent").and_then(|v| v.parse::<bool>().ok()) {
+                        pc.toc_hanging_indent = hi;
+                    }
+                    if let Some(is) = pc.settings.get("toc_include_self").and_then(|v| v.parse::<bool>().ok()) {
+                        pc.toc_include_self = is;
+                    }
+                    if let Some(pb) = pc.settings.get("toc_pair_bilingual").and_then(|v| v.parse::<bool>().ok()) {
+                        pc.toc_pair_bilingual = pb;
+                    }
+                }
+                if pc.kind == CardKind::Table {
+                    if let Some(s) = pc.settings.get("table_style") {
+                        pc.table_style = s.clone();
+                    }
+                    if let Some(s) = pc.settings.get("table_theme").or_else(|| pc.settings.get("theme")) {
+                        pc.table_theme = s.clone();
+                    }
+                    if let Some(s) = pc.settings.get("table_layout_preset") {
+                        pc.table_layout_preset = s.clone();
+                    }
+
+                    // Self-healing: if pc.title is literally "subtitle" or starts with "Tabel 2 " / chapter name,
+                    // or if the card's CSV has metadata rows, extract chapter/section and the real table title.
+                    let matching_csv = report.csv.iter().find(|(path, _)| path == &pc.source || pc.source.ends_with(path));
+                    if let Some((_, csv_bytes)) = matching_csv {
+                        if let Ok(csv_text) = std::str::from_utf8(csv_bytes) {
+                            let lines: Vec<&str> = csv_text.lines().collect();
+                            let has_meta_lines = lines.iter().take(6).any(|l| {
+                                let lower = l.to_lowercase();
+                                lower.starts_with("title,")
+                                    || lower.starts_with("title_en,")
+                                    || lower.starts_with("subtitle,")
+                                    || lower.starts_with("subtitle_en,")
+                            });
+                            if has_meta_lines || pc.title.eq_ignore_ascii_case("subtitle") || pc.title.starts_with("Tabel 2 ") {
+                                let mut ch_opt = None;
+                                let mut ch_en_opt = None;
+                                let mut sec_opt = None;
+                                let mut sec_en_opt = None;
+                                let mut table_title_opt = None;
+
+                                for l in &lines {
+                                    let trimmed = l.trim();
+                                    if trimmed.is_empty() {
+                                        continue;
+                                    }
+                                    let parts: Vec<&str> = trimmed.splitn(3, ',').collect();
+                                    let key = parts[0].trim().trim_matches('"').to_lowercase();
+                                    let val = parts.get(1).map(|s| s.trim().trim_matches('"')).unwrap_or("");
+                                    if key == "title" {
+                                        ch_opt = Some(val.to_string());
+                                    } else if key == "title_en" {
+                                        ch_en_opt = Some(val.to_string());
+                                    } else if key == "subtitle" {
+                                        sec_opt = Some(val.to_string());
+                                    } else if key == "subtitle_en" {
+                                        sec_en_opt = Some(val.to_string());
+                                    } else if table_title_opt.is_none()
+                                        && (trimmed.starts_with("Tabel ")
+                                            || trimmed.starts_with("\"Tabel ")
+                                            || trimmed.starts_with("Table ")
+                                            || trimmed.starts_with("\"Table "))
+                                    {
+                                        let unquoted = parts[0].trim().trim_matches('"');
+                                        table_title_opt = Some(unquoted.to_string());
+                                    }
+                                }
+
+                                if let Some(ch) = ch_opt {
+                                    pc.settings.insert("chapter".into(), ch.clone());
+                                    pc.settings.insert("chapter_title".into(), ch);
+                                }
+                                if let Some(chen) = ch_en_opt {
+                                    pc.settings.insert("chapter_en".into(), chen.clone());
+                                    pc.settings.insert("chapter_title_en".into(), chen);
+                                }
+                                if let Some(sec) = sec_opt {
+                                    pc.settings.insert("section".into(), sec.clone());
+                                    pc.settings.insert("section_title".into(), sec.clone());
+                                    pc.settings.insert("subtitle".into(), sec);
+                                }
+                                if let Some(secen) = sec_en_opt {
+                                    pc.settings.insert("section_en".into(), secen.clone());
+                                    pc.settings.insert("section_title_en".into(), secen.clone());
+                                    pc.settings.insert("subtitle_en".into(), secen);
+                                }
+                                if let Some(tbl_title) = table_title_opt {
+                                    pc.title = tbl_title;
+                                }
+                            }
+                        }
+                    }
+                }
+                if pc.kind == CardKind::Chart {
+                    if let Some(s) = pc.settings.get("chart_type") {
+                        pc.chart_type = s.clone();
+                    }
+                    if let Some(s) = pc.settings.get("chart_image") {
+                        pc.chart_image = s.clone();
                     }
                 }
                 if pc.kind == CardKind::Cover {
@@ -1779,6 +1963,11 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
         render_guard_dialog(app, ui.ctx(), &mut state, &t, &lang);
     }
 
+    // Render Compile & Thumbnail Pre-warm Progress Modal if active
+    if state.compile_progress.is_some() {
+        render_compile_progress_modal(app, ui.ctx(), &mut state, &t, &lang);
+    }
+
     set_state(ui.ctx(), state);
 }
 
@@ -1996,9 +2185,30 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
             let save_btn = crate::icons::button(ui, "preset-save", 22.0, false, &crate::i18n::tr(lang, "Save"));
             if save_btn.clicked() {
                 let now = format_now();
-                state.is_dirty = false;
-                state.execution_log.push(format!("[{now}] {}", crate::i18n::tr(lang, "Publication project saved to cache.")));
-                state.status_message = Some((crate::i18n::tr(lang, "Publication project saved to cache.").to_string(), true));
+                let recent = state.recent_documents.first().cloned().unwrap_or_default();
+                let remembered = app.session.prefs.pubgen_project_path.trim().to_string();
+                let target = if recent.ends_with(".pubgen") && std::path::Path::new(&recent).exists() {
+                    recent
+                } else if remembered.ends_with(".pubgen") && std::path::Path::new(&remembered).exists() {
+                    remembered
+                } else {
+                    String::new()
+                };
+
+                if !target.is_empty() {
+                    match super::compile::save_pubgen_package_to(app, std::path::Path::new(&target)) {
+                        Ok(_) => {
+                            state.is_dirty = false;
+                            state.execution_log.push(format!("[{now}] {}", crate::i18n::tr(lang, "Paket publikasi (.pubgen) berhasil disimpan.")));
+                            state.status_message = Some((format!("Disimpan ke {target}"), true));
+                        }
+                        Err(e) => {
+                            state.status_message = Some((format!("Gagal menyimpan: {e}"), false));
+                        }
+                    }
+                } else {
+                    let _ = app.run("pubgen.savePackageAs", serde_json::json!({}));
+                }
             }
         });
     });
@@ -2809,11 +3019,7 @@ fn render_facing_card(
         });
     });
 
-    if clicked_edit {
-        Some(idx)
-    } else {
-        None
-    }
+    if clicked_edit { Some(idx) } else { None }
 }
 
 fn render_card_action_bar(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, lang: &str) {
@@ -3782,30 +3988,79 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                             ui.label(RichText::new(crate::i18n::tr(lang, "Table of Contents (TOC) Settings:")).font(semibold(11.0)).color(t.text_strong));
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(crate::i18n::tr(lang, "TOC Style:")).font(semibold(11.0)));
-                                craft_ui::ComboBox::from_id_salt("toc_style_select")
+                                craft_ui::ComboBox::from_id_salt(("toc_style_select", card.page, card.chapter_id.as_str()))
                                     .selected_text(&card.toc_style)
-                                    .width(180.0)
+                                    .width(200.0)
                                     .show_ui(ui, |ui| {
-                                        for s in ["Standar", "Titik Pemimpin", "Minimalis"] {
-                                            if ui.selectable_label(card.toc_style == s, s).clicked() {
-                                                card.toc_style = s.into();
+                                        for (s, default_title_id, default_title_bilingual) in [
+                                            ("TOC Paragraph", "Daftar Isi", "Daftar Isi / Table of Contents"),
+                                            ("TOC Table", "Daftar Tabel", "Daftar Tabel / List of Tables"),
+                                            ("TOC Chart", "Daftar Grafik", "Daftar Grafik / List of Charts"),
+                                            ("TOC Entry", "Daftar Isi", "Daftar Isi / Table of Contents"),
+                                        ] {
+                                            if ui.selectable_value(&mut card.toc_style, s.to_string(), s).clicked() {
+                                                card.settings.insert("toc_style".into(), s.to_string());
+                                                state.is_dirty = true;
+                                                // Auto-fill Title if empty or matches standard title
+                                                let target_title = if is_bilingual { default_title_bilingual } else { default_title_id };
+                                                card.title = target_title.into();
                                             }
                                         }
                                     });
                             });
+
+                            // Rules summary text per chosen TOC Style
+                            let rule_desc = match card.toc_style.as_str() {
+                                "TOC Paragraph" => "Aturan: Menyusun daftar bab narasi (RXX/BXX/BAB) dan sub-heading level 1 & 2 secara bersarang.",
+                                "TOC Table" => "Aturan: Hanya menyusun halaman tabel yang diawali 'Tabel' atau 'Table' (halaman landscape 'L' otomatis dikecualikan).",
+                                "TOC Chart" => "Aturan: Hanya menyusun halaman grafik atau gambar yang diawali 'Grafik', 'Chart', atau 'Gambar'.",
+                                _ => "Aturan: Mengumpulkan semua halaman dengan style 'TOC Entry' dan halaman narasi.",
+                            };
+                            ui.label(RichText::new(rule_desc).font(FontId::proportional(11.0)).color(t.text_dim));
+
+                            if card.toc_style == "TOC Table" || card.toc_style == "TOC Chart" {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(crate::i18n::tr(lang, "Tata Letak (Layout):")).font(semibold(11.0)));
+                                    let layouts = ["Standard", "TablePage (BPS Catalog)"];
+                                    let cur_layout = layouts.get(card.toc_layout_style).copied().unwrap_or(layouts[0]);
+                                    craft_ui::ComboBox::from_id_salt(("toc_layout_style_select", card.page, card.chapter_id.as_str()))
+                                        .selected_text(cur_layout)
+                                        .width(180.0)
+                                        .show_ui(ui, |ui| {
+                                            for (idx, l) in layouts.iter().enumerate() {
+                                                if ui.selectable_value(&mut card.toc_layout_style, idx, *l).clicked() {
+                                                    card.settings.insert("toc_layout_style".into(), idx.to_string());
+                                                    state.is_dirty = true;
+                                                }
+                                            }
+                                        });
+                                });
+                            }
+
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new("Kolom:").font(semibold(11.0)));
                                 if ui.selectable_label(card.toc_columns == "1 Kolom", "1 Kolom").clicked() {
                                     card.toc_columns = "1 Kolom".into();
+                                    card.settings.insert("toc_columns".into(), "1 Kolom".into());
+                                    state.is_dirty = true;
                                 }
                                 if ui.selectable_label(card.toc_columns == "2 Kolom", "2 Kolom").clicked() {
                                     card.toc_columns = "2 Kolom".into();
+                                    card.settings.insert("toc_columns".into(), "2 Kolom".into());
+                                    state.is_dirty = true;
                                 }
                             });
-                            ui.checkbox(&mut card.toc_hanging_indent, crate::i18n::tr(lang, "Hanging Indent"));
-                            ui.checkbox(&mut card.toc_include_self, crate::i18n::tr(lang, "Include Self"));
-                            if is_bilingual {
-                                ui.checkbox(&mut card.toc_pair_bilingual, crate::i18n::tr(lang, "Pair Bilingual"));
+                            if ui.checkbox(&mut card.toc_hanging_indent, crate::i18n::tr(lang, "Hanging Indent")).changed() {
+                                card.settings.insert("toc_hanging_indent".into(), card.toc_hanging_indent.to_string());
+                                state.is_dirty = true;
+                            }
+                            if ui.checkbox(&mut card.toc_include_self, crate::i18n::tr(lang, "Include Self")).changed() {
+                                card.settings.insert("toc_include_self".into(), card.toc_include_self.to_string());
+                                state.is_dirty = true;
+                            }
+                            if is_bilingual && ui.checkbox(&mut card.toc_pair_bilingual, crate::i18n::tr(lang, "Pair Bilingual")).changed() {
+                                card.settings.insert("toc_pair_bilingual".into(), card.toc_pair_bilingual.to_string());
+                                state.is_dirty = true;
                             }
                         });
                     }
@@ -3998,6 +4253,17 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
         state.editing_card_idx = Some(idx + 1);
         state.last_editing_card_idx = None;
     } else if close {
+        if let Some(card) = state.cards.get_mut(idx) {
+            if card.kind == CardKind::Toc {
+                card.settings.insert("toc_style".into(), card.toc_style.clone());
+                card.settings.insert("toc_columns".into(), card.toc_columns.clone());
+                card.settings.insert("toc_layout_style".into(), card.toc_layout_style.to_string());
+                card.settings.insert("toc_hanging_indent".into(), card.toc_hanging_indent.to_string());
+                card.settings.insert("toc_include_self".into(), card.toc_include_self.to_string());
+                card.settings.insert("toc_pair_bilingual".into(), card.toc_pair_bilingual.to_string());
+            }
+        }
+        state.is_dirty = true;
         if state.cards.get(idx).map(|c| c.kind != CardKind::Cover).unwrap_or(false) && app.session.active().is_some() {
             super::with_state(ctx, |st| {
                 let _ = super::header_footer::execute_apply_header_footer(app, st);
@@ -4126,11 +4392,7 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
             event_theme: card.settings.get("event_theme").cloned().unwrap_or_default(),
             palette: card.cover_ai_palette.clone(),
             release_no: if state.selected_profile == "bps_brs" {
-                if !card.cover_release_no.trim().is_empty() {
-                    card.cover_release_no.clone()
-                } else {
-                    state.meta_release_no.clone()
-                }
+                if !card.cover_release_no.trim().is_empty() { card.cover_release_no.clone() } else { state.meta_release_no.clone() }
             } else {
                 String::new()
             },
@@ -4164,7 +4426,20 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
 
     // Catalog rows: [type, number, title, file, template, title_en, file_en, theme] like the converted XLSX catalog.
     let mut rows: Vec<Vec<String>> = Vec::new();
-    for card in state.cards.iter().filter(|c| c.kind != CardKind::Cover && c.kind != CardKind::Toc) {
+    for card in state.cards.iter().filter(|c| c.kind != CardKind::Cover) {
+        if card.kind == CardKind::Toc {
+            rows.push(vec![
+                "TOC".to_string(),
+                "".to_string(),
+                card.title.clone(),
+                card.toc_style.clone(),
+                card.toc_layout_style.to_string(),
+                card.title_en.clone(),
+                card.chapter_id.clone(),
+                "".to_string(),
+            ]);
+            continue;
+        }
         let mut file = staged(&card.source).unwrap_or_default();
         let typ = match card.kind {
             CardKind::Narrative => {
@@ -4172,15 +4447,7 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
                 let is_rxx = id_upper.starts_with('R') && id_upper.len() > 1 && id_upper[1..].chars().all(|c| c.is_ascii_digit() || c == '_');
                 let title_upper = card.title.trim().to_ascii_uppercase();
                 let title_starts_bab = title_upper.starts_with("BAB ") || title_upper.starts_with("CHAPTER ");
-                if is_rxx || title_starts_bab {
-                    if file.is_empty() {
-                        "Note"
-                    } else {
-                        "Ulasan"
-                    }
-                } else {
-                    "Note"
-                }
+                if is_rxx || title_starts_bab { if file.is_empty() { "Note" } else { "Ulasan" } } else { "Note" }
             }
             CardKind::Table => "Tabel",
             CardKind::Divider => "Divider",
@@ -4221,11 +4488,7 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
                 })
                 .or_else(|| {
                     let stripped = card.chapter_id.trim_start_matches(|c: char| c.is_alphabetic() || c == '_');
-                    if !stripped.is_empty() && stripped.contains('_') {
-                        Some(stripped.replace('_', "."))
-                    } else {
-                        None
-                    }
+                    if !stripped.is_empty() && stripped.contains('_') { Some(stripped.replace('_', ".")) } else { None }
                 })
                 .or_else(|| card.title.split_whitespace().find(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_digit())).map(str::to_string))
                 .unwrap_or_default()
@@ -4247,13 +4510,71 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         } else {
             card.settings.get("theme").or_else(|| card.settings.get("table_theme")).cloned().unwrap_or_default()
         };
-        rows.push(vec![typ.to_string(), number, card.title.clone(), file, template, title_en, file_en, theme]);
+        let chapter = card.settings.get("chapter").or_else(|| card.settings.get("chapter_title")).cloned().unwrap_or_else(|| {
+            let ch_num = card.title.split_whitespace().find(|w| w.chars().any(|c| c.is_ascii_digit())).unwrap_or("");
+            let d_num: String = ch_num.chars().take_while(|c| c.is_ascii_digit() || *c == '.').take(2).collect();
+            if !d_num.is_empty() {
+                state.cards.iter().find(|c| c.kind == CardKind::Divider && c.title.contains(&d_num)).map(|c| c.title.clone()).unwrap_or_default()
+            } else {
+                String::new()
+            }
+        });
+        let chapter_en = card.settings.get("chapter_en").or_else(|| card.settings.get("chapter_title_en")).cloned().unwrap_or_else(|| {
+            let ch_num = card.title.split_whitespace().find(|w| w.chars().any(|c| c.is_ascii_digit())).unwrap_or("");
+            let d_num: String = ch_num.chars().take_while(|c| c.is_ascii_digit() || *c == '.').take(2).collect();
+            if !d_num.is_empty() {
+                state.cards.iter().find(|c| c.kind == CardKind::Divider && c.title.contains(&d_num)).map(|c| c.title_en.clone()).unwrap_or_default()
+            } else {
+                String::new()
+            }
+        });
+        let section = card
+            .settings
+            .get("section")
+            .or_else(|| card.settings.get("section_title"))
+            .or_else(|| card.settings.get("subtitle"))
+            .cloned()
+            .unwrap_or_default();
+        let section_en = card
+            .settings
+            .get("section_en")
+            .or_else(|| card.settings.get("section_title_en"))
+            .or_else(|| card.settings.get("subtitle_en"))
+            .cloned()
+            .unwrap_or_default();
+
+        rows.push(vec![
+            typ.to_string(),
+            number,
+            card.title.clone(),
+            file,
+            template,
+            title_en,
+            file_en,
+            theme,
+            chapter,
+            chapter_en,
+            section,
+            section_en,
+        ]);
     }
     if rows.is_empty() && !st.excel_had_cover {
         return Err("the worksheet has no publication cards to generate from".into());
     }
-    st.card1_headers =
-        vec!["type".into(), "number".into(), "title".into(), "file".into(), "template".into(), "title_en".into(), "file_en".into(), "theme".into()];
+    st.card1_headers = vec![
+        "type".into(),
+        "number".into(),
+        "title".into(),
+        "file".into(),
+        "template".into(),
+        "title_en".into(),
+        "file_en".into(),
+        "theme".into(),
+        "chapter".into(),
+        "chapter_en".into(),
+        "section".into(),
+        "section_en".into(),
+    ];
     st.card1_records = rows;
     st.card1_type_col = 0;
     st.card1_num_col = 1;
@@ -4281,10 +4602,72 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         super::csv::load_card2_csv(&mut st, &first_table);
     }
 
-    super::excel::generate_publication_pages(app, &mut st)
+    let gen_res = super::excel::generate_publication_pages(app, &mut st)?;
+
+    // Generate TOC contents on their pre-allocated placeholder pages in card order
+    for card in state.cards.iter().filter(|c| c.kind == CardKind::Toc) {
+        let placeholder_loc = app.session.doc().ok().and_then(|d| {
+            for sp in &d.doc.spreads {
+                for it in &sp.items {
+                    if it.label == "pubgen_toc_card" {
+                        if let Some(pg) = d.doc.page_of_item(it.id) {
+                            return Some((it.id, pg));
+                        }
+                    }
+                }
+            }
+            None
+        });
+
+        let cur_pages = app.session.doc().map(|d| d.doc.pages().count()).unwrap_or(0);
+        let (ph_to_clear, target_page) = if let Some((ph_id, pg)) = placeholder_loc {
+            (Some(ph_id), pg)
+        } else {
+            let p = if card.page > 0 && card.page <= cur_pages { card.page.saturating_sub(1) } else { cur_pages };
+            if card.scope_new_page || p >= cur_pages {
+                let after_idx = p.saturating_sub(1);
+                let _ = app.run("layout.pages.insert", serde_json::json!({ "after": after_idx, "count": 1 }));
+            }
+            (None, p)
+        };
+
+        if let Some(ph_id) = ph_to_clear {
+            let _ = app.run("edit.clear", serde_json::json!({ "ids": [ph_id.0] }));
+        }
+
+        let toc_kind_idx = match card.toc_style.as_str() {
+            "TOC Table" => 1,
+            "TOC Chart" => 2,
+            "TOC Paragraph" => 3,
+            _ => {
+                let t = card.title.to_lowercase();
+                if t.contains("tabel") || t.contains("table") {
+                    1
+                } else if t.contains("grafik") || t.contains("chart") || t.contains("gambar") || t.contains("figure") {
+                    2
+                } else {
+                    3
+                }
+            }
+        };
+
+        let mut toc_st = st.clone();
+        toc_st.toc_kind = toc_kind_idx;
+        toc_st.toc_title = card.title.clone();
+        toc_st.toc_layout_style = card.toc_layout_style;
+        toc_st.toc_hanging_indent = card.toc_hanging_indent;
+        toc_st.toc_include_self = card.toc_include_self;
+        toc_st.toc_pair_bilingual = card.toc_pair_bilingual;
+        toc_st.bilingual_output = card.toc_pair_bilingual && !state.doc_language.starts_with("Indonesian");
+
+        let plan = super::toc::TocPlan::from_state(&toc_st);
+        let _ = super::toc::generate_toc(app, &toc_st, target_page, &plan, false);
+    }
+
+    Ok(gen_res)
 }
 
-fn execute_compile(app: &mut DesignApp, ctx: &egui::Context, state: &mut OrchestratorWorkspaceState, publish: bool, lang: &str) {
+fn start_compile_job(app: &mut DesignApp, ctx: &egui::Context, state: &mut OrchestratorWorkspaceState, publish: bool, lang: &str) {
     let now = format_now();
     let pages_count = state.cards.len();
     state.execution_log.push(format!(
@@ -4292,47 +4675,129 @@ fn execute_compile(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orchest
         crate::i18n::tr(lang, "Generating {n} publication page structures from the active worksheet…").replace("{n}", &pages_count.to_string())
     ));
 
-    let pdf_path = format!("outputs/{}.pdf", sanitize_file_stem(&state.meta_title));
     match generate_from_workspace(app, state) {
         Ok(msg) => {
             state.execution_log.push(format!("[{now}] {msg}"));
-            if publish {
-                match app.run("file.exportPdf", serde_json::json!({ "path": pdf_path })) {
-                    Ok(_) => {
-                        state
-                            .execution_log
-                            .push(format!("[{now}] {}", crate::i18n::tr(lang, "Exported release PDF: {path}").replace("{path}", &pdf_path)));
-                        state.last_output_pdf = Some(pdf_path.clone());
-                        state.status_message = Some(("Kompilasi & Publikasi PDF Berhasil".into(), true));
-                    }
-                    Err(e) => {
-                        state.execution_log.push(format!("[{now}] Error: PDF export failed: {e}"));
-                        state.status_message = Some((format!("Ekspor PDF gagal: {e}"), false));
-                    }
-                }
-            } else {
-                state.status_message = Some(("Dokumen berhasil digenerate".into(), true));
-            }
+            let total_doc_pages = app.session.doc().map(|d| d.doc.pages().count()).unwrap_or(0);
+            state.compile_progress = Some(CompileProgressState {
+                is_publish: publish,
+                total_pages: total_doc_pages,
+                current_page: 0,
+                status_text: crate::i18n::tr(lang, "Menyiapkan pratinjau halaman tata letak…").to_string(),
+                error_msg: None,
+                completed: false,
+            });
+            ctx.request_repaint();
         }
         Err(e) => {
             state.execution_log.push(format!("[{now}] Error: {e}"));
             state.status_message = Some((format!("Generate gagal: {e}"), false));
         }
     }
+}
 
-    // Auto-unlock & switch to DesignCraft Layout Mode
-    crate::menus::pubgen_bar::set_orchestrator_mode(ctx, false);
+/// Renders progress notification modal and performs thumbnail pre-warming step-by-step
+fn render_compile_progress_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut OrchestratorWorkspaceState, t: &Tokens, lang: &str) {
+    let Some(mut prog) = state.compile_progress.clone() else {
+        return;
+    };
+
+    let title = if prog.is_publish {
+        crate::i18n::tr(lang, "Mengompilasi & Menerbitkan Publikasi")
+    } else {
+        crate::i18n::tr(lang, "Menyusun Halaman Publikasi")
+    };
+
+    let mut finish_and_switch = false;
+    let mut close = false;
+
+    egui::Window::new(title).collapsible(false).resizable(false).fixed_size([440.0, 160.0]).anchor(Align2::CENTER_CENTER, [0.0, 0.0]).show(
+        ctx,
+        |ui| {
+            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+
+            if let Some(ref err) = prog.error_msg {
+                ui.label(RichText::new(err).font(semibold(12.0)).color(Color32::from_rgb(220, 50, 50)));
+                ui.add_space(8.0);
+                if ui.button(crate::i18n::tr(lang, "Tutup")).clicked() {
+                    close = true;
+                }
+            } else if prog.completed {
+                ui.label(
+                    RichText::new(crate::i18n::tr(lang, "Tata letak siap! Membuka lembar kerja DesignCraft…"))
+                        .font(semibold(12.0))
+                        .color(t.text_strong),
+                );
+                ui.add(egui::ProgressBar::new(1.0).show_percentage().desired_width(ui.available_width()));
+                ui.label(
+                    RichText::new(crate::i18n::tr(lang, "Semua halaman dan cache visual selesai diproses."))
+                        .font(FontId::proportional(11.0))
+                        .color(t.text_dim),
+                );
+                finish_and_switch = true;
+            } else {
+                ui.label(RichText::new(&prog.status_text).font(semibold(12.0)).color(t.text_strong));
+
+                let fraction = if prog.total_pages > 0 { (prog.current_page as f32 / prog.total_pages as f32).clamp(0.0, 0.99) } else { 0.5 };
+
+                let progress_bar = egui::ProgressBar::new(fraction)
+                    .show_percentage()
+                    .desired_width(ui.available_width())
+                    .text(format!("{}/{} halaman", prog.current_page, prog.total_pages));
+                ui.add(progress_bar);
+
+                ui.label(
+                    RichText::new(crate::i18n::tr(lang, "Membuat cache visual agar panel dan menu tidak freeze saat navigasi..."))
+                        .font(FontId::proportional(11.0))
+                        .color(t.text_dim),
+                );
+
+                // Pre-warming completed or skipped; proceed to finalization
+                if prog.is_publish {
+                    let pdf_path = format!("outputs/{}.pdf", sanitize_file_stem(&state.meta_title));
+                    match app.run("file.exportPdf", serde_json::json!({ "path": pdf_path })) {
+                        Ok(_) => {
+                            let now = format_now();
+                            state
+                                .execution_log
+                                .push(format!("[{now}] {}", crate::i18n::tr(lang, "Exported release PDF: {path}").replace("{path}", &pdf_path)));
+                            state.last_output_pdf = Some(pdf_path);
+                            state.status_message = Some(("Kompilasi & Publikasi PDF Berhasil".into(), true));
+                            prog.completed = true;
+                        }
+                        Err(e) => {
+                            prog.error_msg = Some(format!("Ekspor PDF gagal: {e}"));
+                        }
+                    }
+                } else {
+                    state.status_message = Some(("Dokumen berhasil digenerate".into(), true));
+                    prog.completed = true;
+                }
+
+                ctx.request_repaint();
+            }
+        },
+    );
+
+    if close {
+        state.compile_progress = None;
+    } else if finish_and_switch {
+        state.compile_progress = None;
+        crate::menus::pubgen_bar::set_orchestrator_mode(ctx, false);
+    } else {
+        state.compile_progress = Some(prog);
+    }
+}
+
+fn execute_compile(app: &mut DesignApp, ctx: &egui::Context, state: &mut OrchestratorWorkspaceState, publish: bool, lang: &str) {
+    start_compile_job(app, ctx, state, publish, lang);
 }
 
 /// File-stem-safe version of a title for the output PDF name.
 fn sanitize_file_stem(title: &str) -> String {
     let stem: String = title.trim().chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == ' ' { c } else { ' ' }).collect();
     let stem = stem.split_whitespace().collect::<Vec<_>>().join("_");
-    if stem.is_empty() {
-        "publikasi".into()
-    } else {
-        stem
-    }
+    if stem.is_empty() { "publikasi".into() } else { stem }
 }
 
 /// Renders the Re-compilation Safety Guard Dialog (3-way modal: Overwrite / Save v2 / Cancel).
@@ -4420,60 +4885,15 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
         if act == 1 {
             // Save the current manual layout as v2, then regenerate fresh pages in a new document.
             let v2 = format!("outputs/{stem}_v2.designcraft");
-            let v2_pdf = format!("outputs/{stem}_v2.pdf");
             state.execution_log.push(format!("[{now}] {}", crate::i18n::tr(lang, "Saving old layout to: {path}").replace("{path}", &v2)));
             let _ = app.run("file.saveAs", serde_json::json!({ "path": v2 }));
             let _ = app.run("file.new", serde_json::json!({}));
-            match generate_from_workspace(app, state) {
-                Ok(msg) => {
-                    state.execution_log.push(format!("[{now}] {msg}"));
-                    if is_publish {
-                        match app.run("file.exportPdf", serde_json::json!({ "path": v2_pdf })) {
-                            Ok(_) => {
-                                state
-                                    .execution_log
-                                    .push(format!("[{now}] {}", crate::i18n::tr(lang, "Exported release PDF: {path}").replace("{path}", &v2_pdf)));
-                                state.last_output_pdf = Some(v2_pdf);
-                                state.status_message = Some(("Kompilasi ke versi baru (v2) berhasil".into(), true));
-                            }
-                            Err(e) => state.status_message = Some((format!("Ekspor PDF gagal: {e}"), false)),
-                        }
-                    } else {
-                        state.status_message = Some(("Dokumen versi baru (v2) berhasil digenerate".into(), true));
-                    }
-                }
-                Err(e) => {
-                    state.execution_log.push(format!("[{now}] Error: {e}"));
-                    state.status_message = Some((format!("Generate gagal: {e}"), false));
-                }
-            }
+            start_compile_job(app, ctx, state, is_publish, lang);
         } else if act == 2 {
             state.execution_log.push(format!("[{now}] Menimpa tata letak aktif dengan hasil generate segar dari worksheet..."));
             let _ = app.run("file.new", serde_json::json!({}));
-            match generate_from_workspace(app, state) {
-                Ok(msg) => {
-                    state.execution_log.push(format!("[{now}] {msg}"));
-                    if is_publish {
-                        let pdf = format!("outputs/{stem}.pdf");
-                        match app.run("file.exportPdf", serde_json::json!({ "path": pdf })) {
-                            Ok(_) => {
-                                state.execution_log.push(format!("[{now}] Ekspor berkas PDF rilis: {pdf}"));
-                                state.last_output_pdf = Some(pdf);
-                                state.status_message = Some(("Kompilasi ulang & timpa dokumen berhasil".into(), true));
-                            }
-                            Err(e) => state.status_message = Some((format!("Ekspor PDF gagal: {e}"), false)),
-                        }
-                    } else {
-                        state.status_message = Some(("Dokumen berhasil ditimpa dengan generate segar".into(), true));
-                    }
-                }
-                Err(e) => {
-                    state.execution_log.push(format!("[{now}] Error: {e}"));
-                    state.status_message = Some((format!("Generate gagal: {e}"), false));
-                }
-            }
+            start_compile_job(app, ctx, state, is_publish, lang);
         }
-        crate::menus::pubgen_bar::set_orchestrator_mode(ctx, false);
     }
 }
 
@@ -4930,10 +5350,7 @@ mod tests {
             );
 
             // Verify Map Chart titles are present in the document
-            assert!(
-                doc.stories.values().any(|s| s.text.contains("Perbandingan Jumlah Penduduk")),
-                "Map title must be present in document stories!"
-            );
+            assert!(doc.stories.values().any(|s| s.text.contains("Perbandingan Jumlah Penduduk")), "Map title must be present in document stories!");
             assert!(
                 doc.stories.values().any(|s| s.text.contains("Comparison of Population Size")),
                 "Map English title must be present in document stories!"
@@ -4942,8 +5359,6 @@ mod tests {
             // Verify DDA subtitle has no release date or multi-line agency text
             assert!(!state.meta_subtitle.contains("Oktober"), "DDA subtitle must not contain release date: {}", state.meta_subtitle);
             assert!(!state.meta_subtitle.contains('\n'), "DDA subtitle must not contain newlines: {}", state.meta_subtitle);
-
-
 
             // Verify Bookmark debris is completely absent
             for s in doc.stories.values() {
@@ -5058,6 +5473,51 @@ mod tests {
         assert!(res_custom.map_is_custom);
         assert_eq!(res_custom.map_custom_geojson, "maps/custom_border.geojson");
         assert_eq!(res_custom.map_data_csv, "maps/data_custom.csv");
+    }
+
+    #[test]
+    fn test_toc_card_layout_style_roundtrip_and_settings() {
+        let mut state = OrchestratorWorkspaceState::default();
+        state.cards.clear();
+        let mut toc_card = PublicationCard::new_with(CardKind::Toc, "Daftar Tabel", "List of Tables", "Manual", 3, true);
+        toc_card.toc_style = "TOC Table".into();
+        toc_card.toc_layout_style = 1; // TablePage (BPS Catalog)
+        toc_card.toc_columns = "2 Kolom".into();
+        toc_card.toc_hanging_indent = true;
+        toc_card.toc_include_self = true;
+        toc_card.toc_pair_bilingual = true;
+        state.cards.push(toc_card);
+
+        let meta = state.to_metadata();
+        let meta_card = &meta.cards[0];
+
+        assert_eq!(meta_card.settings.get("toc_style").and_then(|v| v.as_str()), Some("TOC Table"));
+        assert_eq!(meta_card.settings.get("toc_layout_style").and_then(|v| v.as_u64()), Some(1));
+        assert_eq!(meta_card.settings.get("toc_columns").and_then(|v| v.as_str()), Some("2 Kolom"));
+        assert_eq!(meta_card.settings.get("toc_hanging_indent").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(meta_card.settings.get("toc_include_self").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(meta_card.settings.get("toc_pair_bilingual").and_then(|v| v.as_bool()), Some(true));
+
+        // Roundtrip back to state via IngestReport
+        let report = pubgen_core::excel::IngestReport {
+            profile_id: "bps_dda".into(),
+            metadata: meta,
+            csv: Vec::new(),
+            text: Vec::new(),
+            assets: Vec::new(),
+            warnings: Vec::new(),
+        };
+
+        let mut restored_state = OrchestratorWorkspaceState::default();
+        apply_ingest_report_to_state(&mut restored_state, "test.pubgen", &report);
+
+        let res_card = &restored_state.cards[0];
+        assert_eq!(res_card.toc_style, "TOC Table");
+        assert_eq!(res_card.toc_layout_style, 1, "toc_layout_style must be preserved as 1 (TablePage)");
+        assert_eq!(res_card.toc_columns, "2 Kolom");
+        assert!(res_card.toc_hanging_indent);
+        assert!(res_card.toc_include_self);
+        assert!(res_card.toc_pair_bilingual);
     }
 
     #[test]
@@ -5263,5 +5723,63 @@ mod tests {
                 let _ = app.run("file.saveAs", serde_json::json!({"path": target.to_string_lossy()}));
             }
         }
+    }
+
+    #[test]
+    fn test_toc_table_and_paragraph_exclusion_and_headers() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()).unwrap_or_default();
+        let pubgen_file = root.join("plan").join("pubgen").join("samples").join("DUAL_LANG").join("KECAMATAN KARAWANG TIMUR DALAM ANGKA.pubgen");
+        if !pubgen_file.is_file() {
+            return;
+        }
+
+        let opened = pubgen_core::container::open_pubgen(&pubgen_file).expect("open pubgen");
+        let report = pubgen_core::excel::IngestReport {
+            profile_id: opened.metadata.profile_id.clone(),
+            metadata: opened.metadata.clone(),
+            csv: opened.content.csv.clone(),
+            text: opened.content.text.clone(),
+            assets: opened.content.assets.clone(),
+            warnings: Vec::new(),
+        };
+        let mut state = OrchestratorWorkspaceState::default();
+        apply_ingest_report_to_state(&mut state, "KECAMATAN KARAWANG TIMUR DALAM ANGKA.pubgen", &report);
+
+        // Verify that cards 02_01_01 and 02_02_01 have real table titles and chapter/section settings
+        let c_02_01 = state.cards.iter().find(|c| c.chapter_id == "02_01_01").expect("02_01_01 card");
+        assert!(c_02_01.title.starts_with("Tabel 02.01.01"), "card 02_01_01 title must be table title, got: {}", c_02_01.title);
+        assert_eq!(c_02_01.settings.get("chapter").map(String::as_str), Some("Tabel 2 PEMERINTAHAN"));
+        assert_eq!(c_02_01.settings.get("section").map(String::as_str), Some("Tabel 02.01 Wilayah Administratif"));
+
+        let c_02_02 = state.cards.iter().find(|c| c.chapter_id == "02_02_01").expect("02_02_01 card");
+        assert!(c_02_02.title.starts_with("Tabel 02.02.01"), "card 02_02_01 title must be table title, got: {}", c_02_02.title);
+        assert!(!c_02_02.title.eq_ignore_ascii_case("subtitle"), "card 02_02_01 title must not be 'subtitle'");
+
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", serde_json::json!({"facingPages": true})).expect("new doc");
+        generate_from_workspace(&mut app, &state).expect("generate pages");
+
+        let active = app.session.active().expect("active document");
+        let all_text: Vec<&str> = active.doc.stories.values().map(|s| s.text.as_str()).collect();
+
+        // 1. Verify TOC Paragraph (Daftar Isi) story
+        let para_toc =
+            all_text.iter().find(|t| t.contains("Daftar Isi") || t.contains("Table of Contents")).copied().expect("Daftar Isi story exists");
+        assert!(!para_toc.contains("Tabel 01.01"), "TOC Paragraph must NOT contain Tabel 01.01: {para_toc}");
+        assert!(!para_toc.contains("Tabel 01.02"), "TOC Paragraph must NOT contain Tabel 01.02: {para_toc}");
+        assert!(!para_toc.contains("Tabel 02.01.01"), "TOC Paragraph must NOT contain Tabel 02.01.01: {para_toc}");
+        assert!(!para_toc.contains("Tabel 02.02.01"), "TOC Paragraph must NOT contain Tabel 02.02.01: {para_toc}");
+        assert!(!para_toc.contains("subtitle"), "TOC Paragraph must NOT contain subtitle: {para_toc}");
+
+        // 2. Verify TOC Table (Daftar Tabel) story
+        let table_toc =
+            all_text.iter().find(|t| t.contains("Daftar Tabel") || t.contains("List of Tables")).copied().expect("Daftar Tabel story exists");
+        assert!(table_toc.contains("2\tPEMERINTAHAN/GOVERNMENT"), "TOC Table must contain Chapter 2 header: {table_toc}");
+        assert!(table_toc.contains("2.1\tWilayah Administratif/Administrative Area"), "TOC Table must contain Section 2.1 header: {table_toc}");
+        assert!(table_toc.contains("2.1.1\tJumlah Rukun Warga"), "TOC Table must contain Table 2.1.1: {table_toc}");
+        assert!(table_toc.contains("2.2\tSumber Daya Manusia/Human Resources"), "TOC Table must contain Section 2.2 header: {table_toc}");
+        assert!(table_toc.contains("2.2.1\tJumlah Pegawai Negeri Sipil"), "TOC Table must contain Table 2.2.1: {table_toc}");
+        assert!(!table_toc.contains("2.1.1\t2 PEMERINTAHAN"), "TOC Table must NOT contain '2.1.1 2 PEMERINTAHAN': {table_toc}");
+        assert!(!table_toc.contains("2.2.1\tsubtitle"), "TOC Table must NOT contain '2.2.1 subtitle': {table_toc}");
     }
 }
