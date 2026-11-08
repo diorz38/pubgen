@@ -951,7 +951,7 @@ Dua batasan yang perlu diketahui: profil kustom hanya bertahan selama sesi (pili
 
 ## 13. Terjemahan AI & Memori Terminologi
 
-Pubgen menerjemahkan publikasi berbahasa Indonesia ke bahasa Inggris dengan model chat yang kompatibel dengan OpenAI pilihan Anda, dan menyimpan setiap keputusan di dalam paket proyek. Terjemahan disiapkan **sebelum** kompilasi: tahap **Translate Worksheet** di Orchestrator mengisi teks Inggris, Anda mengulasnya, lalu kompilasi merender judul, keterangan, dan catatan yang disimpannya — sel tabel dan badan narasi adalah pengecualian (lihat batasan). Tindakan per halaman di dalam dokumen tetap tersedia untuk membetulkan satu halaman secara manual.
+Pubgen menerjemahkan publikasi berbahasa Indonesia ke bahasa Inggris dengan model chat yang kompatibel dengan OpenAI pilihan Anda, dan menyimpan setiap keputusan di dalam paket proyek. Terjemahan disiapkan **sebelum** kompilasi: tahap **Translate Worksheet** di Orchestrator mengisi teks Inggris dan Anda mengulasnya. Halaman yang dihasilkan dari lembar kerja Orchestrator (**Generate Publication**) lalu merender teks Inggris itu — judul, keterangan, catatan, sel tabel yang berpasangan, dan badan narasi Inggris. Jalur kompilasi manifest/`pgs-cli compile` tidak membaca memori terjemahan (lihat batasan). Tindakan per halaman di dalam dokumen tetap tersedia untuk membetulkan satu halaman secara manual.
 
 Semua di bawah ini memerlukan build daring (`--features pubgen,ai-translate-online`; aplikasi Studio mengaktifkannya) dan penyedia yang sudah dikonfigurasi. Model NLLB luring tidak dapat berjalan di build ini — baris **Offline on this computer** di dialog penyiapan menyatakannya.
 
@@ -977,21 +977,21 @@ Di dock kanan Orchestrator, tab **Profil & Eksekusi** (antarmuka Inggris: **Prof
 5. Simpan setiap target yang diterima di memori sebagai *AI draft*, dan tulis bahasa Inggris bertipe judul ke kartunya sebagai **Judul EN**.
 6. Catat satu baris di LogEksekusi: translated / reused / skipped / failed.
 
-Tombol menampilkan progres (`Menerjemahkan dengan AI… 12/84`, berbahasa Indonesia di kedua bahasa antarmuka) dan bilah status mengulang totalnya. Bila semua unit sudah dikenal, tidak ada permintaan yang keluar dari mesin. Tekan **Generate Publication** (atau **Generate & Publish PDF**) sesudahnya: kompilasi merender teks Inggris yang tersimpan.
+Tombol menampilkan progres (`Menerjemahkan dengan AI… 12/84`, berbahasa Indonesia di kedua bahasa antarmuka) dan bilah status mengulang totalnya. Bila semua unit sudah dikenal, tidak ada permintaan yang keluar dari mesin. Tekan **Generate Publication** (atau **Generate & Publish PDF**) sesudahnya: generate dari lembar kerja merender teks Inggris yang tersimpan pada halaman baru.
 
 ### Yang diterjemahkan (per jenis kartu)
 
-| Kartu | Dikirim ke model | Bahasa Inggris disimpan di | Digambar oleh kompilasi |
+| Kartu | Dikirim ke model | Bahasa Inggris disimpan di | Dirender oleh Generate |
 |---|---|---|---|
 | **Cover** | judul publikasi dan baris kedua sampul | **Judul EN** kartu (data sampul) | baris judul Inggris sampul |
-| **Narrative** | judul, dan setiap paragraf tidak kosong dari badan RTF yang disiapkan | **Judul EN**; satu entri memori per paragraf | judul bab Inggris; badannya hanya bila kartu menyebut RTF Inggris (`file_en`) — lihat batasan |
+| **Narrative** | judul, dan setiap paragraf tidak kosong dari badan RTF yang disiapkan | **Judul EN**; satu entri memori per paragraf | judul bab Inggris; badannya dibangun ulang dari memori (atau RTF `file_en` bila kartu menyebutkannya) |
 | **Divider** | judul (nomornya disamarkan, tidak diterjemahkan) | **Judul EN** | judul Inggris dari templat pembatas |
-| **Table** | judul; setiap sel baris pertama (masing-masing dipecah pada `--`); sel pertama setiap baris berikutnya — label baris, atau baris catatan/sumber yang terdeteksi otomatis | **Judul EN**; satu entri memori per header, label, dan catatan | judul pada jalur templat, serta baris catatan/sumber; sel header dan baris hanya melalui tindakan tabel di dalam dokumen (lihat batasan) |
+| **Table** | judul; setiap sel baris pertama (masing-masing dipecah pada `--`); sel pertama setiap baris berikutnya — label baris, atau baris catatan/sumber yang terdeteksi otomatis | **Judul EN**; satu entri memori per header, label, dan catatan | judul dan baris catatan/sumber, serta sel header dan baris yang berpasangan; tabel langsung BRS tetap satu bahasa (lihat batasan) |
 | **Chart** | judul dan label seri | **Judul EN**; memori | judul grafik Inggris |
 | **MapChart** | judul; kolom `title` dari sheet peta | **Judul EN**; memori | judul peta — kolom `title_en` di sheet peta tetap menang |
 | **Image** | keterangan, atau judul bila tidak ada keterangan | **Judul EN** | keterangan di bawah grafik |
 | **Toc** | hanya judul daftar itu sendiri; entri mewarisi bahasa Inggris kartunya dan tidak pernah diterjemahkan sendiri | **Judul EN** | judul Inggris daftar |
-| **Header/Footer** | tidak ada: teks header dan footer bukan bagian dari tahap lembar kerja | — | `{title_en}` di templat header/footer mencetak judul publikasi yang diterjemahkan |
+| **Header/Footer** | belum ada: `UnitRole::HeaderFooter` dideklarasikan tetapi tidak ada jenis kartu yang mengumpulkan baris tersebut | — | `{title_en}` di templat header/footer mencetak judul publikasi yang diterjemahkan |
 
 **Tidak pernah diterjemahkan** — unit tidak dikirim bila:
 
@@ -1000,6 +1000,8 @@ Tombol menampilkan progres (`Menerjemahkan dengan AI… 12/84`, berbahasa Indone
 - pengenal — ISSN/ISBN, kode katalog (`Katalog BPS: …`), URL, alamat e-mail, jalur yang berakhiran ekstensi berkas yang dikenal;
 - nama diri yang dilindungi — nama wilayah GeoJSON pada kartu peta (`nmdesa`/`nmkec`), serta nama instansi, kantor, dan kontak pada sampul;
 - sudah dwibahasa (mengandung ` / ` atau pemisah baris paksa) atau sudah dikenal (teks yang sama hanya dikumpulkan sekali).
+
+Baris header dan footer juga tidak dikumpulkan: `UnitRole::HeaderFooter` ada, tetapi tidak ada jenis kartu yang menghasilkannya, sehingga teks header/footer tetap berbahasa Indonesia; token `{title_en}` tetap mencetak judul yang diterjemahkan.
 
 Metadata sampul tidak pernah dikumpulkan sama sekali: tahun, volume, katalog, ISSN/ISBN, nomor/tanggal/bulan rilis, instansi, alamat kantor, serta nama, telepon, e-mail, dan foto PIC. Nilai sumbu dan label data grafik, sel angka tabel, nomor halaman daftar isi, serta batas klasifikasi dan angka legenda peta digambar dari angka, bukan teks. Angka di dalam unit yang diterjemahkan (judul, catatan) disamarkan dan kembali identik byte demi byte.
 
@@ -1065,7 +1067,8 @@ pgs-cli translate <PROJECT.pubgen> --provider <groq|custom|local> --model <MODEL
 ### Batasan yang perlu diketahui
 
 - **Halaman tabel langsung BRS tetap satu bahasa.** Impor sheet BRS merender tabel semacam itu dengan judul dan sel satu bahasa Indonesia; hanya jalur tabel templat (DDA) yang menulis judul tabel dwibahasa dan baris catatan/sumber berpasangan.
-- **Sel header/baris tabel dan badan narasi Inggris tidak digambar oleh kompilasi.** Langkah generasi yang memasangkan sel tabel dan membangun ulang badan narasi Inggris dari memori adalah bagian dari mode AI per halaman, dan kompilasi mematikannya; karena itu kompilasi menggambar sel dan badan berbahasa Indonesia. Gunakan tindakan tabel dan ulasan di dalam dokumen untuk halaman tersebut, atau sebutkan RTF Inggris di `file_en` kartu.
+- **Sel tabel Inggris dan badan narasi Inggris dirender oleh Generate, bukan oleh kompilasi manifest.** Halaman yang dihasilkan dari lembar kerja Orchestrator memasangkan setiap sel header dan baris dari memori (bahasa Inggris di baris kedua) dan membangun ulang badan narasi Inggris; jalur kompilasi manifest/`pgs-cli compile` tidak membaca memori, jadi merender sel dan badan berbahasa Indonesia. Tidak ada sakelar per halaman terpisah untuk ini: tahap **Translate Worksheet** mengisi memori, dan Generate membacanya otomatis. Anda tetap bisa membetulkan satu halaman tabel dengan tindakan tabel di dalam dokumen, atau menyebut RTF Inggris di `file_en` kartu.
+- **Baris header dan footer belum diterjemahkan.** `UnitRole::HeaderFooter` dideklarasikan tetapi tidak ada jenis kartu yang mengumpulkan baris tersebut, sehingga teks header/footer tetap berbahasa Indonesia; `{title_en}` di templat tetap mencetak judul publikasi yang diterjemahkan.
 - **Paragraf narasi tanpa bahasa Inggris yang bisa dipakai mempertahankan teks Indonesianya.** Saat badan Inggris dibangun ulang dari memori, paragraf yang targetnya hilang, kosong, atau akan menambah pemisah baris tetap memakai paragraf Indonesia; jumlah paragraf dan setiap gaya paragraf dipertahankan, dan sisa badan tetap terbit.
 - **Deteksi judul Inggris membutuhkan gaya paragraf.** Dalam spread narasi, judul dikenali dari gaya paragrafnya (**Title**, **Heading 1**, **Heading 2**). Dokumen Indonesia lama yang paragrafnya tidak memakai gaya tersebut jatuh ke heuristik teks: judul Indonesia yang dikenal, plus paragraf pendek berawalan `A. `, `B. `, atau `C. ` yang dikenali sebagai **Title**.
 - **Kompilasi manifest tidak menerjemahkan.** `pubgen.compileProject` dan `pgs-cli compile` mulai dari keadaan generasi baru: keduanya tidak menjalankan tahap lembar kerja dan tidak membaca memori, jadi hanya merender kolom Inggris milik buku kerja itu sendiri dan glosarium. Lakukan Generate dari Orchestrator untuk bahasa Inggris dari AI.

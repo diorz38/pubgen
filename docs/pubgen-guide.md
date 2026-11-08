@@ -1054,7 +1054,7 @@ Two limits worth knowing: a customised profile lives for the session only (the a
 
 ## 13. AI Translation & Terminology Memory
 
-Pubgen translates an Indonesian publication into English with an OpenAI-compatible chat model you choose, and keeps every decision in the project package. Translation is prepared **before** a compile: the Orchestrator's **Translate Worksheet** stage fills the English, you review it, and a compile renders the titles, captions and notes the stage stored — table cells and the narrative body are the exception (see Limits). The in-document per-page actions are still there for fixing a single page by hand.
+Pubgen translates an Indonesian publication into English with an OpenAI-compatible chat model you choose, and keeps every decision in the project package. Translation is prepared **before** a compile: the Orchestrator's **Translate Worksheet** stage fills the English and you review it. Pages generated from the Orchestrator worksheet (**Generate Publication**) then render that English — titles, captions, notes, the paired table cells and the English narrative body. The manifest/`pgs-cli compile` path does not read the translation memory (see Limits). The in-document per-page actions are still there for fixing a single page by hand.
 
 Everything below needs the online build (`--features pubgen,ai-translate-online`; the Studio app enables it) and a configured provider. The offline NLLB model cannot run in this build — the setup dialog's **Offline on this computer** row says so.
 
@@ -1080,21 +1080,21 @@ The Orchestrator's right dock, **Profile & Execution** tab, has **Translate Work
 5. Store every accepted target in the memory as an *AI draft*, and write title-type English onto its card as **Title EN**.
 6. Log one line in LogEksekusi: translated / reused / skipped / failed.
 
-The button shows the progress (`Menerjemahkan dengan AI… 12/84`, Indonesian in both interface languages) and the status bar repeats the totals. When every unit is already known, no request leaves the machine. Press **Generate Publication** (or **Generate & Publish PDF**) afterwards: the compile renders the stored English.
+The button shows the progress (`Menerjemahkan dengan AI… 12/84`, Indonesian in both interface languages) and the status bar repeats the totals. When every unit is already known, no request leaves the machine. Press **Generate Publication** (or **Generate & Publish PDF**) afterwards: generating from the worksheet renders the stored English on the new pages.
 
 ### What is translated (per card type)
 
-| Card | Sent to the model | English kept in | Painted by a Compile |
+| Card | Sent to the model | English kept in | Rendered by Generate |
 |---|---|---|---|
 | **Cover** | the publication title and the second cover line | the card's **Title EN** (cover data) | the cover's English title line |
-| **Narrative** | the title, and every non-empty paragraph of the staged RTF body | **Title EN**; one memory entry per paragraph | the English chapter title; the body only when the card names an English RTF (`file_en`) — see the limits |
+| **Narrative** | the title, and every non-empty paragraph of the staged RTF body | **Title EN**; one memory entry per paragraph | the English chapter title; the body rebuilt from the memory (or the card's `file_en` RTF when it names one) |
 | **Divider** | the title (its number is masked, not translated) | **Title EN** | the divider template's English title |
-| **Table** | the title; every cell of the first row (each split on `--`); the first cell of every later row — a row label, or an auto-detected note/source line | **Title EN**; one memory entry per header, label and note | the title on the template path, and the note/source line; the header and row cells only through the in-document table action (see the limits) |
+| **Table** | the title; every cell of the first row (each split on `--`); the first cell of every later row — a row label, or an auto-detected note/source line | **Title EN**; one memory entry per header, label and note | the title and the note/source line, plus the paired header and row cells; a BRS direct table stays single-language (see the limits) |
 | **Chart** | the title and the series labels | **Title EN**; memory | the chart's English title |
 | **MapChart** | the title; the map sheet's `title` column | **Title EN**; memory | the map title — a `title_en` column in the map sheet still wins |
 | **Image** | the caption, or the title when there is no caption | **Title EN** | the caption under the graphic |
 | **Toc** | the list's own title only; entries inherit their cards' English and are never translated on their own | **Title EN** | the list's English title |
-| **Header/Footer** | nothing: header and footer text is not part of the worksheet stage | — | `{title_en}` in a header/footer template prints the translated publication title |
+| **Header/Footer** | nothing yet: `UnitRole::HeaderFooter` is declared but no card kind collects those lines | — | `{title_en}` in a header/footer template prints the translated publication title |
 
 **Never translated** — a unit is not sent when it is:
 
@@ -1103,6 +1103,8 @@ The button shows the progress (`Menerjemahkan dengan AI… 12/84`, Indonesian in
 - an identifier — ISSN/ISBN, a catalogue code (`Katalog BPS: …`), a URL, an e-mail address, a path ending in a known file extension;
 - a protected proper name — GeoJSON region names on map cards (`nmdesa`/`nmkec`), and the cover's agency, office and contact names;
 - already bilingual (it contains ` / ` or a forced line break) or already known (the same text is collected once).
+
+Header and footer lines are not collected either: `UnitRole::HeaderFooter` exists but no card kind produces it, so the header/footer's own text stays Indonesian; the `{title_en}` token still prints the translated title.
 
 Cover metadata is never collected at all: year, volume, catalogue, ISSN/ISBN, release number/date/month, agency, office address, and the PIC's name, phone, e-mail and photo. Chart axis values and data labels, table numeric cells, TOC page numbers, and map classification breaks and legend numbers are drawn from numbers, not text. Numbers inside a translated unit (a title, a note) are masked and come back byte-identical.
 
@@ -1168,7 +1170,8 @@ pgs-cli translate <PROJECT.pubgen> --provider <groq|custom|local> --model <MODEL
 ### Limits worth knowing
 
 - **A BRS direct table page stays single-language.** The BRS sheet import renders such a table with its Indonesian title and single-language cells; only the template (DDA) table path writes a bilingual table title and the paired note/source line.
-- **Table header/row cells and the English narrative body are not painted by a Compile.** The generation step that pairs table cells and rebuilds the English narrative body from the memory belongs to the per-page AI mode, which a compile leaves off; a Compile therefore paints the Indonesian cells and body. Use the in-document table and review actions for those pages, or name an English RTF in the card's `file_en`.
+- **English table cells and the English narrative body render on Generate, not on the manifest compile.** Pages generated from the Orchestrator worksheet pair each header and row cell from the memory (English on a second line) and rebuild the English narrative body; the manifest/`pgs-cli compile` path does not read the memory, so it renders the Indonesian cells and body. There is no separate per-page switch for this: the worksheet's **Translate Worksheet** stage fills the memory, and Generate reads it automatically. You can still fix a single table page with the in-document table action, or name an English RTF in the card's `file_en`.
+- **Header and footer lines are not translated yet.** `UnitRole::HeaderFooter` is declared but no card kind collects those lines, so a header/footer's own text stays Indonesian; `{title_en}` in a template still prints the translated publication title.
 - **A narrative paragraph with no usable English keeps its Indonesian text.** When the English body is rebuilt from the memory, a paragraph whose target is missing, empty, or would add a line break keeps the Indonesian paragraph; the paragraph count and every paragraph style are preserved, and the rest of the body still publishes.
 - **English heading detection needs paragraph styles.** In a narrative spread, a heading is recognised by its paragraph style (**Title**, **Heading 1**, **Heading 2**). A legacy Indonesian document whose paragraphs carry no such style falls back to text heuristics: the known Indonesian headings, plus short paragraphs starting `A. `, `B. ` or `C. ` recognised as **Title**.
 - **The manifest compile does not translate.** `pubgen.compileProject` and `pgs-cli compile` start from a fresh generation state: they do not run the worksheet stage and do not read the memory, so they render only the workbook's own English columns and the glossary. Generate from the Orchestrator for AI English.
