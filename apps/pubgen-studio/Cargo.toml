@@ -33,3 +33,4 @@ winresource = "0.1"
 
 [target.'cfg(windows)'.dependencies]
 winsafe = { version = "0.0.29", default-features = false, features = ["user"] }
+winreg = "0.55"

@@ -1,4 +1,4 @@
-﻿//! PubGen Studio: Dual-Mode Publication Orchestrator & Layout Studio.
+//! PubGen Studio: Dual-Mode Publication Orchestrator & Layout Studio.
 //!
 //! Usage: `pubgen-studio [project.pubgen | document.designcraft]`
 //!
@@ -10,6 +10,7 @@
 
 mod app;
 mod domain;
+mod file_assoc;
 mod mode;
 mod project;
 mod window_frame;
@@ -36,11 +37,14 @@ fn app_icon() -> Option<egui::IconData> {
     #[cfg(target_os = "macos")]
     let png: &[u8] = include_bytes!("../../../assets/app-icon/designcraft-macos-512.png");
     #[cfg(not(target_os = "macos"))]
-    let png: &[u8] = include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/ai.storyteller.designcraft.png");
+    let png: &[u8] = include_bytes!("../../../assets/app-icon/pgs_icon_256.png");
     eframe::icon_data::from_png_bytes(png).ok()
 }
 
 fn main() -> eframe::Result<()> {
+    // Automatically associate .pubgen files with PGS in Windows Registry (per-user)
+    file_assoc::register_pubgen_file_association();
+
     let args: Vec<String> = std::env::args().skip(1).collect();
     let initial_file = args.first().map(PathBuf::from);
 

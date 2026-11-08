@@ -4658,6 +4658,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "winreg",
  "winresource",
  "winsafe",
  "zip 3.0.0",
