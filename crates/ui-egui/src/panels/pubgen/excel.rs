@@ -3650,8 +3650,10 @@ pub(crate) fn apply_excel_cover(st: &mut PubgenState, cover: &ExcelCoverData, ba
         st.cover_style = 13;
         st.cover_include_inside_back = false;
         // BRS is single-language by default, but the document language stays authoritative:
-        // a bilingual choice must survive the profile defaults (fix round 2).
-        st.bilingual_output = doc_language_is_bilingual(&st.doc_language);
+        // a bilingual choice must survive the profile defaults (fix round 2). It also needs
+        // actual English content: a worksheet with no translations stays single-language
+        // (fix round 3), so the default language alone cannot change the output.
+        st.bilingual_output = doc_language_is_bilingual(&st.doc_language) && !st.translations.is_empty();
         st.card2_table_footer = false;
     } else if is_dda_profile {
         st.cover_include_inside_back = true;
@@ -3808,9 +3810,11 @@ pub fn generate_publication_pages(app: &mut DesignApp, st: &mut PubgenState) -> 
     // defaults to single-language ("Indonesian") when no language selects English, but a
     // bilingual document keeps the EN titles/captions the translation stage produced. A
     // profile or margin override earlier in the compile may have reset the flag, so it is
-    // re-derived from the language here, not merely preserved.
+    // re-derived from the language here, not merely preserved. Bilingual output also needs
+    // real English content: with an empty translation map the pages stay single-language
+    // (fix round 3), so a fresh worksheet's default language cannot change the output.
     if is_brs {
-        st.bilingual_output = doc_language_is_bilingual(&st.doc_language);
+        st.bilingual_output = doc_language_is_bilingual(&st.doc_language) && !st.translations.is_empty();
     }
     st.card2_row_conditions = true;
 
@@ -4645,6 +4649,34 @@ pub(crate) mod flow_tests {
         assert!(
             !texts.iter().any(|t| t.trim() == "Figure 1 BPS Office"),
             "the English caption must not leak into a single-language document, found: {texts:?}"
+        );
+    }
+
+    /// A fresh worksheet defaults to `doc_language = "Indonesian-English"` but has no
+    /// translation memory yet. Without a single English caption the compile must stay
+    /// single-language at both decision points, otherwise every untranslated BRS build
+    /// silently changed its layout (fix round 3).
+    #[test]
+    fn test_brs_pipeline_stays_single_language_without_translations() {
+        let mut st = brs_image_pipeline_state("Indonesian-English");
+        st.translations.clear();
+
+        // The cover-metadata decision (`apply_excel_cover`) runs before generation.
+        apply_excel_cover(&mut st, &ExcelCoverData::default(), None);
+        assert!(!st.bilingual_output, "cover metadata must not enable bilingual output without translations");
+
+        // Generation re-derives the flag; keep the seeded bilingual value to prove it is cleared.
+        st.bilingual_output = true;
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let res = generate_publication_pages(&mut app, &mut st);
+        assert!(res.is_ok(), "BRS pipeline generation failed: {res:?}");
+        assert!(!st.bilingual_output, "an untranslated Indonesian-English worksheet must not generate bilingual output on BRS");
+
+        let texts = pipeline_stories(&app);
+        assert!(texts.iter().any(|t| t.trim() == "Gambar 1 Kantor BPS"), "the Indonesian image caption must render, found: {texts:?}");
+        assert!(
+            !texts.iter().any(|t| t.trim() == "Figure 1 BPS Office"),
+            "the English caption must not appear without a translation, found: {texts:?}"
         );
     }
 }
