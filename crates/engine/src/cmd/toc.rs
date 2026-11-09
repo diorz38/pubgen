@@ -283,14 +283,27 @@ pub fn collect(d: &Document, entries: &[TocEntry], skip: &[StoryId]) -> Vec<Foun
             // ("Geografi" → "BAB 01 Geografi"). The line has its own box above the title, so a
             // page whose first text box *is* the entry's own frame (a front-matter sheet that
             // opens with its ISSN line, say) keeps its own text alone.
-            let (text, prefix) = if e.chapter_number {
+            let (text, prefix, en_start) = if e.chapter_number {
                 let own_box = first.as_ref().is_none_or(|(frame, _)| *frame == ft.frame);
-                match first.as_ref().map(|(_, t)| t.trim()).filter(|p| !p.is_empty() && !own_box) {
+                let (mut t, p) = match first.as_ref().map(|(_, t)| t.trim()).filter(|p| !p.is_empty() && !own_box) {
                     Some(p) if !p.eq_ignore_ascii_case(&text) => (format!("{p} {text}"), format!("{p} ")),
                     _ => (text, String::new()),
+                };
+                let mut en_s = None;
+                if e.pair_columns
+                    && !t.contains(" / ")
+                    && let Some(en_title) = find_same_page_chapter_en(d, abs, ft.frame)
+                {
+                    let sep = e.pair_separator.as_deref().unwrap_or(" / ");
+                    let right = strip_chapter_token(&en_title);
+                    if !right.is_empty() {
+                        en_s = Some(t.len() + sep.len());
+                        t = format!("{t}{sep}{right}");
+                    }
                 }
+                (t, p, en_s)
             } else {
-                (text, String::new())
+                (text, String::new(), None)
             };
             let prefix_len = prefix.chars().count();
             // The frame's column: left or right of its page's center (the Dual Lang RXX layout's
@@ -309,7 +322,7 @@ pub fn collect(d: &Document, entries: &[TocEntry], skip: &[StoryId]) -> Vec<Foun
                 column,
                 prefix_len,
                 prefix,
-                en_start: None,
+                en_start,
             });
         }
     }
@@ -429,6 +442,28 @@ fn strip_chapter_token(s: &str) -> &str {
         Some(at) => s[at + numbered.len()..].trim_start_matches(['.', ':', ',']).trim_start(),
         None => s,
     }
+}
+
+/// Look for an English chapter title frame on the same page `abs` (e.g. "Chapter 01 Geography"
+/// in bilingual review layout where both language headers share the same opening spread).
+fn find_same_page_chapter_en(d: &Document, abs: usize, own_frame: ItemId) -> Option<String> {
+    let (si, _) = d.page_loc(abs)?;
+    let spread = d.spreads.get(si)?;
+    for it in &spread.items {
+        if it.id == own_frame || it.label.contains("header") || it.label.contains("footer") || it.label == "hf" {
+            continue;
+        }
+        let Some(tf) = it.text_frame() else { continue };
+        if d.page_of_item(it.id) != Some(abs) {
+            continue;
+        }
+        let Some(story) = d.story(tf.story) else { continue };
+        let line = story.text.lines().next().unwrap_or("").trim();
+        if it.label == "pubgen_chapter_en" || line.to_lowercase().starts_with("chapter") {
+            return Some(line.to_string());
+        }
+    }
+    None
 }
 
 /// The topmost, then leftmost, text box whose center sits on absolute page `abs`, with the first
@@ -1214,6 +1249,44 @@ mod tests {
         let runs = toc_runs(&s);
         assert!(runs.iter().any(|(t, st)| t == "Geography" && st == "TOC English"), "{runs:?}");
         assert!(runs.iter().all(|(t, _)| t != "Chapter 01"), "the twin's own chapter line is dropped: {runs:?}");
+    }
+
+    #[test]
+    fn pair_columns_folds_same_page_chapter_twin_into_the_chapter_row() {
+        // Dual Lang layout where Indonesian and English chapter headers are stacked on the SAME page:
+        // Textbox 1: "BAB 01" (first box)
+        // Textbox 2: "Geografi" (style: TOC Chapter)
+        // Textbox 3: "Chapter 01 Geography" (English chapter title)
+        let mut s = Session::new();
+        s.execute("file.new", &json!({"pages": 2, "facingPages": false})).unwrap();
+        for n in ["TOC Chapter", "TOC Entry", "Body"] {
+            s.execute("style.paragraph.create", &json!({"name": n})).unwrap();
+        }
+        let put = |s: &mut Session, spread: usize, rect: [f64; 4], text: &str, style: &str| {
+            let r = s.execute("frame.create", &json!({"spread": spread, "rect": rect, "content": "text", "text": text})).unwrap();
+            s.execute("text.select", &json!({"story": r["story"], "anchor": 0, "focus": 0})).unwrap();
+            s.execute("style.paragraph.apply", &json!({"name": style})).unwrap();
+        };
+        put(&mut s, 0, [36.0, 36.0, 300.0, 72.0], "BAB 01", "TOC Entry");
+        put(&mut s, 0, [36.0, 76.0, 300.0, 108.0], "Geografi", "TOC Chapter");
+        put(&mut s, 0, [36.0, 112.0, 300.0, 140.0], "Chapter 01 Geography", "Body");
+
+        let entries = json!({"entries": [{"style": "TOC Chapter", "chapterNumber": true, "pairColumns": true}]});
+        let rows = s.execute("toc.entries", &entries).unwrap();
+        assert_eq!(
+            rows,
+            json!([
+                {"level": 1, "text": "BAB 01 Geografi / Geography", "page": "1"},
+            ])
+        );
+
+        s.execute(
+            "toc.generate",
+            &json!({"page": 2, "title": "", "entries": [{"style": "TOC Chapter", "chapterNumber": true, "pairColumns": true}]}),
+        )
+        .unwrap();
+        let runs = toc_runs(&s);
+        assert!(runs.iter().any(|(t, st)| t == "Geography" && st == "TOC English"), "{runs:?}");
     }
 
     #[test]

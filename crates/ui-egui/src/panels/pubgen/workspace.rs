@@ -4937,6 +4937,10 @@ fn poll_translate_job(state: &mut OrchestratorWorkspaceState, app: &DesignApp, c
     state.translate_units.clear();
     state.translate_glossary_pairs.clear();
 
+    super::with_state(ctx, |pubgen_st| {
+        super::translate_stage::seed_pubgen_state(pubgen_st, &state.tm);
+    });
+
     // Trigger AI Quota Update modal popup (0.8.4 parity)
     super::with_state(ctx, |pubgen_st| {
         super::ai::push_groq_quota_popup(pubgen_st, provider);
@@ -5358,7 +5362,7 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         toc_st.toc_hanging_indent = card.toc_hanging_indent;
         toc_st.toc_include_self = card.toc_include_self;
         toc_st.toc_pair_bilingual = card.toc_pair_bilingual;
-        toc_st.bilingual_output = card.toc_pair_bilingual && !state.doc_language.starts_with("Indonesian");
+        toc_st.bilingual_output = card.toc_pair_bilingual && state.doc_language != "Indonesian";
 
         let plan = super::toc::TocPlan::from_state(&toc_st);
         let _ = super::toc::generate_toc(app, &toc_st, target_page, &plan, false);
@@ -6556,6 +6560,21 @@ mod tests {
                 doc2.stories.values().any(|s| s.text.contains("Socio-Economic Dynamics and Employment in East Karawang")),
                 "AI translated body must be placed in document stories for BAB 04!"
             );
+        }
+    }
+
+    #[test]
+    fn test_inspect_r03_import_and_translate() {
+        let rtf_bytes = std::fs::read("plan/pubgen/samples/DUAL_LANG/rtf/R03.rtf").expect("read R03.rtf");
+        let imported = designcraft_textimport::import("R03.rtf", &rtf_bytes).expect("import R03.rtf");
+        let story = &imported.story;
+        let ranges = story.para_ranges();
+        println!("R03.rtf para_ranges count: {}", ranges.len());
+        for (i, r) in ranges.iter().enumerate() {
+            let slice = story.slice(r.clone()).trim();
+            if !slice.is_empty() {
+                println!("  P[{}]: len={} text={:?}", i, slice.len(), &slice[..slice.len().min(60)]);
+            }
         }
     }
 

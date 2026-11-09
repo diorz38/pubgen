@@ -1448,12 +1448,20 @@ pub fn translated_body_rtf(st: &PubgenState, source_rtf: &str) -> Option<PathBuf
     let bytes = std::fs::read(&source).ok()?;
     let english = super::translate_stage::translated_body_rtf_bytes(&bytes, &|paragraph| {
         let trimmed = paragraph.trim();
+        if trimmed.eq_ignore_ascii_case("ulasan") {
+            return Some("REVIEW".to_string());
+        }
         if let Some(target) = st.translations.get(trimmed) {
             return Some(target.clone());
         }
         let normalized = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
         if let Some(target) = st.translations.get(&normalized) {
             return Some(target.clone());
+        }
+        for (k, v) in &st.translations {
+            if k.trim().eq_ignore_ascii_case(trimmed) {
+                return Some(v.clone());
+            }
         }
         let lines: Vec<&str> = trimmed.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
         if lines.len() > 1 {

@@ -214,7 +214,63 @@ pub fn unmask(output: &str, masked: &Masked) -> Result<String, MaskError> {
     Ok(out)
 }
 
-/// Every numeric run in order, `%` stripped — for comparing source and output.
+/// Normalize a numeric run for cross-language statistical comparison:
+/// - Strips thousand separators (`.` or `,`) when followed by groups of 3 digits.
+/// - Unifies decimal markers (`.` and `,`) so Indonesian `1,93` matches English `1.93`.
+/// - Normalizes ratio colons/slashes (`30:1` or `30 to 1`).
+pub fn normalize_number_run(run: &str) -> String {
+    let clean = run.trim_matches(|c: char| !c.is_ascii_digit());
+    if clean.is_empty() {
+        return String::new();
+    }
+    // If it's a simple integer
+    if clean.chars().all(|c| c.is_ascii_digit()) {
+        return clean.to_string();
+    }
+
+    // Check if the string has standard thousand separators (e.g. 1.234.567 or 1,234,567)
+    // or decimal fractions (e.g. 1,93 vs 1.93, 1.234,56 vs 1,234.56)
+    if clean.contains('.') && clean.contains(',') {
+        let last_dot = clean.rfind('.').unwrap_or(0);
+        let last_comma = clean.rfind(',').unwrap_or(0);
+        if last_comma > last_dot {
+            // Indonesian format: 1.234,56 -> remove dots, replace comma with dot
+            clean.replace('.', "").replace(',', ".")
+        } else {
+            // English format: 1,234.56 -> remove commas
+            clean.replace(',', "")
+        }
+    } else if clean.contains(',') {
+        // Could be decimal (1,93) or thousand (1,234)
+        let parts: Vec<&str> = clean.split(',').collect();
+        if parts.len() == 2 && parts[1].len() != 3 {
+            // Decimal marker: 1,93 -> 1.93
+            format!("{}.{}", parts[0], parts[1])
+        } else if parts.iter().skip(1).all(|p| p.len() == 3) {
+            // Thousands: 1,234 -> 1234
+            clean.replace(',', "")
+        } else {
+            // Fallback decimal
+            clean.replace(',', ".")
+        }
+    } else if clean.contains('.') {
+        // Could be thousand (1.234) or decimal (1.93)
+        let parts: Vec<&str> = clean.split('.').collect();
+        if parts.len() == 2 && parts[1].len() != 3 {
+            // Decimal: 1.93
+            clean.to_string()
+        } else if parts.iter().skip(1).all(|p| p.len() == 3) {
+            // Indonesian thousand: 1.234 -> 1234
+            clean.replace('.', "")
+        } else {
+            clean.to_string()
+        }
+    } else {
+        clean.to_string()
+    }
+}
+
+/// Every numeric run in order, normalized for comparing source and output.
 pub fn number_census(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     let mut out = Vec::new();
@@ -230,7 +286,10 @@ pub fn number_census(text: &str) -> Vec<String> {
                 i += 1;
             }
             if run.chars().any(|c| c.is_ascii_digit()) {
-                out.push(run);
+                let norm = normalize_number_run(&run);
+                if !norm.is_empty() {
+                    out.push(norm);
+                }
             }
         } else {
             i += 1;
@@ -294,8 +353,10 @@ mod tests {
     }
 
     #[test]
-    fn number_census_preserves_indonesian_format() {
-        assert_eq!(number_census("Total 1.234,56 jiwa (2026) 12,5%"), vec!["1.234,56", "2026", "12,5"]);
+    fn number_census_normalizes_cross_language_number_formats() {
+        assert_eq!(number_census("Total 1.234,56 jiwa (2026) 12,5%"), vec!["1234.56", "2026", "12.5"]);
+        // And English output format with commas/dots matches the same census
+        assert_eq!(number_census("Total 1,234.56 people (2026) 12.5%"), number_census("Total 1.234,56 jiwa (2026) 12,5%"));
     }
 
     #[test]

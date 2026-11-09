@@ -463,30 +463,27 @@ pub fn translated_body_rtf_bytes(source: &[u8], lookup: &dyn Fn(&str) -> Option<
     let story = &imported.story;
     let mut translations: Vec<Option<String>> = Vec::new();
     let mut any = false;
-    let mut any_body = false;
     let ranges = story.para_ranges();
     for range in &ranges {
         let p_text = story.slice(range.clone());
         let trimmed = p_text.trim();
         let english = usable_target(lookup(trimmed));
-        let is_heading_only =
-            trimmed.eq_ignore_ascii_case("ulasan") || trimmed.eq_ignore_ascii_case("review") || trimmed.eq_ignore_ascii_case("overview");
-        if english.is_some() && !is_heading_only {
-            any_body = true;
-        }
         any |= english.is_some();
         translations.push(english);
     }
-    let valid = if ranges.len() > 1 { any_body } else { any };
-    valid.then(|| render_body(&rebuilt_story(story, &translations)).into_bytes())
+    any.then(|| render_body(&rebuilt_story(story, &translations)).into_bytes())
 }
 
-/// A target usable as one paragraph: trimmed, non-empty and a single line. A target carrying
-/// `\n` or `\r` would make `paragraphs.join("\n")` produce more paragraphs than `source.paras`,
-/// shifting every later paragraph format (and `Story::check` rejects such a story), so it counts
-/// as missing and the paragraph keeps its Indonesian text. The TM entry itself is never rewritten.
+/// A target usable as one paragraph: trimmed, non-empty and flattened into a single line.
+/// Any embedded `\n` or `\r` is collapsed into spaces so `paragraphs.join("\n")` maintains the
+/// exact paragraph count matching `source.paras` (which `Story::check` requires).
 fn usable_target(target: Option<String>) -> Option<String> {
-    target.map(|target| target.trim().to_string()).filter(|target| !target.is_empty() && !target.contains('\n') && !target.contains('\r'))
+    target
+        .map(|target| {
+            let one_line = target.replace('\r', " ").replace('\n', " ");
+            one_line.split_whitespace().collect::<Vec<_>>().join(" ")
+        })
+        .filter(|target| !target.is_empty())
 }
 
 /// Mask and request every segment of every translatable paragraph, then rebuild the body by

@@ -2233,7 +2233,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                         resolved_en_rtf = None;
                     }
                 }
-                if resolved_en_rtf.is_none() && st.translate_with_ai && !file_val.is_empty() {
+                if resolved_en_rtf.is_none() && !file_val.is_empty() {
                     resolved_en_rtf = ai::translated_body_rtf(st, file_val);
                 }
             }
@@ -2299,7 +2299,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                     format!("Chapter {num_val} {title_line}")
                 };
                 if !en_header_text.is_empty() {
-                    frame_with_font_full(
+                    let sid = frame_with_font_full(
                         app,
                         spread_idx,
                         [margin.x0, header_y, margin.x1, header_y + 28.0],
@@ -2309,6 +2309,17 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                         15.0,
                         None,
                     );
+                    if let Some(sid) = sid {
+                        let _ = app.session.edit(|doc, _| {
+                            let frames = doc.story(designcraft_doc::StoryId(sid)).map(|st| st.frames.clone()).unwrap_or_default();
+                            for fid in frames {
+                                if let Some(it) = doc.item_mut(fid) {
+                                    it.label = "pubgen_chapter_en".to_string();
+                                }
+                            }
+                            Ok(serde_json::Value::Null)
+                        });
+                    }
                     header_y += 38.0;
                 }
 
@@ -2394,18 +2405,72 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                             en_over = val.get("overset").and_then(Value::as_bool).unwrap_or(false) || sid.is_some_and(|s| story_is_overset(app, s));
                             inserted_rtfs_count = inserted_rtfs_count.saturating_add(1);
                         }
+                    } else if let Some(file_str) = Some(file_val).filter(|s| !s.is_empty())
+                        && let Some(rtf_file) = resolve_catalog_related_file(&st.card1_path, file_str, "rtf")
+                    {
+                        // Fallback: place source RTF into the right frame so the dual-language layout
+                        // has content rather than an empty blank frame when no English RTF exists yet.
+                        let rtf_path_str = rtf_file.to_string_lossy().to_string();
+                        let res = app.run(
+                            "file.place",
+                            json!({
+                                "path": rtf_path_str,
+                                "frame": fid,
+                                "autoflow": false,
+                            }),
+                        );
+                        if let Ok(val) = res {
+                            en_story_id = val.get("story").and_then(Value::as_u64);
+                            let sid = en_story_id.map(designcraft_doc::StoryId);
+                            en_over = val.get("overset").and_then(Value::as_bool).unwrap_or(false) || sid.is_some_and(|s| story_is_overset(app, s));
+                            inserted_rtfs_count = inserted_rtfs_count.saturating_add(1);
+                        }
                     } else {
-                        // Symmetrical dual-language column: create REVIEW header in right frame
-                        let _ = app.session.edit(|doc, _| {
-                            let story_id = doc.item(designcraft_doc::ItemId(fid)).and_then(|it| it.text_frame()).map(|tf| tf.story);
-                            if let Some(sid) = story_id
-                                && let Some(st) = doc.story_mut(sid)
-                            {
-                                st.replace(0..st.len(), "REVIEW\n\n");
-                                en_story_id = Some(sid.0);
+                        // Symmetrical dual-language column fallback: place Indonesian RTF and replace header with REVIEW
+                        let mut placed = false;
+                        if let Some(id_rtf) = resolve_catalog_related_file(&st.card1_path, file_val, "rtf") {
+                            let res = app.run(
+                                "file.place",
+                                json!({
+                                    "path": id_rtf.to_string_lossy(),
+                                    "frame": fid,
+                                }),
+                            );
+                            if let Ok(val) = res {
+                                en_story_id = val.get("story").and_then(Value::as_u64);
+                                let sid = en_story_id.map(designcraft_doc::StoryId);
+                                en_over =
+                                    val.get("overset").and_then(Value::as_bool).unwrap_or(false) || sid.is_some_and(|s| story_is_overset(app, s));
+                                inserted_rtfs_count = inserted_rtfs_count.saturating_add(1);
+                                placed = true;
+                                if let Some(sid) = sid {
+                                    let _ = app.session.edit(|doc, _| {
+                                        if let Some(story) = doc.story_mut(sid) {
+                                            let ranges = story.para_ranges();
+                                            if let Some(first_range) = ranges.first() {
+                                                let first_p = story.slice(first_range.clone());
+                                                if first_p.trim().eq_ignore_ascii_case("ulasan") {
+                                                    story.replace(first_range.clone(), "REVIEW\n");
+                                                }
+                                            }
+                                        }
+                                        Ok(serde_json::Value::Null)
+                                    });
+                                }
                             }
-                            Ok(serde_json::Value::Null)
-                        });
+                        }
+                        if !placed {
+                            let _ = app.session.edit(|doc, _| {
+                                let story_id = doc.item(designcraft_doc::ItemId(fid)).and_then(|it| it.text_frame()).map(|tf| tf.story);
+                                if let Some(sid) = story_id
+                                    && let Some(st) = doc.story_mut(sid)
+                                {
+                                    st.replace(0..st.len(), "REVIEW\n\n");
+                                    en_story_id = Some(sid.0);
+                                }
+                                Ok(serde_json::Value::Null)
+                            });
+                        }
                     }
                 }
 
@@ -2634,7 +2699,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                     } else {
                         resolved_en_spread_rtf = None;
                     }
-                    if resolved_en_spread_rtf.is_none() && st.translate_with_ai && !file_val.is_empty() {
+                    if resolved_en_spread_rtf.is_none() && !file_val.is_empty() {
                         resolved_en_spread_rtf = ai::translated_body_rtf(st, file_val);
                     }
                 }

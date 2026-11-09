@@ -275,19 +275,23 @@ pub fn split_and_harmonize_table_title(title: &str, title_en_opt: Option<&str>) 
     let id_trimmed = id_raw.trim();
     let en_trimmed = en_raw.trim();
 
+    // Strip any redundant "Table XX.XX" or "Tabel XX.XX" prefix from the English line
+    // so it doesn't duplicate the table kicker/number columns in bilingual table pages.
+    let en_cleaned = super::toc::strip_tablepage_title_prefix(en_trimmed, "", "Table");
+
     let id_year = extract_trailing_year(id_trimmed);
-    let en_year = extract_trailing_year(en_trimmed);
+    let en_year = extract_trailing_year(en_cleaned);
 
     let (final_id, final_en) = match (id_year, en_year) {
         (None, Some(yr)) => {
             let id_clean = id_trimmed.trim_end_matches(',').trim_end();
-            (format!("{id_clean}, {yr}"), en_trimmed.to_string())
+            (format!("{id_clean}, {yr}"), en_cleaned.to_string())
         }
         (Some(yr), None) => {
-            let en_clean = en_trimmed.trim_end_matches(',').trim_end();
+            let en_clean = en_cleaned.trim_end_matches(',').trim_end();
             (id_trimmed.to_string(), format!("{en_clean}, {yr}"))
         }
-        _ => (id_trimmed.to_string(), en_trimmed.to_string()),
+        _ => (id_trimmed.to_string(), en_cleaned.to_string()),
     };
 
     (final_id, Some(final_en))

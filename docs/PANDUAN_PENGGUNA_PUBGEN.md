@@ -210,12 +210,37 @@ Ini adalah langkah utama yang menyusun seluruh buku publikasi:
 | **Generate Pages** | Tombol ajaib yang menyusun seluruh teks, tabel, dan gambar menjadi halaman buku siap cetak. |
 | **Running Header / Footer** | Teks di bagian atas dan bawah halaman yang menunjukkan nomor halaman dan judul publikasi. |
 
+### Kelompok Peran Terjemahan (*Translation Unit Roles*)
+Saat meninjau hasil terjemahan di panel sebelah kanan, unit terjemahan dikelompokkan ke dalam 4 kategori utama:
+
+| Kelompok | Jenis / Peran Unit | Keterangan / Sumber Teks |
+|---|---|---|
+| **1. Page Title** | `cover_title` | Judul utama dan subjudul pada halaman sampul (`COVER`) |
+| | `table_title` | Judul dan keterangan tabel statistik |
+| | `chart_title` | Judul grafik statistik |
+| | `map_title` | Judul dan keterangan peta tematik |
+| | `image_caption` | Teks keterangan gambar / infografis |
+| | `divider_title` | Judul halaman pembatas bab (*Divider*) |
+| | `card_title` | Judul umum pada kartu publikasi |
+| **2. Paragraph Content** | `narrative_title` | Judul bab dan subbab naskah ulasan |
+| | `narrative_body` | Paragraf teks isi ulasan narasi bab |
+| **3. Table Content** | `table_header` | Kepala kolom dan sub-kolom tabel data |
+| | `table_row_label` | Baris pertama / label kategori baris pada tabel data |
+| | `table_note` | Catatan kaki tabel dan sumber data (`Sumber: ...`) |
+| **4. Other** | `chart_series` | Seri data dan label legenda grafik |
+| | `toc_title` | Label judul Daftar Isi, Daftar Tabel, dan Daftar Grafik |
+| | `header_footer` | Teks kepala dan kaki halaman (*Running Header/Footer*) |
+
 ---
 
 ## 5. Pertanyaan yang Sering Diajukan (FAQ)
 
-### Q: Mengapa teks ulasan bahasa Inggris saya belum muncul di halaman?
-> **Jawab:** Pastikan Anda sudah menjalankan tombol **Translate with AI** atau memastikan file `file_en` di Excel mengarah ke file bahasa Inggris yang berbeda dari file bahasa Indonesia.
+### Q: Bagaimana jika file naskah ulasan bahasa Inggris (file_en) belum tersedia atau sama dengan file bahasa Indonesia?
+> **Jawab:** Tidak masalah! Jika file `file_en` di Excel menunjuk ke file yang sama dengan `file` (seperti naskah BAB 03 & BAB 04), PubGen secara cerdas akan merekonstruksi naskah bahasa Inggris dari file bahasa Indonesia tersebut:
+> 1. Judul bab otomatis menjadi `"REVIEW"`.
+> 2. Paragraf dan heading yang sudah ada di memori terjemahan / AI akan diganti dengan bahasa Inggris.
+> 3. Teks yang belum diterjemahkan tetap dipertahankan dengan format aslinya agar kolom kanan halaman tidak kosong.
+> 4. Subbab di Daftar Isi (TOC) otomatis dipadukan (`Subbab Indonesia / English Subheading`).
 
 ### Q: Apakah saya harus terhubung ke internet saat menggunakan PubGen?
 > **Jawab:** PubGen dapat berjalan secara **offline** untuk impor Excel, penyusunan tabel, tata letak halaman, dan ekspor. Koneksi internet hanya dibutuhkan jika Anda menekan tombol *Translate with AI* untuk menerjemahkan teks baru yang belum ada di memori.

@@ -58,24 +58,25 @@ pub fn toc_kind_of_words(words: &[String]) -> usize {
 /// and the number in column 1, leaving only the title text for column 2).
 pub(crate) fn strip_tablepage_title_prefix<'a>(title: &'a str, num: &str, typ: &str) -> &'a str {
     let mut t = title.trim();
+    // 1. First strip known type prefixes (e.g. "Table", "Tabel", "Grafik", "Chart")
+    for prefix in &["Tabel", "Table", "Grafik", "Chart"] {
+        if let Some(rest) = t.strip_prefix(prefix) {
+            t = rest.trim();
+            break;
+        } else if let Some(rest) = t.to_lowercase().strip_prefix(&prefix.to_lowercase()) {
+            t = title[title.len() - rest.len()..].trim();
+            break;
+        }
+    }
     if !typ.is_empty() {
         if let Some(rest) = t.strip_prefix(typ) {
             t = rest.trim();
         } else if let Some(rest) = t.to_lowercase().strip_prefix(&typ.to_lowercase()) {
             t = title[title.len() - rest.len()..].trim();
         }
-    } else {
-        for prefix in &["Tabel", "Table", "Grafik", "Chart"] {
-            if let Some(rest) = t.strip_prefix(prefix) {
-                t = rest.trim();
-                break;
-            } else if let Some(rest) = t.to_lowercase().strip_prefix(&prefix.to_lowercase()) {
-                t = title[title.len() - rest.len()..].trim();
-                break;
-            }
-        }
     }
 
+    // 2. Strip matching number prefix if present
     let clean_num = num.trim_end_matches('.');
     if !clean_num.is_empty() {
         if let Some(rest) = t.strip_prefix(clean_num) {
@@ -83,10 +84,26 @@ pub(crate) fn strip_tablepage_title_prefix<'a>(title: &'a str, num: &str, typ: &
         } else if let Some(rest) = t.strip_prefix(num) {
             t = rest.trim();
         }
-    } else if let Some((first, rest)) = t.split_once(' ') {
+    }
+    // Also strip any leading digit sequence or section number (e.g. "01.01", "02.02.01", "2.1.1", "03.01")
+    if let Some((first, rest)) = t.split_once(' ') {
         let f_clean = first.trim_end_matches('.');
         if f_clean.chars().any(|c| c.is_ascii_digit()) && f_clean.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-') {
             t = rest.trim();
+        }
+    }
+
+    // 3. In case "Table 01.01" had two words stripped sequentially
+    for prefix in &["Tabel", "Table", "Grafik", "Chart"] {
+        if let Some(rest) = t.strip_prefix(prefix) {
+            t = rest.trim();
+            if let Some((first, rest_after)) = t.split_once(' ') {
+                let f_clean = first.trim_end_matches('.');
+                if f_clean.chars().any(|c| c.is_ascii_digit()) && f_clean.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-') {
+                    t = rest_after.trim();
+                }
+            }
+            break;
         }
     }
 

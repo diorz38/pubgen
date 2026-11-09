@@ -87,7 +87,20 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
 
         let mut card_settings = table_settings;
         if let Some(ten) = kv.get("title_en").or_else(|| kv.get("judul_en")) {
-            card_settings.insert("title_en".to_string(), serde_json::Value::String(ten.clone()));
+            // For Table cards, if `title` in header rows was a chapter header (e.g. `Tabel 2 PEMERINTAHAN`),
+            // `title_en` was the chapter English header (`Table 2 GOVERNMENT`), NOT the table's own title_en.
+            // Only set `title_en` on the card if this is not a Table card or if it doesn't match the chapter English.
+            let is_chapter_header_en = card_settings
+                .get("chapter_title_en")
+                .or_else(|| card_settings.get("chapter_en"))
+                .and_then(|v| v.as_str())
+                .map(|chen| chen.trim().eq_ignore_ascii_case(ten.trim()))
+                .unwrap_or(false);
+            if !is_chapter_header_en
+                && (kind != CardKind::Table || !ten.to_ascii_uppercase().starts_with("TABLE ") || ten.split_whitespace().count() <= 3)
+            {
+                card_settings.insert("title_en".to_string(), serde_json::Value::String(ten.clone()));
+            }
         }
         if let Some(fen) = kv.get("file_en").or_else(|| kv.get("berkas_en")) {
             let norm_fen = fen.replace('\\', "/");
