@@ -55,8 +55,15 @@
 12. [Publication Profiles](#12-publication-profiles)
 13. [AI Translation & Terminology Memory](#13-ai-translation--terminology-memory)
     - [Setup](#setup)
+    - [Translate Worksheet (pre-compile)](#translate-worksheet-pre-compile)
+    - [What is translated (per card type)](#what-is-translated-per-card-type)
+    - [The review gate](#the-review-gate)
+    - [Translation memory](#translation-memory)
+    - [Numbers, masking and the glossary](#numbers-masking-and-the-glossary)
     - [Translating pages](#translating-pages)
     - [Terminology memory](#terminology-memory)
+    - [Headless translation with pgs-cli](#headless-translation-with-pgs-cli)
+    - [Limits worth knowing](#limits-worth-knowing)
 14. [Step-by-Step Practical Tutorials](#14-step-by-step-practical-tutorials)
     - [Tutorial 1: Creating a Complete Publication in 3 Minutes](#tutorial-1-creating-a-complete-publication-in-3-minutes)
     - [Tutorial 2: Designing a Custom Cover with Your Own Photo & Colors](#tutorial-2-designing-a-custom-cover-with-your-own-photo--colors)
@@ -1047,32 +1054,131 @@ Two limits worth knowing: a customised profile lives for the session only (the a
 
 ## 13. AI Translation & Terminology Memory
 
-Pubgen's optional AI features run through **Groq** (online translation) and **Cloudflare Workers AI** (AI cover backgrounds, §3). Everything below needs the online build (`--features pubgen,ai-translate-online`) and a configured key.
+Pubgen translates an Indonesian publication into English with an OpenAI-compatible chat model you choose, and keeps every decision in the project package. Translation is prepared **before** a compile: the Orchestrator's **Translate Worksheet** stage fills the English and you review it. Pages generated from the Orchestrator worksheet (**Generate Publication**) then render that English — titles, captions, notes, the paired table cells and the English narrative body. The manifest/`pgs-cli compile` path does not read the translation memory (see Limits). The in-document per-page actions are still there for fixing a single page by hand.
+
+Everything below needs the online build (`--features pubgen,ai-translate-online`; the Studio app enables it) and a configured provider. The offline NLLB model cannot run in this build — the setup dialog's **Offline on this computer** row says so.
 
 ### Setup
 
-Open **Publication Tools ▸ AI Translate ▸ Setup…**, or press **AI Translator** in the panel header. Paste your Groq API key from [console.groq.com/keys](https://console.groq.com/keys), pick a model (**Refresh models** fills the list from your account), then **Use AI**. The key is stored in your local DesignCraft preferences. The dialog is honest about the trade: catalog text is sent to Groq's cloud, and free-tier rate limits make large jobs slower rather than blocking them.
+Open **Publication Tools ▸ AI Translate ▸ Setup…**, or press **AI Translator** in the Pubgen panel header. The **Translate with AI — setup** dialog has two tabs, **Setup** and **Terminology**. Pick one of the four rows, fill its fields and press **Use AI**: one tiny live request proves the endpoint and the model id, then the settings are saved and that provider is armed.
+
+- **Online — Groq (free account)** — a free key from [console.groq.com/keys](https://console.groq.com/keys). **Refresh models** fills the list from your account (speech-to-text, text-to-speech, embedding and safety endpoints are hidden); the default is `llama-3.3-70b-versatile`. Catalog text is sent to Groq's cloud, and free-tier limits make a large job take longer rather than fail — 16 units per request, up to three retries after a `429`.
+- **Custom API (OpenAI-compatible)** — any chat endpoint: base URL (the `http://` or `https://` scheme is required and never guessed), an optional key, and a model. **Refresh models** reads the endpoint's `/models`.
+- **Local AI (Ollama, LM Studio…)** — a local `/v1` server, `http://localhost:11434/v1` (Ollama) by default; LM Studio and llama.cpp work the same way. No key, and nothing leaves the computer.
+- **Offline on this computer** — informational only: the NLLB-200 files are not wired into this build, so this row cannot translate. Use one of the three above.
+
+Where the settings live: in DesignCraft they are provider preferences in `prefs.json` in the settings folder (`DesignCraftData` for a portable install). PubGen Studio keeps its own copy in `settings.json` under `%APPDATA%\pubgen-studio` (Windows), `$XDG_CONFIG_HOME/pubgen-studio` or `~/.config/pubgen-studio`, and loads it at start-up. The key sits in that file in the clear; it is never written into a document, the `.pubgen` package, the translation memory, a log line or an error message.
+
+### Translate Worksheet (pre-compile)
+
+The Orchestrator's right dock, **Profile & Execution** tab, has **Translate Worksheet** under the publication-profile box. It is dimmed until a provider is configured and the worksheet has at least one card, but it can still be pressed: with cards and no provider it resolves memory and glossary hits locally, and anything left over reports that no provider is configured. Once a provider is configured, one press starts a background job:
+
+1. Collect the translatable units of every card (the table below).
+2. Resolve what can be resolved locally: a translation-memory entry (any origin), or a whole-string official glossary term. Those units are counted as reused and cost no request; a glossary hit also enters the memory as *Imported*.
+3. Mask the rest — glossary terms and numbers become placeholders — and send only the misses to the provider, 16 units per request.
+4. Restore the placeholders, apply the official glossary, and run the number census (below). A unit that fails is counted as failed, and nothing is written for it.
+5. Store every accepted target in the memory as an *AI draft*, and write title-type English onto its card as **Title EN**.
+6. Log one line in LogEksekusi: translated / reused / skipped / failed.
+
+The button shows the progress (`Menerjemahkan dengan AI… 12/84`, Indonesian in both interface languages) and the status bar repeats the totals. When every unit is already known, no request leaves the machine. Press **Generate Publication** (or **Generate & Publish PDF**) afterwards: generating from the worksheet renders the stored English on the new pages.
+
+### What is translated (per card type)
+
+| Card | Sent to the model | English kept in | Rendered by Generate |
+|---|---|---|---|
+| **Cover** | the publication title and the second cover line | the card's **Title EN** (cover data) | the cover's English title line |
+| **Narrative** | the title, and every non-empty paragraph of the staged RTF body | **Title EN**; one memory entry per paragraph | the English chapter title; the body rebuilt from the memory (or the card's `file_en` RTF when it names one) |
+| **Divider** | the title (its number is masked, not translated) | **Title EN** | the divider template's English title |
+| **Table** | the title; every cell of the first row (each split on `--`); the first cell of every later row — a row label, or an auto-detected note/source line | **Title EN**; one memory entry per header, label and note | the title and the note/source line, plus the paired header and row cells; a BRS direct table stays single-language (see the limits) |
+| **Chart** | the title and the series labels | **Title EN**; memory | the chart's English title |
+| **MapChart** | the title; the map sheet's `title` column | **Title EN**; memory | the map title — a `title_en` column in the map sheet still wins |
+| **Image** | the caption, or the title when there is no caption | **Title EN** | the caption under the graphic |
+| **Toc** | the list's own title only; entries inherit their cards' English and are never translated on their own | **Title EN** | the list's English title |
+| **Header/Footer** | nothing yet: `UnitRole::HeaderFooter` is declared but no card kind collects those lines | — | `{title_en}` in a header/footer template prints the translated publication title |
+
+**Never translated** — a unit is not sent when it is:
+
+- empty or whitespace only;
+- a number on its own (`1.234,56`, `(1)`, `2026`, `12,5%`, `-`);
+- an identifier — ISSN/ISBN, a catalogue code (`Katalog BPS: …`), a URL, an e-mail address, a path ending in a known file extension;
+- a protected proper name — GeoJSON region names on map cards (`nmdesa`/`nmkec`), and the cover's agency, office and contact names;
+- already bilingual (it contains ` / ` or a forced line break) or already known (the same text is collected once).
+
+Header and footer lines are not collected either: `UnitRole::HeaderFooter` exists but no card kind produces it, so the header/footer's own text stays Indonesian; the `{title_en}` token still prints the translated title.
+
+Cover metadata is never collected at all: year, volume, catalogue, ISSN/ISBN, release number/date/month, agency, office address, and the PIC's name, phone, e-mail and photo. Chart axis values and data labels, table numeric cells, TOC page numbers, and map classification breaks and legend numbers are drawn from numbers, not text. Numbers inside a translated unit (a title, a note) are masked and come back byte-identical.
+
+### The review gate
+
+The right dock's third tab is **Translation Review** (Indonesian interface: **Ulasan Terjemahan**). It lists one row per unreviewed AI draft: the Indonesian source in bold, an editable English field, **Accept** and **Reject**.
+
+- **Accept** keeps the target and marks the entry *Reviewed*. If you edited the field, the edited text replaces the draft and is marked *Reviewed* too.
+- **Reject** removes the entry, so a later run may translate that text again.
+- Either action marks the project dirty; save the package to keep it.
+
+The card editor shows the state next to **Title EN:** (a field that appears only in a bilingual or English document) — a badge **AI draft** with its own **Accept** button, or **Reviewed** (these two labels are English in both interface languages). A *Reviewed* entry is never overwritten by a later AI run: the model's new target is dropped and the reviewed one is kept. A glossary hit shows no badge — it is deterministic, not a draft.
+
+### Translation memory
+
+Every accepted unit is stored in `translation_memory.json` inside the `.pubgen` package: source, target, origin, role and timestamp. In the file the origins are `ai` (a draft), `reviewed` (a human decision) and `imported` (a whole-string glossary hit).
+
+- Lookup ignores extra whitespace and falls back to case; a *Reviewed* or *Imported* entry wins over an AI draft with the same source.
+- The memory is capped at 100,000 entries per package. Past the cap new units are not stored; an existing entry can still be replaced.
+- A package written before the memory existed opens with an empty one.
+- Reopening a project loads the memory into the worksheet: **Translate Worksheet** reuses every unit it already knows with zero provider requests and sends only what is new or edited. The typical second run costs nothing.
+
+### Numbers, masking and the glossary
+
+- Glossary terms and numbers are replaced by `[[n]]` placeholders before the request (at most 512 per unit) and restored afterwards. Restoration is strict: a placeholder that is missing, duplicated, reordered or invented rejects the unit instead of corrupting a statistic.
+- Indonesian number formatting never reaches the model, so `1.234,56` and `12,5%` survive exactly.
+- After unmasking, every numeric run in the source is compared with the target (a number census). Any difference rejects the unit: it is not written to the card or the memory, and it counts as failed.
+- The official glossary is enforced on the target deterministically before the census, so a model that ignored the prompt cannot ship a non-standard term.
 
 ### Translating pages
 
-Dual Lang must be on (**Publication Tools ▸ Dual Language Mode**, `Ctrl+Shift+L`). Then:
+The in-document actions still exist for a single page. Dual Lang must be on (**Publication Tools ▸ Dual Language Mode**, `Ctrl+Shift+L`) and a provider configured. Then:
 
-- **Translate this Page** — the label becomes **Translate Review on this Page** on an `RXX` review page (chapter title and right-hand body are replaced with English, paragraph styles preserved) or **Translate Table on this Page** on a table page (title, header cells and the source/note box are translated in place, English on a new line in italic).
-- **Translate Tables…** — batch translation over a page range, opened from the same button or **Publication Tools ▸ AI Translate ▸ Translate Table Pages…**.
-- A progress bar and a working **Cancel** run in the background; translations are cached, so a second Generate or Translate over the same rows is instant.
+- **Translate this Page** in the Pubgen panel becomes **Translate Table on this Page** on a table page and **Translate Review on this Page** on an `RXX` review page; **Publication Tools ▸ AI Translate** offers the same actions plus **Translate Table Pages…** for a page range (the **Translate Table Pages (Batch)** dialog).
+- A review page gets its chapter title and right-hand body replaced with English, paragraph styles preserved. A table page gets its title, header cells and source/note box translated in place, the English on a new line in italic.
+- A progress bar and a **Cancel** sit in the panel header's status row; results are cached, so a second run over the same rows is instant.
 
 ### Terminology memory
 
 An official glossary keeps AI output on standard statistical wording — *Kecamatan* → *Subdistrict*, *PDRB* → *GRDP*, *Luas Wilayah* → *Total Area*.
 
 - The bundled glossary is `assets/pubgen/bps_glossary.json`. Resolution order: your saved path in preferences, then the asset, then the build folder. A missing or malformed file degrades to an empty glossary, never an error.
-- The glossary is injected into the prompt (up to 200 terms, `id = en`) and applied **deterministically to whole cells** after translation.
+- The glossary is injected into the prompt (up to 200 terms, `id = en`), masks whole terms in a request, and is applied **deterministically to whole cells** after translation.
 - The **Terminology** tab in the AI setup dialog is a full editor: search, add, edit, remove, **Import CSV…** (two columns — Indonesian, English — comma, semicolon, tab or pipe; header optional), **Reset to bundled**, and **Save…** to a `bps_glossary.json` of your own.
 - **Collect Vocabulary** reads the generated pages (headers, row labels, titles, note and source lines, plus phrase runs) and adds the Indonesian terms it finds with an empty English column; every Excel generation does this automatically and reports `Vocabulary: N new term(s) collected`.
 - **Fill AI Drafts** fills those blank English cells from the model term by term. The **Auto** checkbox beside it repeats the step after each generation.
 - **Fix Terms** applies the glossary to translations already on the selected page; **Retranslate (Glossary)** corrects those terms and re-runs only the texts the glossary flagged (one request batch).
 
-> **Not in the product:** the earlier *Draft Review* narrative summarizer was removed in October 2026. Pubgen does not draft chapter prose from table figures today; the AI work is translation and terminology. If you need a commentary paragraph, write it and place it as RTF.
+### Headless translation with pgs-cli
+
+```sh
+pgs-cli translate <PROJECT.pubgen> --provider <groq|custom|local> --model <MODEL> \
+    [--base-url <URL>] [--key-env <VARIABLE>] [--dry-run]
+```
+
+- `--provider` is `groq`, `custom` or `local`; `offline` is refused.
+- `--base-url` is optional for `groq` (Groq's endpoint is the default) and required for `custom` and `local`.
+- `--key-env` names the environment variable that holds the key — required for `groq` and `custom`, not required for `local`; when it is given, the variable is read for every provider, so one that is unset or empty is an error. There is deliberately no option that takes the key itself.
+- `--dry-run` counts the units and stops: no network, no environment lookup, no package write.
+- The report is JSON on stdout — `units` (collected), `translated` (new AI targets stored), `reused` (memory hits), `skipped` (whole-string glossary hits), and `failed`, each entry naming the unit and the reason.
+- The exit status is non-zero when any unit failed. Only the memory is written back; card settings and package content stay untouched, so the GUI still shows the new drafts for review.
+
+### Limits worth knowing
+
+- **A BRS direct table page stays single-language.** The BRS sheet import renders such a table with its Indonesian title and single-language cells; only the template (DDA) table path writes a bilingual table title and the paired note/source line.
+- **English table cells and the English narrative body render on Generate, not on the manifest compile.** Pages generated from the Orchestrator worksheet pair each header and row cell from the memory (English on a second line) and rebuild the English narrative body; the manifest/`pgs-cli compile` path does not read the memory, so it renders the Indonesian cells and body. There is no separate per-page switch for this: the worksheet's **Translate Worksheet** stage fills the memory, and Generate reads it automatically. You can still fix a single table page with the in-document table action, or name an English RTF in the card's `file_en`.
+- **Header and footer lines are not translated yet.** `UnitRole::HeaderFooter` is declared but no card kind collects those lines, so a header/footer's own text stays Indonesian; `{title_en}` in a template still prints the translated publication title.
+- **A narrative paragraph with no usable English keeps its Indonesian text.** When the English body is rebuilt from the memory, a paragraph whose target is missing, empty, or would add a line break keeps the Indonesian paragraph; the paragraph count and every paragraph style are preserved, and the rest of the body still publishes.
+- **English heading detection needs paragraph styles.** In a narrative spread, a heading is recognised by its paragraph style (**Title**, **Heading 1**, **Heading 2**). A legacy Indonesian document whose paragraphs carry no such style falls back to text heuristics: the known Indonesian headings, plus short paragraphs starting `A. `, `B. ` or `C. ` recognised as **Title**.
+- **The manifest compile does not translate.** `pubgen.compileProject` and `pgs-cli compile` start from a fresh generation state: they do not run the worksheet stage and do not read the memory, so they render only the workbook's own English columns and the glossary. Generate from the Orchestrator for AI English.
+- **TLS trusts public roots only.** The HTTP client is ureq 2 with the Mozilla root store compiled in (webpki-roots); it does not read the operating system's certificate store. An endpoint behind a private CA — an internal gateway or a corporate proxy — fails with a certificate error. Use Local AI over plain `http://localhost`, or a certificate from a publicly trusted CA.
+- **The offline model is not in this build**, whatever the hardware pane reports.
+
+> **Not in the product:** the earlier *Draft Review* narrative summarizer was removed in October 2026. Pubgen does not draft chapter prose from table figures; the AI work is translation and terminology. If you need a commentary paragraph, write it and place it as RTF.
 
 ---
 

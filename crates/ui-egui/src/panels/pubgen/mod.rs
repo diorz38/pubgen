@@ -32,6 +32,7 @@ pub mod ai_cover;
 pub mod ai_cover_job;
 pub mod audit;
 pub mod charts;
+pub mod translate_stage;
 pub mod workspace;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -156,12 +157,12 @@ pub fn poll_active_jobs(app: &mut DesignApp, st: &mut PubgenState) {
         let ok = job.poll(st);
         if job.finished {
             st.translate_job = None;
-            ai::push_groq_quota_popup(st);
+            let provider = app.session.prefs.translation_provider.clone();
+            ai::push_groq_quota_popup(st, &provider);
             #[cfg(not(target_arch = "wasm32"))]
             {
-                let cred = ai::backend_from_prefs(app)
-                    .filter(|(provider, _, _)| provider == "groq")
-                    .map(|(_, key, _)| designcraft_imagegen::quota::fingerprint(&key));
+                let cred =
+                    ai::backend_config_from_prefs(app).filter(|c| c.provider == "groq").map(|c| designcraft_imagegen::quota::fingerprint(&c.key));
                 if let (Some(cred), Some(n)) = (cred, designcraft_translate::remaining_requests()) {
                     let _ = std::thread::Builder::new().name("pubgen-groq-quota".into()).spawn(move || {
                         designcraft_imagegen::quota::report_groq(&cred, n);
@@ -171,12 +172,12 @@ pub fn poll_active_jobs(app: &mut DesignApp, st: &mut PubgenState) {
             if ok {
                 if let Some(target) = st.ai_page_target.take() {
                     ai::apply_page_result(app, st, &target);
-                    st.header_status = Some((format!("Page translated with AI.{}", ai::groq_quota_suffix()), true));
+                    st.header_status = Some((format!("Page translated with AI.{}", ai::groq_quota_suffix(&provider)), true));
                     return;
                 }
                 if let Some(target) = st.ai_table_target.take() {
                     ai::apply_table_page_result(app, st, &target);
-                    st.header_status = Some((format!("Table page translated with AI.{}", ai::groq_quota_suffix()), true));
+                    st.header_status = Some((format!("Table page translated with AI.{}", ai::groq_quota_suffix(&provider)), true));
                     return;
                 }
                 if !st.ai_table_targets_batch.is_empty() {
@@ -185,8 +186,10 @@ pub fn poll_active_jobs(app: &mut DesignApp, st: &mut PubgenState) {
                     for target in &targets {
                         count += ai::apply_table_page_result(app, st, target);
                     }
-                    st.header_status =
-                        Some((format!("{} table items across {} pages translated with AI.{}", count, targets.len(), ai::groq_quota_suffix()), true));
+                    st.header_status = Some((
+                        format!("{} table items across {} pages translated with AI.{}", count, targets.len(), ai::groq_quota_suffix(&provider)),
+                        true,
+                    ));
                     return;
                 }
                 if job.is_drafts() {
@@ -200,7 +203,7 @@ pub fn poll_active_jobs(app: &mut DesignApp, st: &mut PubgenState) {
                     execute_excel_and_generate(app, st, &path)
                 };
                 st.card1_status = Some(match res {
-                    Ok(msg) => (format!("{msg}{}", ai::groq_quota_suffix()), true),
+                    Ok(msg) => (format!("{msg}{}", ai::groq_quota_suffix(&provider)), true),
                     Err(err) => (err, false),
                 });
                 return;
@@ -281,16 +284,16 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
         let ok = job.poll(&mut st);
         if job.finished {
             st.translate_job = None;
-            // Popup: report how much of the Groq quota this AI operation left.
-            ai::push_groq_quota_popup(&mut st);
+            let provider = app.session.prefs.translation_provider.clone();
+            // Popup: report how much of the provider's quota this AI operation left.
+            ai::push_groq_quota_popup(&mut st, &provider);
             // Mirror Groq's remaining-request count into the shared Supabase tracker,
             // keyed by a fingerprint of this user's key so different accounts are
             // tracked separately (best effort, off the UI thread).
             #[cfg(not(target_arch = "wasm32"))]
             {
-                let cred = ai::backend_from_prefs(app)
-                    .filter(|(provider, _, _)| provider == "groq")
-                    .map(|(_, key, _)| designcraft_imagegen::quota::fingerprint(&key));
+                let cred =
+                    ai::backend_config_from_prefs(app).filter(|c| c.provider == "groq").map(|c| designcraft_imagegen::quota::fingerprint(&c.key));
                 if let (Some(cred), Some(n)) = (cred, designcraft_translate::remaining_requests()) {
                     let _ = std::thread::Builder::new().name("pubgen-groq-quota".into()).spawn(move || {
                         designcraft_imagegen::quota::report_groq(&cred, n);
@@ -301,13 +304,13 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
                 // Page-targeted job: write the results into the page's own textboxes.
                 if let Some(target) = st.ai_page_target.take() {
                     ai::apply_page_result(app, &st, &target);
-                    st.header_status = Some((format!("Page translated with AI.{}", ai::groq_quota_suffix()), true));
+                    st.header_status = Some((format!("Page translated with AI.{}", ai::groq_quota_suffix(&provider)), true));
                     ui.data_mut(|d| d.insert_temp(state_id, st));
                     return;
                 }
                 if let Some(target) = st.ai_table_target.take() {
                     ai::apply_table_page_result(app, &st, &target);
-                    st.header_status = Some((format!("Table page translated with AI.{}", ai::groq_quota_suffix()), true));
+                    st.header_status = Some((format!("Table page translated with AI.{}", ai::groq_quota_suffix(&provider)), true));
                     ui.data_mut(|d| d.insert_temp(state_id, st));
                     return;
                 }
@@ -318,7 +321,7 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
                         count += ai::apply_table_page_result(app, &st, target);
                     }
                     st.header_status = Some((
-                        format!("{} table item(s) across {} page(s) translated with AI.{}", count, targets.len(), ai::groq_quota_suffix()),
+                        format!("{} table item(s) across {} page(s) translated with AI.{}", count, targets.len(), ai::groq_quota_suffix(&provider)),
                         true,
                     ));
                     ui.data_mut(|d| d.insert_temp(state_id, st));
@@ -337,7 +340,7 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
                     execute_excel_and_generate(app, &mut st, &path)
                 };
                 st.card1_status = Some(match res {
-                    Ok(msg) => (format!("{msg}{}", ai::groq_quota_suffix()), true),
+                    Ok(msg) => (format!("{msg}{}", ai::groq_quota_suffix(&provider)), true),
                     Err(err) => (err, false),
                 });
                 ui.data_mut(|d| d.insert_temp(state_id, st));
@@ -496,6 +499,42 @@ mod tests {
         harness.input_mut().max_texture_side = Some(8192);
         harness.run_steps(4);
         harness.render().unwrap().save(directory.join("pubgen-terminology.png")).unwrap();
+    }
+
+    /// Opt-in evidence: the AI setup dialog's Setup tab on the Custom API pane (all
+    /// four provider radios, base URL + key + model fields). The a11y check is off
+    /// because the panel body behind the dialog has pre-existing unnamed inputs.
+    #[test]
+    fn capture_pubgen_ai_setup_fixture() {
+        let Some(directory) = std::env::var_os("CRAFT_UI_VISUAL_FIXTURES").map(std::path::PathBuf::from) else { return };
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+        let mut ready = false;
+        let mut harness = egui_kittest::Harness::builder().with_size(vec2(560.0, 900.0)).with_accessibility_check(false).wgpu().build_ui_state(
+            move |ui, app: &mut DesignApp| {
+                if !ready {
+                    crate::theme::install_fonts(ui.ctx(), "en");
+                    crate::theme::apply(ui.ctx(), &Tokens::for_brightness(crate::theme::Brightness::MediumDark));
+                    let st = PubgenState::default();
+                    let dialog = ai::AiSetupDialog {
+                        provider: ai::PROVIDER_CUSTOM,
+                        custom_base_url: "https://api.example.com/v1".into(),
+                        custom_model: "gpt-4o-mini".into(),
+                        ..ai::AiSetupDialog::open(app, &st)
+                    };
+                    let st = PubgenState { ai_dialog: Some(dialog), ..Default::default() };
+                    ui.data_mut(|d| d.insert_temp(egui::Id::unique(PANEL_ID), st));
+                    ready = true;
+                    return;
+                }
+                show(app, ui);
+            },
+            app,
+        );
+        harness.input_mut().max_texture_side = Some(8192);
+        harness.run_steps(4);
+        harness.render().unwrap().save(directory.join("pubgen-ai-setup-custom.png")).unwrap();
     }
 
     /// Opt-in evidence: the Publication Cover card with an AI Base style selected

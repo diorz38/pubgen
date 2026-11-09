@@ -4,6 +4,7 @@
 //! pubgen-cli compile <MANIFEST> [OPTIONS]
 //! pubgen-cli info <MANIFEST>
 //! pubgen-cli validate <MANIFEST>
+//! pubgen-cli translate <PROJECT.pubgen> [OPTIONS]
 //! pubgen-cli profiles
 //! pubgen-cli --version
 //! ```
@@ -12,16 +13,26 @@
 mod runtime;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
+use designcraft_translate::mask::{mask as mask_text, number_census, unmask};
+use designcraft_translate::{Lang, OnlineTranslator};
+use pubgen_core::glossary_fix;
+use pubgen_core::translation::{TmEntry, TmOrigin, TranslationMemory, now_stamp};
+use pubgen_core::translation_units::{TransUnit, collect_units};
+use pubgen_core::workspace::Glossary;
+use pubgen_core::workspace_validation::WorkspaceDraft;
 use pubgen_core::{ProfileId, ProfileService};
 use runtime::{CliDesignCraftRuntime, DesignCraftRuntime, MockDesignCraftRuntime};
+use serde::Serialize;
 use serde_json::{Value, json};
 
 const USAGE: &str = "\
 usage: pubgen-cli compile <MANIFEST> [OPTIONS]
        pubgen-cli info <MANIFEST>
        pubgen-cli validate <MANIFEST>
+       pubgen-cli translate <PROJECT.pubgen> [OPTIONS]
        pubgen-cli profiles
        pubgen-cli --version
 
@@ -33,6 +44,13 @@ Compile options:
   --designcraft-exe <PATH>   Explicit path to pubgen-enabled designcraft binary
   --timeout <SECONDS>        Connection/compile timeout in seconds (default: 30)
   --profile <PROFILE_ID>     Override publication profile (bps_brs, bps_dda, generic_book, generic_report)
+
+Translate options:
+  --provider <NAME>          groq, custom or local (offline is not built into this CLI)
+  --base-url <URL>           OpenAI-compatible endpoint (required for custom and local)
+  --model <ID>               Model id (required)
+  --key-env <VARIABLE>       Environment variable holding the API key (required for groq and custom)
+  --dry-run                  Report the units without calling the provider or writing the package
 ";
 
 const PUBGEN_DESIGNCRAFT_EXE: &str = "PUBGEN_DESIGNCRAFT_EXE";
@@ -47,6 +65,9 @@ fn main() {
         Some("compile") => report(run_compile(&args[1..])),
         Some("info") => report(run_info(&args[1..])),
         Some("validate") => report(run_validate(&args[1..])),
+        Some("translate") => {
+            report(parse_translate_args(&args[1..]).and_then(|translate| run_translate(&translate)).and_then(print_translate_report))
+        }
         Some("profiles") => report(run_profiles()),
         _ => {
             eprintln!("{USAGE}");
@@ -295,6 +316,238 @@ fn run_profiles() -> Result<(), String> {
     Ok(())
 }
 
+/// CLI options for the `translate` command.
+pub struct TranslateArgs {
+    pub project: PathBuf,
+    pub provider: String,
+    pub base_url: String,
+    pub model: String,
+    pub key_env: Option<String>,
+    pub dry_run: bool,
+}
+
+/// What one `translate` run did: the counts printed as JSON on stdout.
+#[derive(Debug, Default, Serialize)]
+pub struct TranslateReport {
+    pub units: usize,
+    pub translated: usize,
+    pub reused: usize,
+    pub skipped: usize,
+    /// (unit key, why it was rejected).
+    pub failed: Vec<(String, String)>,
+}
+
+pub fn parse_translate_args(args: &[String]) -> Result<TranslateArgs, String> {
+    let mut project: Option<PathBuf> = None;
+    let mut provider: Option<String> = None;
+    let mut base_url: Option<String> = None;
+    let mut model: Option<String> = None;
+    let mut key_env: Option<String> = None;
+    let mut dry_run = false;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--provider" => {
+                i = i.saturating_add(1);
+                provider = Some(option_value(args, i, "--provider")?);
+            }
+            "--base-url" => {
+                i = i.saturating_add(1);
+                base_url = Some(option_value(args, i, "--base-url")?);
+            }
+            "--model" => {
+                i = i.saturating_add(1);
+                model = Some(option_value(args, i, "--model")?);
+            }
+            "--key-env" => {
+                i = i.saturating_add(1);
+                key_env = Some(option_value(args, i, "--key-env")?);
+            }
+            "--dry-run" => dry_run = true,
+            // A literal key argument must not exist: the key only ever comes from --key-env.
+            a if a.starts_with('-') => return Err(format!("unknown option {a}")),
+            a if project.is_none() => project = Some(PathBuf::from(a)),
+            a => return Err(format!("unexpected argument {a}")),
+        }
+        i = i.saturating_add(1);
+    }
+    let project = project.ok_or("missing PROJECT (.pubgen)")?;
+    let provider = provider.ok_or("missing --provider (groq, custom or local)")?.to_lowercase();
+    let model = model.ok_or("missing --model")?;
+    let base_url = base_url.unwrap_or_default();
+    match provider.as_str() {
+        "groq" => {}
+        "custom" | "local" => {
+            if base_url.trim().is_empty() {
+                return Err(format!("--provider {provider} needs --base-url"));
+            }
+        }
+        "offline" => return Err("--provider offline is not built into this CLI; use groq, custom or local".into()),
+        other => return Err(format!("unknown provider `{other}` (groq, custom or local)")),
+    }
+    if provider != "local" && key_env.is_none() {
+        return Err(format!("--provider {provider} needs --key-env <VARIABLE>"));
+    }
+    Ok(TranslateArgs { project, provider, base_url, model, key_env, dry_run })
+}
+
+fn option_value(args: &[String], index: usize, option: &str) -> Result<String, String> {
+    args.get(index).filter(|s| !s.is_empty() && !s.starts_with('-')).cloned().ok_or_else(|| format!("{option} needs a value"))
+}
+
+/// `translate <PROJECT.pubgen> [OPTIONS]`: runs the GUI's translation stage in-process and
+/// warms the package's translation memory. Card settings and package content are untouched.
+pub fn run_translate(args: &TranslateArgs) -> Result<TranslateReport, String> {
+    let opened = pubgen_core::open_pubgen(&args.project).map_err(|e| format!("{}: {e}", args.project.display()))?;
+    let draft = WorkspaceDraft {
+        manifest: opened.manifest.clone(),
+        metadata: opened.metadata.clone(),
+        glossary: opened.glossary.clone(),
+        tm: opened.tm.clone(),
+        csv: opened.content.csv.clone(),
+        text: opened.content.text.clone(),
+        assets: opened.content.assets.clone(),
+        warnings: Vec::new(),
+    };
+    let pairs = glossary_pairs(&draft.glossary);
+    let units = collect_units(&draft);
+    let mut tm: TranslationMemory = draft.tm.clone();
+    let mut report = TranslateReport { units: units.len(), ..TranslateReport::default() };
+    let mut misses: Vec<TransUnit> = Vec::new();
+    for unit in units {
+        if tm.lookup(&unit.text).is_some_and(|entry| !entry.target.trim().is_empty()) {
+            report.reused += 1;
+        } else if let Some(english) = glossary_lookup(&draft.glossary, &unit.text) {
+            // Deterministic English: never sent to the provider, entered into the memory below.
+            let inserted = tm.insert(TmEntry {
+                source: unit.text.clone(),
+                target: english.to_string(),
+                origin: TmOrigin::Imported,
+                role: unit.role.as_str().into(),
+                updated: now_stamp(),
+            });
+            if inserted {
+                report.skipped += 1;
+            } else {
+                report.failed.push((unit.key.clone(), "translation memory is full".into()));
+            }
+        } else {
+            misses.push(unit);
+        }
+    }
+    // A dry run ends here: no translator, no environment lookup, no package write.
+    if args.dry_run {
+        return Ok(report);
+    }
+
+    let key = match &args.key_env {
+        Some(var) => {
+            std::env::var(var).ok().filter(|value| !value.trim().is_empty()).ok_or_else(|| format!("environment variable {var} is unset or empty"))?
+        }
+        None => String::new(),
+    };
+    let mut translator = if args.provider == "groq" && args.base_url.trim().is_empty() {
+        OnlineTranslator::new(&key, &args.model)
+    } else {
+        OnlineTranslator::with_endpoint(&key, &args.model, &args.base_url)
+    };
+
+    if !misses.is_empty() {
+        // Only misses go to the provider, masked with the glossary pairs the restore uses.
+        let masked: Vec<_> = misses.iter().map(|unit| mask_text(&unit.text, &pairs)).collect();
+        let requests: Vec<String> = masked.iter().map(|m| m.text.clone()).collect();
+        let cancel = AtomicBool::new(false);
+        let mut progress = |done: usize, total: usize| eprintln!("pubgen-cli: translated {done}/{total}");
+        let outputs = translator
+            .translate(&requests, Lang::Indonesian, Lang::English, Some(&pairs), &cancel, &mut progress)
+            .map_err(|e| format!("translation failed: {e}"))?;
+        if outputs.len() != misses.len() {
+            return Err(format!("provider returned {} results for {} units", outputs.len(), misses.len()));
+        }
+        let entries = enforce_entries(&pairs);
+        for ((unit, masked), output) in misses.iter().zip(masked.iter()).zip(outputs.iter()) {
+            let restored = match unmask(output, masked) {
+                Ok(restored) => restored,
+                Err(e) => {
+                    report.failed.push((unit.key.clone(), e.to_string()));
+                    continue;
+                }
+            };
+            // Same order as the GUI stage: unmask, enforce the official terms, then the census.
+            let target = enforce_target(restored.trim(), &entries);
+            if target.is_empty() {
+                report.failed.push((unit.key.clone(), "model returned an empty translation".into()));
+            } else if number_census(&unit.text) != number_census(&target) {
+                // The guard that makes statistical tables safe: a changed number is a failure.
+                report.failed.push((unit.key.clone(), format!("number changed in translation: {target}")));
+            } else if tm.insert(TmEntry {
+                source: unit.text.clone(),
+                target: target.clone(),
+                origin: TmOrigin::Ai,
+                role: unit.role.as_str().into(),
+                updated: now_stamp(),
+            }) {
+                report.translated += 1;
+            } else {
+                // The entry was not persisted, so the report must not count it as done.
+                report.failed.push((unit.key.clone(), "translation memory is full".into()));
+            }
+        }
+    }
+
+    // Only the memory changes; `content` (CSV, narrative text, assets, template) is saved verbatim.
+    pubgen_core::save_pubgen(&args.project, &opened.manifest, &opened.metadata, &opened.glossary, &tm, &opened.content)
+        .map_err(|e| format!("{}: {e}", args.project.display()))?;
+    Ok(report)
+}
+
+/// The official English for a whole cell, case-insensitively (mirrors the GUI's
+/// `BpsGlossary::lookup`); `None` while an entry has no target.
+fn glossary_lookup<'a>(glossary: &'a Glossary, cell: &str) -> Option<&'a str> {
+    let key = cell.trim().to_lowercase();
+    glossary
+        .entries
+        .iter()
+        .find(|entry| !entry.source.trim().is_empty() && !entry.target.trim().is_empty() && entry.source.trim().to_lowercase() == key)
+        .map(|entry| entry.target.trim())
+}
+
+/// `(source, target)` pairs for masking and the provider prompt: every entry naming both sides.
+fn glossary_pairs(glossary: &Glossary) -> Vec<(String, String)> {
+    glossary
+        .entries
+        .iter()
+        .filter(|entry| !entry.source.trim().is_empty() && !entry.target.trim().is_empty())
+        .map(|entry| (entry.source.trim().to_string(), entry.target.trim().to_string()))
+        .collect()
+}
+
+/// The same pairs as `glossary_fix` entries: the official English the prompt asked for, applied
+/// to a target the model may have written differently (mirrors the GUI's stage).
+fn enforce_entries(pairs: &[(String, String)]) -> Vec<glossary_fix::Entry> {
+    pairs
+        .iter()
+        .map(|(term, replacement)| glossary_fix::Entry {
+            term: term.clone(),
+            replacement: replacement.clone(),
+            do_not_translate: false,
+            case_preserve: true,
+        })
+        .collect()
+}
+
+/// Glossary enforcement on an unmasked target, before the number census writes anything.
+fn enforce_target(target: &str, entries: &[glossary_fix::Entry]) -> String {
+    glossary_fix::enforce(target, entries).0
+}
+
+/// Print the JSON report and turn a non-empty `failed` list into a non-zero exit.
+fn print_translate_report(report: TranslateReport) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(&report).map_err(|e| format!("report: {e}"))?;
+    println!("{json}");
+    if report.failed.is_empty() { Ok(()) } else { Err(format!("{} unit(s) failed to translate", report.failed.len())) }
+}
+
 fn manifest_arg(args: &[String]) -> Result<PathBuf, String> {
     let Some(first) = args.first().filter(|a| !a.starts_with('-')) else {
         return Err(format!("missing MANIFEST\n{USAGE}"));
@@ -373,5 +626,97 @@ mod tests {
     #[test]
     fn test_run_profiles_succeeds() {
         assert!(run_profiles().is_ok());
+    }
+
+    /// A tiny `.pubgen` package with one Table card whose staged CSV yields translatable
+    /// units (title, headers, row labels), the shape the GUI's translation stage consumes.
+    fn write_fixture_package(path: &Path) {
+        use pubgen_core::workspace::{CardKind, CardScope, Language, PageLayout, ProjectManifest, PublicationCard, PublicationMetadata};
+        let manifest = ProjectManifest { format_version: 1, name: "CLI translate".into(), template: false, slots: Vec::new() };
+        let metadata = PublicationMetadata {
+            profile_id: "bps_dda".into(),
+            layout: PageLayout::Single,
+            language: Language::Id,
+            title: "CLI translate".into(),
+            title_en: None,
+            cards: vec![PublicationCard {
+                id: "t1".into(),
+                kind: CardKind::Table,
+                scope: CardScope::NewPage,
+                source: Some("T1.csv".into()),
+                title: "Luas Wilayah menurut Kecamatan".into(),
+                settings: std::collections::BTreeMap::new(),
+            }],
+            extra: std::collections::BTreeMap::new(),
+        };
+        let mut content = pubgen_core::ProjectContent::default();
+        content.csv.push(("T1.csv".into(), b"Kecamatan;Luas Wilayah (km2)\nKarawang;1.234,5\n".to_vec()));
+        pubgen_core::save_pubgen(path, &manifest, &metadata, &Glossary::default(), &TranslationMemory::default(), &content).expect("save fixture");
+    }
+
+    #[test]
+    fn translate_dry_run_reports_units_without_network() {
+        let dir = std::env::temp_dir().join(format!("pgs-cli-tr-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("t.pubgen");
+        write_fixture_package(&path);
+        let args = parse_translate_args(&[
+            // The brief's snippet passes "t.pubgen"; the package lives under the temp dir, so
+            // the real path is used here (a relative name would open nothing).
+            path.to_string_lossy().into_owned(),
+            "--provider".into(),
+            "local".into(),
+            "--base-url".into(),
+            "http://localhost:11434/v1".into(),
+            "--model".into(),
+            "m".into(),
+            "--dry-run".into(),
+        ])
+        .expect("args parse");
+        let report = run_translate(&args).expect("dry run");
+        assert!(report.units > 0);
+        assert_eq!(report.translated, 0, "a dry run must not call the provider");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The headless path applies the official wording to an AI target before the census and the
+    /// memory write (the GUI's ordering), so a model that echoed a lowercase term cannot persist
+    /// it as `TmOrigin::Ai`.
+    #[test]
+    fn enforce_target_applies_the_official_glossary_wording() {
+        use pubgen_core::workspace::GlossaryEntry;
+        let glossary = Glossary {
+            entries: vec![
+                GlossaryEntry { source: "Kecamatan".into(), target: "Subdistrict".into() },
+                GlossaryEntry { source: "Luas Wilayah".into(), target: "Area (km2)".into() },
+                GlossaryEntry { source: "".into(), target: "ignored".into() },
+            ],
+        };
+        let entries = enforce_entries(&glossary_pairs(&glossary));
+        assert_eq!(entries.len(), 2, "a one-sided entry must not become an enforcement rule");
+        assert_eq!(enforce_target("Area by kecamatan", &entries), "Area by Subdistrict");
+        assert_eq!(enforce_target("luas wilayah and Kecamatan", &entries), "Area (km2) and Subdistrict");
+        assert_eq!(enforce_target("nothing to fix", &entries), "nothing to fix");
+    }
+
+    #[test]
+    fn a_key_is_read_from_the_environment_not_an_argument() {
+        // --key-env names a variable; the key itself must never appear in argv,
+        // shell history, or a process listing.
+        let args = parse_translate_args(&[
+            "t.pubgen".to_string(),
+            "--provider".into(),
+            "custom".into(),
+            "--base-url".into(),
+            "https://x/v1".into(),
+            "--model".into(),
+            "m".into(),
+            "--key-env".into(),
+            "MY_KEY".into(),
+        ])
+        .expect("args parse");
+        assert_eq!(args.key_env.as_deref(), Some("MY_KEY"));
+        let err = parse_translate_args(&["t.pubgen".into(), "--api-key".into(), "secret".into()]);
+        assert!(err.is_err(), "a literal key argument must not exist");
     }
 }

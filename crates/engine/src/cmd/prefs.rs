@@ -50,7 +50,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Preferences",
             [],
             None,
-            "{showHiddenCharacters?, typographersQuotes?, polygonSides?, starInset?, scaleStrokes?, dimensionsIncludeStroke?, transformationsAreTotals?, absolutePageNumbers?, highlightHj?, highlightKeeps?, highlightCustomTracking?, highlightSubstitutedFonts?, richBlackOutput?, favoriteFonts?: [family], recentFonts?: [family], showFontNamesInEnglish?, smartTextReflow?, autocorrect?, autocorrectList?: [[word, correction]], showAddedText?, showNoteAnchors?, cjkFeatures?: bool|null (CJK-only menu items and dialogs shown; null follows the interface language), linkTextFiles? (Create Links When Placing Text Files), recoveryMinutes?, recentFilesMax?: 0–100, defaultUnits?: {horizontalUnits?, verticalUnits?, rulerOrigin?, keyboardIncrement? (pt), kerningIncrement? (1/1000 em)} (Units & Increments of new documents), translationModelDir?: path, translationModelId?: id, translationProvider?: \"offline\"|\"groq\", translationGroqApiKey?: string, translationGroqModel?: id, pubgenGlossaryPath?: path (custom BPS terminology JSON; empty = bundled), pubgenProjectPath?: path (last Pubgen publication manifest), coverAiCloudflareAccountId?: string, coverAiCloudflareApiToken?: string (Pubgen AI Base cover, Workers AI Edit scope)} → all application preferences",
+            "{showHiddenCharacters?, typographersQuotes?, polygonSides?, starInset?, scaleStrokes?, dimensionsIncludeStroke?, transformationsAreTotals?, absolutePageNumbers?, highlightHj?, highlightKeeps?, highlightCustomTracking?, highlightSubstitutedFonts?, richBlackOutput?, favoriteFonts?: [family], recentFonts?: [family], showFontNamesInEnglish?, smartTextReflow?, autocorrect?, autocorrectList?: [[word, correction]], showAddedText?, showNoteAnchors?, cjkFeatures?: bool|null (CJK-only menu items and dialogs shown; null follows the interface language), linkTextFiles? (Create Links When Placing Text Files), recoveryMinutes?, recentFilesMax?: 0–100, defaultUnits?: {horizontalUnits?, verticalUnits?, rulerOrigin?, keyboardIncrement? (pt), kerningIncrement? (1/1000 em)} (Units & Increments of new documents), translationModelDir?: path, translationModelId?: id, translationProvider?: \"offline\"|\"groq\"|\"custom\"|\"local\", translationGroqApiKey?: string, translationGroqModel?: id, translationCustomBaseUrl?: url, translationCustomApiKey?: string, translationCustomModel?: id, translationLocalBaseUrl?: url (default http://localhost:11434/v1), translationLocalModel?: id, pubgenGlossaryPath?: path (custom BPS terminology JSON; empty = bundled), pubgenProjectPath?: path (last Pubgen publication manifest), coverAiCloudflareAccountId?: string, coverAiCloudflareApiToken?: string (Pubgen AI Base cover, Workers AI Edit scope)} → all application preferences",
             super::always,
             |s, p| {
                 let cur = serde_json::to_value(&s.prefs).map_err(|e| bad("prefs.set", e.to_string()))?;
@@ -151,6 +151,36 @@ mod tests {
         assert!(s.execute("document.preferences", &json!({"pageWidth": 100})).is_err(), "Document Setup's, not Preferences'");
         s.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(s.doc().unwrap().doc.settings.horizontal_units, designcraft_geom::Unit::Picas);
+    }
+
+    #[test]
+    fn prefs_set_accepts_the_custom_provider_fields() {
+        let mut s = Session::new();
+        let r = s
+            .execute(
+                "prefs.set",
+                &json!({
+                    "translationProvider": "custom",
+                    "translationCustomBaseUrl": "https://api.example.com/v1",
+                    "translationCustomApiKey": "k",
+                    "translationCustomModel": "gpt-4o-mini",
+                    "translationLocalBaseUrl": "http://localhost:11434/v1",
+                    "translationLocalModel": "qwen2.5:7b"
+                }),
+            )
+            .expect("prefs.set accepts the new keys");
+        assert_eq!(r["translationProvider"], "custom");
+        assert_eq!(s.prefs.translation_provider, "custom");
+        assert_eq!(s.prefs.translation_custom_base_url, "https://api.example.com/v1");
+        assert_eq!(s.prefs.translation_local_model, "qwen2.5:7b");
+    }
+
+    #[test]
+    fn prefs_defaults_keep_the_legacy_provider() {
+        let p = crate::Prefs::default();
+        assert_eq!(p.translation_provider, "offline");
+        assert!(p.translation_custom_base_url.is_empty());
+        assert_eq!(p.translation_local_base_url, "http://localhost:11434/v1");
     }
 }
 

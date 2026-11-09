@@ -8,10 +8,13 @@ pub mod compiler;
 pub mod container;
 pub mod excel;
 pub mod excel_export;
+pub mod glossary_fix;
 pub mod manifest;
 pub mod plan;
 pub mod profile;
 pub mod report;
+pub mod translation;
+pub mod translation_units;
 pub mod workspace;
 pub mod workspace_compile;
 pub mod workspace_validation;
@@ -23,6 +26,8 @@ pub use manifest::{BuildSettings, ChapterEntry, DocumentSettings, PubgenManifest
 pub use plan::{CommandPlan, PublicationOp};
 pub use profile::{LayoutGeometry, ProfileId, ProfileService, PublicationProfile};
 pub use report::{ChapterReport, CompileReport, DiagnosticItem, DiagnosticSeverity, OutputArtifacts};
+pub use translation::{TmEntry, TmOrigin, TranslationMemory, now_stamp};
+pub use translation_units::{TransUnit, UnitRole, collect_units, is_skippable, protected_names, split_header_stacks};
 pub use workspace::{
     CardKind, CardScope, Glossary, GlossaryEntry, Language, PUBGEN_FORMAT_VERSION, PageLayout, ProjectManifest, PublicationCard, PublicationMetadata,
     Slot,

@@ -182,7 +182,7 @@ pub(crate) fn pubgen_header_band(app: &mut DesignApp, ui: &mut Ui, st: &mut Pubg
         }
 
         // AI Translator button
-        let backend_ready = ai::backend_from_prefs(app).is_some();
+        let backend_ready = ai::backend_config_from_prefs(app).is_some();
         let ai_setup_label = if backend_ready { "AI Translator \u{2713}" } else { "AI Translator" };
         let ai_setup_tip = if backend_ready {
             "AI Provider configured and ready. Click to change settings, API key, or model."
@@ -214,7 +214,7 @@ pub(crate) fn pubgen_header_band(app: &mut DesignApp, ui: &mut Ui, st: &mut Pubg
     ui.horizontal(|ui| {
         ui.set_min_height(26.0);
         let lang = app.ui.language.clone();
-        let backend_ready = ai::backend_from_prefs(app).is_some();
+        let backend_ready = ai::backend_config_from_prefs(app).is_some();
 
     // Profile Switcher & Metadata Preview (Pillar 7)
     ui.horizontal(|ui| {
@@ -313,11 +313,11 @@ pub(crate) fn pubgen_header_band(app: &mut DesignApp, ui: &mut Ui, st: &mut Pubg
         if page_btn.clicked() && let Some(target) = table_target.clone() {
             let mut units = ai::collect_table_page_units(app, &target, &st.glossary);
             units.retain(|(k, _)| !st.translations.contains_key(k));
-            if let Some((provider, key, model)) = ai::backend_from_prefs(app) {
+            if let Some(config) = ai::backend_config_from_prefs(app) {
                 if !units.is_empty() {
                     st.ai_table_target = Some(target);
                     let terms = st.glossary.prompt_pairs();
-                    st.translate_job = Some(ai::TranslateJob::spawn(&provider, &key, &model, units, terms, ui.ctx().clone()));
+                    st.translate_job = Some(ai::TranslateJob::spawn(&config, units, terms, ui.ctx().clone()));
                     st.header_status = Some(("Translating table page with AI…".into(), true));
                 } else {
                     ai::apply_table_page_result(app, st, &target);
@@ -332,10 +332,10 @@ pub(crate) fn pubgen_header_band(app: &mut DesignApp, ui: &mut Ui, st: &mut Pubg
         } else if page_btn.clicked() && let Some(target) = review_target.as_ref() {
             let mut units = ai::collect_page_units(app, target);
             units.retain(|(k, _)| !st.translations.contains_key(k));
-            if let Some((provider, key, model)) = ai::backend_from_prefs(app) {
+            if let Some(config) = ai::backend_config_from_prefs(app) {
                 st.ai_page_target = Some(target.clone());
                 let terms = st.glossary.prompt_pairs();
-                st.translate_job = Some(ai::TranslateJob::spawn(&provider, &key, &model, units, terms, ui.ctx().clone()));
+                st.translate_job = Some(ai::TranslateJob::spawn(&config, units, terms, ui.ctx().clone()));
                 st.header_status = Some(("Translating page with AI…".into(), true));
             } else if units.is_empty() {
                 // Everything cached: re-apply from the map.
@@ -402,7 +402,7 @@ pub(crate) fn pubgen_header_band(app: &mut DesignApp, ui: &mut Ui, st: &mut Pubg
                 } else {
                     (format!("Glossary applied: {corrected} term(s) corrected on the page."), true)
                 });
-            } else if let Some((provider, key, model)) = ai::backend_from_prefs(app) {
+            } else if let Some(config) = ai::backend_config_from_prefs(app) {
                 let mut units = if let Some(target) = table_target.as_ref() {
                     ai::collect_table_page_units(app, target, &st.glossary)
                 } else if let Some(target) = review_target.as_ref() {
@@ -423,7 +423,7 @@ pub(crate) fn pubgen_header_band(app: &mut DesignApp, ui: &mut Ui, st: &mut Pubg
                     } else if let Some(target) = review_target.clone() {
                         st.ai_page_target = Some(target);
                     }
-                    st.translate_job = Some(ai::TranslateJob::spawn(&provider, &key, &model, units, terms, ui.ctx().clone()));
+                    st.translate_job = Some(ai::TranslateJob::spawn(&config, units, terms, ui.ctx().clone()));
                     st.header_status = Some((format!("Retranslating {} text(s) with the official terms…", recheck.len()), true));
                 }
             } else {
@@ -495,11 +495,11 @@ pub(crate) fn pubgen_header_band(app: &mut DesignApp, ui: &mut Ui, st: &mut Pubg
                     all_units.sort_by(|a, b| a.0.cmp(&b.0));
                     all_units.dedup_by(|a, b| a.0 == b.0);
 
-                    if let Some((provider, key, model)) = ai::backend_from_prefs(app) {
+                    if let Some(config) = ai::backend_config_from_prefs(app) {
                         if !all_units.is_empty() {
                             st.ai_table_targets_batch = targets;
                             let terms = st.glossary.prompt_pairs();
-                            st.translate_job = Some(ai::TranslateJob::spawn(&provider, &key, &model, all_units, terms, ui.ctx().clone()));
+                            st.translate_job = Some(ai::TranslateJob::spawn(&config, all_units, terms, ui.ctx().clone()));
                             st.header_status = Some(("Translating table pages with AI…".into(), true));
                         } else {
                             let mut count = 0;

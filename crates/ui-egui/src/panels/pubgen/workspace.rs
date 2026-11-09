@@ -41,6 +41,8 @@ pub enum CardEditTab {
 pub enum OrchestratorRightTab {
     SumberKonten,
     ProfilEksekusi,
+    /// T8: the translation review pane (AI drafts awaiting a human decision).
+    Terjemahan,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -389,6 +391,24 @@ pub struct OrchestratorWorkspaceState {
     // Re-compilation Safety Guard Dialog state
     pub show_guard_dialog: bool,
     pub guard_is_publish: bool,
+    // Translation memory (T7): persisted inside the .pubgen package, seeded from it on open.
+    #[serde(default)]
+    pub tm: pubgen_core::TranslationMemory,
+    /// The document's glossary pairs `(source, target)`, persisted as `glossary.json` (T8).
+    /// Kept apart from `translate_glossary_pairs`: that one is the per-run masking list and is
+    /// cleared when a run ends, which must not wipe the saved glossary.
+    #[serde(default)]
+    pub glossary_pairs: Vec<(String, String)>,
+    // The worksheet translation stage's in-flight job (T7). A job never survives a
+    // restart, so none of this is serialized.
+    #[serde(skip)]
+    pub translate_job: Option<super::ai::TranslateJob>,
+    #[serde(skip)]
+    pub translate_units: Vec<pubgen_core::translation_units::TransUnit>,
+    #[serde(skip)]
+    pub translate_glossary_pairs: Vec<(String, String)>,
+    #[serde(skip)]
+    pub translate_reused: usize,
     // Generation & Thumbnail Pre-warm Progress Modal state
     #[serde(skip)]
     pub compile_progress: Option<CompileProgressState>,
@@ -587,6 +607,12 @@ impl Default for OrchestratorWorkspaceState {
             status_message: None,
             show_guard_dialog: false,
             guard_is_publish: false,
+            tm: pubgen_core::TranslationMemory::default(),
+            glossary_pairs: Vec::new(),
+            translate_job: None,
+            translate_units: Vec::new(),
+            translate_glossary_pairs: Vec::new(),
+            translate_reused: 0,
             compile_progress: None,
         }
     }
@@ -802,7 +828,15 @@ pub fn set_state(ctx: &egui::Context, state: OrchestratorWorkspaceState) {
     ctx.data_mut(|d| d.insert_temp(workspace_state_id(), state));
 }
 
-pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, source_name: &str, report: &pubgen_core::excel::IngestReport) {
+/// Apply an ingest report to the workspace state. `glossary_pairs` is the document's glossary
+/// (`source`, `target`), supplied by the caller because only the ui-egui boundary can load the
+/// bundled/user `BpsGlossary` asset (T8); it is what `glossary.json` is written from.
+pub fn apply_ingest_report_to_state(
+    state: &mut OrchestratorWorkspaceState,
+    source_name: &str,
+    report: &pubgen_core::excel::IngestReport,
+    glossary_pairs: &[(String, String)],
+) {
     state.recent_documents = vec![source_name.to_owned()];
     state.meta_title = report.metadata.title.clone();
     state.meta_subtitle = report.metadata.title_en.clone().unwrap_or_default();
@@ -814,6 +848,19 @@ pub fn apply_ingest_report_to_state(state: &mut OrchestratorWorkspaceState, sour
         pubgen_core::Language::IdEn => "Indonesian-English",
     }
     .into();
+
+    // A worksheet import replaces the publication, so the previous document's translation memory
+    // must not leak its English onto this one's cards (or be saved into its package). Any
+    // translation still in flight belongs to the document that is being replaced.
+    state.tm = pubgen_core::TranslationMemory::default();
+    state.glossary_pairs.clear();
+    state.translate_units.clear();
+    state.translate_glossary_pairs.clear();
+    state.translate_reused = 0;
+    state.translate_job = None;
+    // The replaced document's glossary is rebuilt from the caller's pairs; `seed_pubgen_state`
+    // and generation then reuse the same official English the package saves.
+    state.glossary_pairs.extend(glossary_pairs.iter().filter(|(s, t)| !s.trim().is_empty() && !t.trim().is_empty()).cloned());
 
     if state.selected_profile == "bps_dda" {
         state.meta_release_no.clear();
@@ -1380,6 +1427,25 @@ const ORCH_TAB_PAD: f32 = 44.0;
 const DOCK_TAB_H: f32 = 27.0;
 const DOCK_TAB_LABEL: f32 = 12.0;
 const DOCK_TAB_PAD: f32 = 10.0;
+/// Width of the collapse-to-icons button at the left of the dock's tab strip.
+const DOCK_COLLAPSE_W: f32 = 18.0;
+
+/// Lay out one dock tab label inside its tab: [`DOCK_TAB_PAD`] on the left, the rest for text.
+/// At the default 320 px dock the three tabs are ~100 px wide, narrower than "Sources & Content",
+/// "Profile & Execution" and "Translation Review" at [`DOCK_TAB_LABEL`], so the string is cut with
+/// an ellipsis rather than painted over the neighbouring tab (the full label stays in the tooltip).
+fn dock_tab_label(ctx: &egui::Context, rect: Rect, text: &str, color: Color32) -> std::sync::Arc<egui::Galley> {
+    let max_w = (rect.width() - DOCK_TAB_PAD).max(DOCK_TAB_LABEL);
+    crate::rtl::truncated(ctx, text, FontId::proportional(DOCK_TAB_LABEL), color, max_w)
+}
+
+/// Paint a [`dock_tab_label`] galley with its left edge [`DOCK_TAB_PAD`] inside the tab.
+fn paint_dock_tab_label(ui: &Ui, rect: Rect, galley: std::sync::Arc<egui::Galley>) {
+    let pos = pos2(rect.min.x + DOCK_TAB_PAD, rect.center().y - galley.size().y / 2.0);
+    // PLACEHOLDER keeps the colours the galley was laid out with (same as the host tab strip).
+    ui.painter().galley(pos, galley, Color32::PLACEHOLDER);
+}
+
 /// Home screen scale — the same sizes `chrome::start_screen` uses for DesignCraft's own welcome
 /// page, so both entry screens read as one product. (F5)
 const HOME_TITLE: f32 = 24.0;
@@ -1408,6 +1474,14 @@ fn dock_width(total_width: f32, dock_expanded: bool, stored_w: f32) -> (f32, f32
     }
     let dock_max = (total_width * RIGHT_DOCK_MAX_SHARE).max(RIGHT_DOCK_MIN_W);
     (stored_w.clamp(RIGHT_DOCK_MIN_W, dock_max), DOCK_DIVIDER_W)
+}
+
+/// The three tab widths of the expanded dock's tab strip at `width`: two equal floors after the
+/// collapse button, and the remainder for the last tab.
+fn dock_tab_widths(width: f32) -> (f32, f32, f32) {
+    let remaining_w = (width - DOCK_COLLAPSE_W).max(100.0);
+    let tab_w = (remaining_w / 3.0).floor();
+    (tab_w, tab_w, (width - (DOCK_COLLAPSE_W + 2.0 * tab_w)).max(0.0))
 }
 
 /// Draws the workspace tab strip at the top of the Orchestrator panel, following Designcraft document tabs design.
@@ -1569,6 +1643,7 @@ pub fn sync_external_workspace(
     ctx: &egui::Context,
     source_name: &str,
     metadata: &pubgen_core::PublicationMetadata,
+    tm: &pubgen_core::TranslationMemory,
     csv: &[(String, Vec<u8>)],
     text: &[(String, Vec<u8>)],
     assets: &[(String, Vec<u8>)],
@@ -1583,12 +1658,23 @@ pub fn sync_external_workspace(
         assets: assets.to_vec(),
         warnings: Vec::new(),
     };
-    apply_ingest_report_to_state(&mut state, source_name, &report);
+    apply_ingest_report_to_state(&mut state, source_name, &report, &[]);
+    // The package's own memory is loaded after the import reset, so opening a `.pubgen` keeps it.
+    state.tm = tm.clone();
     super::with_state(ctx, |pubgen_st| {
         if let Some(cov_card) = state.cards.iter().find(|c| c.kind == CardKind::Cover) {
             sync_card_to_pubgen_state(cov_card, &state, pubgen_st);
         }
     });
+    set_state(ctx, state);
+}
+
+/// Restore an opened package's glossary after `sync_external_workspace` (T8): `open_pubgen`
+/// reads `glossary.json`, so saving the package again keeps its terminology instead of
+/// writing an empty glossary over it.
+pub fn set_workspace_glossary(ctx: &egui::Context, entries: &[pubgen_core::GlossaryEntry]) {
+    let mut state = get_state(ctx);
+    state.glossary_pairs = entries.iter().map(|e| (e.source.clone(), e.target.clone())).collect();
     set_state(ctx, state);
 }
 
@@ -1903,6 +1989,12 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
     }
     let mut state = get_state(ui.ctx());
 
+    // Poll the in-flight worksheet translation job every frame (T7). The button lives in
+    // the Studio view, so a job can only exist there.
+    if state.view == OrchestratorView::Studio {
+        poll_translate_job(&mut state);
+    }
+
     if state.view == OrchestratorView::Home {
         render_orchestrator_home(app, ui, &mut state, &t, &lang);
         set_state(ui.ctx(), state);
@@ -2055,6 +2147,27 @@ fn render_collapsed_dock(
         state.right_dock_tab = OrchestratorRightTab::ProfilEksekusi;
         state.right_dock_expanded = true;
     }
+
+    ui.add_space(2.0);
+
+    // Icon 3: Ulasan Terjemahan (T8 review pane)
+    let is_tab3 = state.right_dock_tab == OrchestratorRightTab::Terjemahan;
+    let (r3, resp3) = ui.allocate_exact_size(vec2(width, 36.0), Sense::click());
+    let resp3 = resp3.on_hover_text(crate::i18n::tr(lang, "Translation Review"));
+    resp3.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_tab3, crate::i18n::tr(lang, "Translation Review")));
+    let btn3 = Rect::from_center_size(r3.center(), vec2(30.0, 30.0));
+    if resp3.hovered() || is_tab3 {
+        ui.painter().rect_filled(btn3, 3.0, if is_tab3 { t.panel_darker } else { t.hover });
+    }
+    if is_tab3 {
+        ui.painter().rect_stroke(btn3, 3.0, Stroke::new(1.5, t.accent), StrokeKind::Inside);
+    }
+    let icon_box3 = Rect::from_center_size(btn3.center(), vec2(18.0, 18.0));
+    crate::icons::paint(ui.painter(), icon_box3, "panel-preflight", if is_tab3 { t.accent } else { t.icon });
+    if resp3.clicked() {
+        state.right_dock_tab = OrchestratorRightTab::Terjemahan;
+        state.right_dock_expanded = true;
+    }
 }
 
 /// Expanded right dock with tabs (InDesign parity: tab strip + collapse button)
@@ -2071,9 +2184,8 @@ fn render_expanded_dock(
     ui.set_height(total_height);
 
     let tab_bar_height = DOCK_TAB_H;
-    let collapse_btn_w = 18.0f32;
-    let remaining_w = (width - collapse_btn_w).max(100.0);
-    let tab_w = (remaining_w / 2.0).floor();
+    let collapse_btn_w = DOCK_COLLAPSE_W;
+    let (tab_w, tab2_w, tab3_w) = dock_tab_widths(width);
 
     // 1. Tab Bar strip
     let (strip, _) = ui.allocate_exact_size(vec2(width, tab_bar_height), Sense::hover());
@@ -2110,19 +2222,16 @@ fn render_expanded_dock(
         }
         ui.painter().line_segment([tab1_rect.left_bottom(), tab1_rect.right_bottom()], Stroke::new(1.0, t.border));
     }
-    ui.painter().text(
-        tab1_rect.left_center() + vec2(DOCK_TAB_PAD, 0.0),
-        Align2::LEFT_CENTER,
-        crate::i18n::tr(lang, "Sources & Content"),
-        FontId::proportional(DOCK_TAB_LABEL),
-        if is_tab1 { t.text_strong } else { t.text_dim },
+    paint_dock_tab_label(
+        ui,
+        tab1_rect,
+        dock_tab_label(ui.ctx(), tab1_rect, crate::i18n::tr(lang, "Sources & Content"), if is_tab1 { t.text_strong } else { t.text_dim }),
     );
     if tab1_resp.clicked() {
         state.right_dock_tab = OrchestratorRightTab::SumberKonten;
     }
 
     // Tab 2: Profil & Eksekusi
-    let tab2_w = (width - (collapse_btn_w + tab_w)).max(0.0);
     let tab2_rect = Rect::from_min_size(pos2(strip.min.x + collapse_btn_w + tab_w, strip.min.y), vec2(tab2_w, tab_bar_height));
     let is_tab2 = state.right_dock_tab == OrchestratorRightTab::ProfilEksekusi;
     let tab2_resp =
@@ -2138,15 +2247,38 @@ fn render_expanded_dock(
         }
         ui.painter().line_segment([tab2_rect.left_bottom(), tab2_rect.right_bottom()], Stroke::new(1.0, t.border));
     }
-    ui.painter().text(
-        tab2_rect.left_center() + vec2(DOCK_TAB_PAD, 0.0),
-        Align2::LEFT_CENTER,
-        crate::i18n::tr(lang, "Profile & Execution"),
-        FontId::proportional(DOCK_TAB_LABEL),
-        if is_tab2 { t.text_strong } else { t.text_dim },
+    paint_dock_tab_label(
+        ui,
+        tab2_rect,
+        dock_tab_label(ui.ctx(), tab2_rect, crate::i18n::tr(lang, "Profile & Execution"), if is_tab2 { t.text_strong } else { t.text_dim }),
     );
     if tab2_resp.clicked() {
         state.right_dock_tab = OrchestratorRightTab::ProfilEksekusi;
+    }
+
+    // Tab 3: Ulasan Terjemahan (T8)
+    let tab3_rect = Rect::from_min_size(pos2(strip.min.x + collapse_btn_w + 2.0 * tab_w, strip.min.y), vec2(tab3_w, tab_bar_height));
+    let is_tab3 = state.right_dock_tab == OrchestratorRightTab::Terjemahan;
+    let tab3_resp =
+        ui.interact(tab3_rect, ui.scope_id().with("dock_tab_3"), Sense::click()).on_hover_text(crate::i18n::tr(lang, "Translation Review"));
+    tab3_resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_tab3, crate::i18n::tr(lang, "Translation Review")));
+    if is_tab3 {
+        ui.painter().rect_filled(tab3_rect, 0.0, t.panel);
+        ui.painter().line_segment([tab3_rect.left_top(), tab3_rect.left_bottom()], Stroke::new(1.0, t.border));
+        ui.painter().line_segment([tab3_rect.right_top(), tab3_rect.right_bottom()], Stroke::new(1.0, t.border));
+    } else {
+        if tab3_resp.hovered() {
+            ui.painter().rect_filled(tab3_rect, 0.0, t.hover);
+        }
+        ui.painter().line_segment([tab3_rect.left_bottom(), tab3_rect.right_bottom()], Stroke::new(1.0, t.border));
+    }
+    paint_dock_tab_label(
+        ui,
+        tab3_rect,
+        dock_tab_label(ui.ctx(), tab3_rect, crate::i18n::tr(lang, "Translation Review"), if is_tab3 { t.text_strong } else { t.text_dim }),
+    );
+    if tab3_resp.clicked() {
+        state.right_dock_tab = OrchestratorRightTab::Terjemahan;
     }
 
     // Line under the collapse button
@@ -2165,6 +2297,13 @@ fn render_expanded_dock(
             }
             OrchestratorRightTab::ProfilEksekusi => {
                 render_right_panel(app, ui, state, t, lang);
+            }
+            OrchestratorRightTab::Terjemahan => {
+                // T8: review the AI drafts before a compile; the pane owns the memory so Accept
+                // and Reject persist with the package.
+                let mut dirty = state.is_dirty;
+                super::translate_stage::review_pane(ui, &mut state.tm, &mut dirty);
+                state.is_dirty = dirty;
             }
         }
     });
@@ -2242,14 +2381,15 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         {
             let lang = lang.to_string();
             let ctx = ui.ctx().clone();
-            let _ = app.ask_open("dataMerge", crate::app::file_dialogs::Bound::App, move |_app, path| {
+            let _ = app.ask_open("dataMerge", crate::app::file_dialogs::Bound::App, move |app, path| {
                 let p = std::path::Path::new(&path);
                 let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
                 if ext == "xlsx" || ext == "xlsm" {
                     if let Ok(report) = pubgen_core::excel::ingest_workbook(p) {
                         let mut st = get_state(&ctx);
                         let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(&path);
-                        apply_ingest_report_to_state(&mut st, name, &report);
+                        let pairs = super::ai::BpsGlossary::load(&app.session.prefs.pubgen_glossary_path).prompt_pairs();
+                        apply_ingest_report_to_state(&mut st, name, &report, &pairs);
                         super::with_state(&ctx, |pubgen_st| {
                             if let Some(cov_card) = st.cards.iter().find(|c| c.kind == CardKind::Cover) {
                                 sync_card_to_pubgen_state(cov_card, &st, pubgen_st);
@@ -2298,12 +2438,13 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
             .clicked()
         {
             let ctx = ui.ctx().clone();
-            let _ = app.ask_open("dataMerge", crate::app::file_dialogs::Bound::App, move |_app, path| {
+            let _ = app.ask_open("dataMerge", crate::app::file_dialogs::Bound::App, move |app, path| {
                 let p = std::path::Path::new(&path);
                 if let Ok(report) = pubgen_core::excel::ingest_workbook(p) {
                     let mut st = get_state(&ctx);
                     let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(&path);
-                    apply_ingest_report_to_state(&mut st, name, &report);
+                    let pairs = super::ai::BpsGlossary::load(&app.session.prefs.pubgen_glossary_path).prompt_pairs();
+                    apply_ingest_report_to_state(&mut st, name, &report, &pairs);
                     super::with_state(&ctx, |pubgen_st| {
                         if let Some(cov_card) = st.cards.iter().find(|c| c.kind == CardKind::Cover) {
                             sync_card_to_pubgen_state(cov_card, &st, pubgen_st);
@@ -3323,8 +3464,42 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
             ui.label(RichText::new("Margins: T:20.2 B:20.0 L:19.0 R:15.0 mm | Spreads: Tidak").font(FontId::proportional(11.0)).color(t.text_dim));
         });
 
-    // 2. Action Buttons: Generate & Generate and Publish
+    // 2. Action Buttons: Translate, Generate & Generate and Publish
     let btn_h = 28.0f32;
+
+    // Translate Worksheet (T7): TM/glossary hits resolve locally, only misses are sent.
+    let translate_enabled = super::ai::backend_config_from_prefs(app).is_some() && !state.cards.is_empty();
+    let translate_label = if state.translate_job.is_some() {
+        format!(
+            "Menerjemahkan dengan AI… {}/{}",
+            state.translate_job.as_ref().map(|j| j.done).unwrap_or(0),
+            state.translate_job.as_ref().map(|j| j.total).unwrap_or(0)
+        )
+    } else {
+        crate::i18n::tr(lang, "Translate Worksheet").to_string()
+    };
+    let translate_resp = ui
+        .add_sized(
+            [ui.available_width(), btn_h],
+            egui::Button::new(RichText::new(translate_label).font(semibold(11.5)).color(if translate_enabled || state.translate_job.is_some() {
+                t.text_strong
+            } else {
+                t.text_dim
+            }))
+            .fill(t.panel_darker)
+            .corner_radius(CornerRadius::same(t.radius)),
+        )
+        .on_hover_text(crate::i18n::tr(
+            lang,
+            "Translate the worksheet's titles, headers and notes into English (memory and glossary hits need no request)",
+        ));
+    if !translate_enabled && state.translate_job.is_none() {
+        translate_resp.clone().on_hover_text(crate::i18n::tr(lang, "Configure an AI provider first, and add at least one card"));
+    }
+    if translate_resp.clicked() {
+        start_translate_stage(app, ui.ctx(), state);
+    }
+    // The job itself is polled once per frame in `show`, whichever tab is open.
 
     // Generate Button (Deep Cyan)
     if ui
@@ -3705,6 +3880,22 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                                     if show_title_en {
                                         ui.label(RichText::new(crate::i18n::tr(lang, "Title EN:")).font(semibold(11.0)).color(t.text_strong));
                                         ui.add_sized([ui.available_width(), 22.0], egui::TextEdit::singleline(&mut card.title_en));
+                                        // T8: is this English an unreviewed AI draft or a human decision?
+                                        if let Some(label) = super::translate_stage::badge_label(&state.tm, &card.title) {
+                                            let reviewed = label == "Reviewed";
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    RichText::new(label)
+                                                        .font(FontId::proportional(11.0))
+                                                        .color(if reviewed { t.success } else { t.accent }),
+                                                );
+                                                if !reviewed && ui.button(RichText::new("Accept").font(FontId::proportional(11.0))).clicked() {
+                                                    if state.tm.promote(&card.title) {
+                                                        state.is_dirty = true;
+                                                    }
+                                                }
+                                            });
+                                        }
                                     }
 
                                     let show_chapter = matches!(card.kind, CardKind::Narrative | CardKind::Table | CardKind::Chart | CardKind::MapChart | CardKind::Divider);
@@ -4425,6 +4616,140 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
     }
 }
 
+/// The core draft of the current worksheet (T7): the metadata `to_metadata` writes into
+/// a package, plus the staged content and the translation memory. This is what the
+/// translation stage plans over (`collect_units` consumes the core draft).
+fn worksheet_draft(state: &OrchestratorWorkspaceState) -> pubgen_core::workspace_validation::WorkspaceDraft {
+    let mut csv = Vec::new();
+    let mut text = Vec::new();
+    let mut assets = Vec::new();
+    for (key, bytes) in state.cached_content.iter() {
+        let clean = key.replace('\\', "/");
+        if clean.starts_with("csv/") || clean.ends_with(".csv") {
+            csv.push((key.clone(), bytes.clone()));
+        } else if clean.starts_with("rtf/")
+            || clean.starts_with("md/")
+            || clean.starts_with("text/")
+            || clean.ends_with(".rtf")
+            || clean.ends_with(".md")
+        {
+            text.push((key.clone(), bytes.clone()));
+        } else {
+            assets.push((key.clone(), bytes.clone()));
+        }
+    }
+    let name = state.meta_title.trim();
+    let name = if name.is_empty() { "worksheet" } else { name };
+    let mut draft = pubgen_core::workspace_validation::WorkspaceDraft::from_ingest(
+        name.to_string(),
+        pubgen_core::excel::IngestReport {
+            profile_id: state.selected_profile.clone(),
+            metadata: state.to_metadata(),
+            csv,
+            text,
+            assets,
+            warnings: Vec::new(),
+        },
+    );
+    draft.tm = state.tm.clone();
+    draft
+}
+
+/// "Translate Worksheet" (T7): resolve the TM and whole-string glossary hits locally,
+/// then send only the misses to the provider as one background job.
+fn start_translate_stage(app: &mut DesignApp, ctx: &egui::Context, state: &mut OrchestratorWorkspaceState) {
+    if state.translate_job.is_some() || state.cards.is_empty() {
+        return;
+    }
+    let glossary = super::ai::BpsGlossary::load(&app.session.prefs.pubgen_glossary_path);
+    let draft = worksheet_draft(state);
+    let mut tm = state.tm.clone();
+    let (misses, plan) = super::translate_stage::plan_units(&draft, &tm, &glossary);
+    super::translate_stage::store_glossary_hits(&draft, &mut tm, &glossary, &misses);
+    state.tm = tm;
+    state.translate_reused = plan.reused;
+    if misses.is_empty() {
+        // Everything resolved locally: no request leaves the machine.
+        let now = format_now();
+        state.execution_log.push(format!("[{now}] Translated 0 unit(s), reused {}, skipped 0, failed 0.", plan.reused));
+        state.status_message = Some((format!("Semua unit berasal dari memori/kosakata ({}) — tidak ada permintaan AI.", plan.reused), true));
+        state.is_dirty = true;
+        return;
+    }
+    let Some(cfg) = super::ai::backend_config_from_prefs(app) else {
+        state.status_message = Some(("Tidak ada penyedia AI yang dikonfigurasi (Pengaturan AI).".into(), false));
+        return;
+    };
+    let pairs = glossary.prompt_pairs();
+    let requests = super::translate_stage::masked_requests(&misses, &pairs);
+    state.translate_units = misses;
+    state.translate_glossary_pairs = pairs.clone();
+    state.translate_job = Some(super::ai::TranslateJob::spawn(&cfg, requests, pairs, ctx.clone()));
+    state.status_message = Some((format!("Menerjemahkan {} unit dengan AI…", state.translate_units.len()), true));
+}
+
+/// Poll the worksheet translation job (T7): restore the masked outputs, reject any
+/// unit whose numbers did not survive, write the accepted English onto the cards and
+/// into the memory, and report one line in LogEksekusi.
+fn poll_translate_job(state: &mut OrchestratorWorkspaceState) {
+    let Some(mut job) = state.translate_job.take() else { return };
+    let mut scratch = super::PubgenState::default();
+    let _ok = job.poll(&mut scratch);
+    if !job.finished {
+        state.status_message = Some((format!("Menerjemahkan dengan AI… {}/{}", job.done, job.total), true));
+        state.translate_job = Some(job);
+        return;
+    }
+    let mut draft = worksheet_draft(state);
+    let mut tm = std::mem::take(&mut state.tm);
+    let outputs: Vec<(String, String)> = scratch.translations.into_iter().collect();
+    let (results, restore_failed) = super::translate_stage::restore_outputs(&state.translate_units, &outputs, &state.translate_glossary_pairs);
+    // T8: deterministic glossary enforcement reuses the run's masking pairs — the same official
+    // English the prompt asked for, applied to output the model may have written differently.
+    let entries: Vec<pubgen_core::glossary_fix::Entry> = state
+        .translate_glossary_pairs
+        .iter()
+        .map(|(term, replacement)| pubgen_core::glossary_fix::Entry {
+            term: term.clone(),
+            replacement: replacement.clone(),
+            do_not_translate: false,
+            case_preserve: true,
+        })
+        .collect();
+    let mut res = super::translate_stage::apply_results(&mut draft, &mut tm, &state.translate_units, &results, &entries);
+    state.tm = tm;
+    res.failed.extend(restore_failed);
+    // Refresh the UI cards from the core draft: `to_metadata` maps `state.cards` 1:1.
+    for (core_card, ui_card) in draft.metadata.cards.iter().zip(&mut state.cards) {
+        if let Some(ten) = core_card.settings.get("title_en").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            ui_card.title_en = ten.to_string();
+        }
+    }
+    let now = format_now();
+    state.execution_log.push(format!(
+        "[{now}] Translated {} unit(s), reused {}, skipped {}, failed {}.",
+        res.translated,
+        state.translate_reused,
+        res.skipped,
+        res.failed.len()
+    ));
+    if let Some((msg, good)) = scratch.header_status
+        && !good
+    {
+        state.execution_log.push(format!("[{now}] {msg}"));
+    }
+    if res.glossary_fixes > 0 {
+        state.execution_log.push(format!("[{now}] Glossary enforced {} replacement(s) on AI output.", res.glossary_fixes));
+    }
+    state.status_message = Some((
+        format!("Terjemahan selesai: {} unit, {} daur ulang, {} gagal", res.translated, state.translate_reused, res.failed.len()),
+        res.failed.is_empty(),
+    ));
+    state.is_dirty = true;
+    state.translate_units.clear();
+    state.translate_glossary_pairs.clear();
+}
+
 /// Executes compilation and automatically transitions workspace to DesignCraft Layout mode.
 /// Build a `PubgenState` from the active worksheet (cards + cached csv/text/assets),
 /// stage the cached content into a temp folder, and run the shared page-generation
@@ -4437,16 +4762,10 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
     // (`excel::execute_excel_to_csvs`), otherwise BRS loses its table style,
     // theme and header/footer preset (`state::apply_profile`, `state.rs:787`).
     st.apply_profile(super::profiles::ProfileManager::get_profile(&state.selected_profile), false);
-    let is_bilingual = state.doc_language.to_lowercase().contains("bilingual")
-        || state.doc_language.to_lowercase().contains("dwibahasa")
-        || state.doc_language.eq_ignore_ascii_case("indonesian-english")
-        || state.doc_language.eq_ignore_ascii_case("indo-english")
-        || (state.doc_language.to_lowercase().contains("indonesia") && state.doc_language.to_lowercase().contains("english"));
-    if is_bilingual || state.selected_profile == "bps_dda" {
-        st.bilingual_output = true;
-    } else if state.selected_profile == "bps_brs" {
-        st.bilingual_output = false;
-    }
+    // Fix round 2: carry the worksheet's language into the pipeline state. The page generator
+    // reads it to decide bilingual output for BRS, so it must not arrive empty.
+    st.doc_language = state.doc_language.clone();
+    st.glossary = super::ai::BpsGlossary::load(&app.session.prefs.pubgen_glossary_path);
 
     if state.margin_top_mm > 0 {
         let mut prof = st.active_profile();
@@ -4751,6 +5070,24 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         st.card2_path = first_table.clone();
         super::csv::load_card2_csv(&mut st, &first_table);
     }
+
+    // Bilingual output is re-derived *here*, at the last point before page generation: every
+    // `apply_profile` call and `excel::apply_excel_cover` above resets `bilingual_output` from
+    // the profile, and the seed below derives `translate_with_ai` from it. Deriving it earlier
+    // left the two flags disagreeing and the paired English never rendered.
+    let is_bilingual = state.doc_language.to_lowercase().contains("bilingual")
+        || state.doc_language.to_lowercase().contains("dwibahasa")
+        || state.doc_language.eq_ignore_ascii_case("indonesian-english")
+        || state.doc_language.eq_ignore_ascii_case("indo-english")
+        || (state.doc_language.to_lowercase().contains("indonesia") && state.doc_language.to_lowercase().contains("english"));
+    if is_bilingual || state.selected_profile == "bps_dda" {
+        st.bilingual_output = true;
+    } else if state.selected_profile == "bps_brs" {
+        st.bilingual_output = false;
+    }
+    // T7: seed the generation cache from the translation memory so a compile reuses
+    // every translation; the worksheet's glossary reaches `pair_cells` the same way.
+    super::translate_stage::seed_pubgen_state(&mut st, &state.tm);
 
     let gen_res = super::excel::generate_publication_pages(app, &mut st)?;
 
@@ -5098,6 +5435,41 @@ mod tests {
         assert_eq!(dock_width(1440.0, false, 320.0), (RIGHT_DOCK_COLLAPSED_W, 0.0));
     }
 
+    /// Three tabs share the dock at ~100 px each (the default 320 px dock), less than "Sources &
+    /// Content", "Profile & Execution" and "Translation Review" need at 12 px. A painted label must
+    /// therefore fit its own tab — elided with "…" — and never run into its neighbour. Measured with
+    /// the real font: each galley's width against its tab's width minus [`DOCK_TAB_PAD`].
+    #[test]
+    fn dock_tab_labels_fit_their_tab_at_the_default_width() {
+        let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx, "en");
+        let mut out = ctx.run_ui(Default::default(), |_| {}); // fonts only bind inside a run
+        out.textures_delta.clear();
+
+        let (tab1_w, tab2_w, tab3_w) = dock_tab_widths(default_right_dock_w());
+        let tabs = [("Sources & Content", tab1_w), ("Profile & Execution", tab2_w), ("Translation Review", tab3_w)];
+        for lang in ["en", "id"] {
+            for (key, tab_w) in tabs {
+                let text = crate::i18n::tr(lang, key);
+                let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(tab_w, DOCK_TAB_H));
+                let galley = dock_tab_label(&ctx, rect, text, Color32::WHITE);
+                let raw = crate::rtl::plain(&ctx, text, FontId::proportional(DOCK_TAB_LABEL), Color32::WHITE);
+                assert!(
+                    galley.size().x <= tab_w - DOCK_TAB_PAD + 0.5,
+                    "{lang} `{text}` paints {:.1} px into a {tab_w} px tab ({:.1} px unelided, {:.1} px available)",
+                    galley.size().x,
+                    raw.size().x,
+                    tab_w - DOCK_TAB_PAD
+                );
+                assert!(galley.elided || raw.size().x <= tab_w - DOCK_TAB_PAD, "{lang} `{text}` must be elided to fit");
+            }
+            // The widest label must actually elide at this width, or the check above proves nothing.
+            let widest = crate::i18n::tr(lang, "Translation Review");
+            let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(tab3_w, DOCK_TAB_H));
+            assert!(dock_tab_label(&ctx, rect, widest, Color32::WHITE).elided, "{lang} `{widest}` was expected to elide in a {tab3_w} px tab");
+        }
+    }
+
     /// Chrome type comes from one small scale: DesignCraft's `LABEL_SIZE` (11 px), the 11.5 px section
     /// band, the 12 px panel title, and the [`HOME_*`] start-screen sizes. Nothing in this file may dip
     /// back to the 9–10.5 px sizes that made the Orchestrator's labels smaller than every panel in
@@ -5423,7 +5795,7 @@ mod tests {
         let sample = std::path::Path::new("../../plan/pubgen/samples/brs/ntp202610.xlsx");
         if sample.is_file() {
             let report = pubgen_core::excel::ingest_workbook(sample).expect("ingest sample");
-            apply_ingest_report_to_state(&mut state, "ntp202610.xlsx", &report);
+            apply_ingest_report_to_state(&mut state, "ntp202610.xlsx", &report, &[]);
             assert_eq!(state.meta_title, "Perkembangan Nilai Tukar Petani");
             assert_eq!(state.meta_release_no, "61/10/32/Th. XXVIII");
             assert_eq!(state.meta_release_date, "1 Oktober 2026");
@@ -5453,6 +5825,109 @@ mod tests {
         }
     }
 
+    /// T7: importing a workbook replaces the publication, so the previous document's translation
+    /// memory must not reuse its English on the new cards (or be saved into the new package).
+    #[test]
+    fn test_ingesting_a_workbook_clears_the_previous_translation_memory() {
+        let mut state = OrchestratorWorkspaceState::default();
+        state.tm.insert(pubgen_core::translation::TmEntry {
+            source: "Luas Wilayah".into(),
+            target: "Total Area".into(),
+            origin: pubgen_core::translation::TmOrigin::Ai,
+            role: "table_title".into(),
+            updated: pubgen_core::translation::now_stamp(),
+        });
+        state.translate_units.push(pubgen_core::translation_units::TransUnit {
+            key: "Luas Wilayah".into(),
+            text: "Luas Wilayah".into(),
+            role: pubgen_core::translation_units::UnitRole::TableTitle,
+            card_id: "table-1".into(),
+        });
+        state.translate_glossary_pairs.push(("Kecamatan".into(), "Subdistrict".into()));
+
+        let report = pubgen_core::excel::IngestReport {
+            profile_id: "bps_brs".into(),
+            metadata: pubgen_core::PublicationMetadata {
+                profile_id: "bps_brs".into(),
+                layout: pubgen_core::PageLayout::Single,
+                language: pubgen_core::Language::Id,
+                title: "Terjemahan Berikutnya".into(),
+                title_en: None,
+                cards: Vec::new(),
+                extra: Default::default(),
+            },
+            csv: Vec::new(),
+            text: Vec::new(),
+            assets: Vec::new(),
+            warnings: Vec::new(),
+        };
+        apply_ingest_report_to_state(&mut state, "other.xlsx", &report, &[]);
+
+        assert!(state.tm.entries.is_empty(), "a newly imported document must not inherit the previous memory");
+        assert!(state.tm.lookup("Luas Wilayah").is_none());
+        assert!(state.translate_units.is_empty(), "a pending unit belongs to the replaced document");
+        assert!(state.translate_glossary_pairs.is_empty());
+    }
+
+    /// T8: the ingest path carries the document glossary, so `glossary.json` has entries to write.
+    /// It lives apart from the masking pairs, which a translation run clears.
+    #[test]
+    fn ingesting_a_workbook_seeds_the_glossary_without_the_masking_pairs() {
+        let mut state = OrchestratorWorkspaceState::default();
+        state.glossary_pairs.push(("Lama".into(), "Old".into()));
+        let report = pubgen_core::excel::IngestReport {
+            profile_id: "bps_brs".into(),
+            metadata: pubgen_core::PublicationMetadata {
+                profile_id: "bps_brs".into(),
+                layout: pubgen_core::PageLayout::Single,
+                language: pubgen_core::Language::Id,
+                title: "Glosarium".into(),
+                title_en: None,
+                cards: Vec::new(),
+                extra: Default::default(),
+            },
+            csv: Vec::new(),
+            text: Vec::new(),
+            assets: Vec::new(),
+            warnings: Vec::new(),
+        };
+        apply_ingest_report_to_state(&mut state, "glosarium.xlsx", &report, &[("Kecamatan".into(), "Subdistrict".into())]);
+
+        assert_eq!(state.glossary_pairs, vec![("Kecamatan".to_string(), "Subdistrict".to_string())]);
+        assert!(state.translate_glossary_pairs.is_empty(), "the run's masking list stays separate");
+    }
+
+    /// T7: opening a `.pubgen` loads that package's own memory, which the import reset must keep.
+    #[test]
+    fn test_sync_external_workspace_keeps_the_opened_packages_memory() {
+        let ctx = egui::Context::default();
+        let mut tm = pubgen_core::TranslationMemory::default();
+        tm.insert(pubgen_core::translation::TmEntry {
+            source: "Luas Wilayah".into(),
+            target: "Total Area".into(),
+            origin: pubgen_core::translation::TmOrigin::Reviewed,
+            role: "table_title".into(),
+            updated: pubgen_core::translation::now_stamp(),
+        });
+        let metadata = pubgen_core::PublicationMetadata {
+            profile_id: "bps_brs".into(),
+            layout: pubgen_core::PageLayout::Single,
+            language: pubgen_core::Language::Id,
+            title: "Paket".into(),
+            title_en: None,
+            cards: Vec::new(),
+            extra: Default::default(),
+        };
+
+        sync_external_workspace(&ctx, "Paket.pubgen", &metadata, &tm, &[], &[], &[]);
+        // T8: the package's glossary is restored after the import reset too.
+        set_workspace_glossary(&ctx, &[pubgen_core::GlossaryEntry { source: "Kecamatan".into(), target: "Subdistrict".into() }]);
+
+        let state = get_state(&ctx);
+        assert_eq!(state.tm.lookup("Luas Wilayah").map(|entry| entry.target.as_str()), Some("Total Area"));
+        assert_eq!(state.glossary_pairs, vec![("Kecamatan".to_string(), "Subdistrict".to_string())]);
+    }
+
     #[test]
     fn test_generate_publication_from_workspace_cards() {
         // The Generate buttons must build pages from the worksheet cards + cached
@@ -5464,7 +5939,7 @@ mod tests {
             return;
         }
         let report = pubgen_core::excel::ingest_workbook(sample).expect("ingest sample");
-        apply_ingest_report_to_state(&mut state, "ntp202610.xlsx", &report);
+        apply_ingest_report_to_state(&mut state, "ntp202610.xlsx", &report, &[]);
         assert!(!state.cards.is_empty());
         assert!(!state.cached_content.is_empty());
 
@@ -5486,7 +5961,7 @@ mod tests {
         let sample = std::path::Path::new("../../plan/pubgen/samples/SINGLE_LANG/BAB_02_2025.xlsx");
         if sample.is_file() {
             let report = pubgen_core::excel::ingest_workbook(sample).expect("ingest DDA sample");
-            apply_ingest_report_to_state(&mut state, "BAB_02_2025.xlsx", &report);
+            apply_ingest_report_to_state(&mut state, "BAB_02_2025.xlsx", &report, &[]);
             assert_eq!(state.selected_profile, "bps_dda");
 
             // DIV must be Divider (Pembatas)
@@ -5530,7 +6005,7 @@ mod tests {
         let sample = std::path::Path::new("../../plan/pubgen/samples/DUAL_LANG/BAB_01_2025_ai_translate.xlsx");
         if sample.is_file() {
             let report = pubgen_core::excel::ingest_workbook(sample).expect("ingest DDA BAB_01 sample");
-            apply_ingest_report_to_state(&mut state, "BAB_01_2025_ai_translate.xlsx", &report);
+            apply_ingest_report_to_state(&mut state, "BAB_01_2025_ai_translate.xlsx", &report, &[]);
             assert_eq!(state.selected_profile, "bps_dda");
 
             // Verify Paragraph cards (A02, G00, B01, G01, G02)
@@ -5694,7 +6169,7 @@ mod tests {
         };
 
         let mut restored_state = OrchestratorWorkspaceState::default();
-        apply_ingest_report_to_state(&mut restored_state, "test.xlsx", &report);
+        apply_ingest_report_to_state(&mut restored_state, "test.xlsx", &report, &[]);
 
         let res_stock = &restored_state.cards[restored_state.cards.len() - 2];
         let res_custom = &restored_state.cards[restored_state.cards.len() - 1];
@@ -5742,7 +6217,7 @@ mod tests {
         };
 
         let mut restored_state = OrchestratorWorkspaceState::default();
-        apply_ingest_report_to_state(&mut restored_state, "test.pubgen", &report);
+        apply_ingest_report_to_state(&mut restored_state, "test.pubgen", &report, &[]);
 
         let res_card = &restored_state.cards[0];
         assert_eq!(res_card.toc_style, "TOC Table");
@@ -5848,7 +6323,7 @@ mod tests {
             warnings: Vec::new(),
         };
         let mut state = OrchestratorWorkspaceState::default();
-        apply_ingest_report_to_state(&mut state, "Perkembangan Nilai Tukar Petani.pubgen", &report);
+        apply_ingest_report_to_state(&mut state, "Perkembangan Nilai Tukar Petani.pubgen", &report, &[]);
 
         let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", serde_json::json!({"facingPages": true})).expect("new doc");
@@ -5933,7 +6408,7 @@ mod tests {
             assert_eq!(staged.as_deref(), Some(src.as_slice()), "an RTF narrative must not be rewritten");
         }
         let mut state = OrchestratorWorkspaceState::default();
-        apply_ingest_report_to_state(&mut state, "ntp202610.xlsx", &report);
+        apply_ingest_report_to_state(&mut state, "ntp202610.xlsx", &report, &[]);
         assert!(state.cached_content.keys().any(|key| key.starts_with("rtf/")), "narratives are staged under rtf/");
 
         let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
@@ -5958,6 +6433,42 @@ mod tests {
         }
     }
 
+    /// Fix round 2 (shipped path): Compile must carry the worksheet's `doc_language` into the
+    /// page pipeline. A BRS document set to Indonesian-English used to lose the English image
+    /// caption because the pipeline forced `bilingual_output = false` for every BRS build.
+    #[test]
+    fn test_generate_from_workspace_keeps_the_bilingual_image_caption() {
+        let image = std::fs::read(super::super::testutil::sample_image_path()).expect("sample image");
+        let mut state =
+            OrchestratorWorkspaceState { selected_profile: "bps_brs".into(), doc_language: "Indonesian-English".into(), ..Default::default() };
+        state.cards.clear();
+        state.cards.push(PublicationCard {
+            kind: CardKind::Image,
+            title: "Gambar 1 Kantor BPS".into(),
+            source: "img/office.png".into(),
+            chapter_id: "G1".into(),
+            ..Default::default()
+        });
+        std::sync::Arc::make_mut(&mut state.cached_content).insert("img/office.png".into(), image);
+        state.tm.insert(pubgen_core::translation::TmEntry {
+            source: "Gambar 1 Kantor BPS".into(),
+            target: "Figure 1 BPS Office".into(),
+            origin: pubgen_core::translation::TmOrigin::Ai,
+            role: "image_caption".into(),
+            updated: pubgen_core::translation::now_stamp(),
+        });
+
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let res = generate_from_workspace(&mut app, &state);
+        assert!(res.is_ok(), "worksheet compilation failed: {res:?}");
+
+        let texts: Vec<String> = app.session.active().map(|a| a.doc.stories.values().map(|s| s.text.clone()).collect()).unwrap_or_default();
+        assert!(
+            texts.iter().any(|t| t.trim() == "Figure 1 BPS Office"),
+            "the compile pipeline must render the English image caption, found: {texts:?}"
+        );
+    }
+
     #[test]
     fn test_toc_table_and_paragraph_exclusion_and_headers() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()).unwrap_or_default();
@@ -5976,7 +6487,7 @@ mod tests {
             warnings: Vec::new(),
         };
         let mut state = OrchestratorWorkspaceState::default();
-        apply_ingest_report_to_state(&mut state, "KECAMATAN KARAWANG TIMUR DALAM ANGKA.pubgen", &report);
+        apply_ingest_report_to_state(&mut state, "KECAMATAN KARAWANG TIMUR DALAM ANGKA.pubgen", &report, &[]);
 
         // Verify that cards 02_01_01 and 02_02_01 have real table titles and chapter/section settings
         let c_02_01 = state.cards.iter().find(|c| c.chapter_id == "02_01_01").expect("02_01_01 card");

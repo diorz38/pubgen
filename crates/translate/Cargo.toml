@@ -22,9 +22,11 @@ sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 
 [features]
 default = []
-# Online provider (Groq free tier). Stub without it; never enabled on wasm.
-groq = ["dep:ureq", "dep:serde_json"]
+# OpenAI-compatible HTTP transport (Groq, custom endpoints, local servers).
+online = ["dep:ureq", "dep:serde_json"]
+# Backwards-compatible alias: existing callers ask for `groq`.
+groq = ["online"]
 # Offline NLLB-200 distilled 600M (ONNX Runtime). Stub without it.
 nllb = ["dep:ort", "dep:tokenizers"]
-# In-app model downloader (shares ureq with groq).
-download = ["dep:ureq", "dep:sha2", "dep:serde_json"]
+# In-app model downloader (shares ureq with the online transport).
+download = ["online", "dep:sha2"]

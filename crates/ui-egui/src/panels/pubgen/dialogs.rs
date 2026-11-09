@@ -321,7 +321,7 @@ pub fn dialog_table_range_ui(app: &mut DesignApp, ctx: &egui::Context, st: &mut 
             ui.label(RichText::new(badge_text).size(11.0).color(badge_color));
 
             ui.add_space(12.0);
-            let backend_ready = ai::backend_from_prefs(app).is_some();
+            let backend_ready = ai::backend_config_from_prefs(app).is_some();
             let is_running = st.translate_job.as_ref().is_some_and(|j| !j.finished);
 
             if is_running {

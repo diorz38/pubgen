@@ -5,7 +5,7 @@
 //! error string, never written into a document. Without the \`groq\` feature the type
 //! exists and every call returns \`TranslateError::Unavailable\`.
 
-#[cfg(feature = "groq")]
+#[cfg(feature = "online")]
 use std::sync::atomic::Ordering;
 use std::sync::atomic::{AtomicBool, AtomicU32};
 
@@ -27,58 +27,82 @@ pub fn remaining_requests() -> Option<u32> {
 }
 
 /// Remember the rate-limit header from a chat-completions response (200 or 429).
-#[cfg(feature = "groq")]
-fn store_remaining(r: &ureq::Response) {
+/// Only Groq's own responses feed the Groq counter: a local server must not
+/// clobber the hosted key's number.
+#[cfg(feature = "online")]
+fn store_remaining(r: &ureq::Response, base_url: &str) {
+    if !base_url.starts_with("https://api.groq.com") {
+        return;
+    }
     if let Some(v) = r.header("x-ratelimit-remaining-requests").and_then(|v| v.trim().parse::<u32>().ok()) {
         GROQ_REMAINING_REQUESTS.store(v, Ordering::Relaxed);
     }
 }
 
 /// Units per request: small enough for free-tier rate caps, big enough to amortise.
-#[cfg(feature = "groq")]
+#[cfg(feature = "online")]
 const BATCH: usize = 16;
-#[cfg(feature = "groq")]
+#[cfg(feature = "online")]
 const MAX_429_RETRIES: usize = 3;
 /// Terminology pairs appended to the system prompt (bounded, sorted upstream).
-#[cfg(feature = "groq")]
+#[cfg(feature = "online")]
 const TERMS_IN_PROMPT: usize = 200;
 
 /// Online translator (Groq free tier; OpenAI-compatible chat completions).
-#[cfg_attr(not(feature = "groq"), allow(dead_code))]
+#[cfg_attr(not(feature = "online"), allow(dead_code))]
 pub struct OnlineTranslator {
     key: String,
     model: String,
-    #[cfg(feature = "groq")]
+    #[cfg(feature = "online")]
     agent: ureq::Agent,
     /// Overridable for tests (a canned local listener stands in for api.groq.com).
-    #[cfg(feature = "groq")]
+    #[cfg(feature = "online")]
     base_url: String,
 }
 
 impl OnlineTranslator {
+    /// Groq's hosted endpoint. Kept so existing callers are unchanged.
     pub fn new(key: &str, model: &str) -> Self {
+        Self::with_endpoint(key, model, "https://api.groq.com/openai/v1")
+    }
+
+    /// Any OpenAI-compatible endpoint: Groq, a custom host, or a local server
+    /// (Ollama, LM Studio, llama.cpp). An empty key means no Authorization header.
+    pub fn with_endpoint(key: &str, model: &str, base_url: &str) -> Self {
+        #[cfg(not(feature = "online"))]
+        let _ = base_url;
         Self {
             key: key.trim().to_string(),
             model: model.trim().to_string(),
-            #[cfg(feature = "groq")]
+            #[cfg(feature = "online")]
             agent: ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(30)).build(),
-            #[cfg(feature = "groq")]
-            base_url: "https://api.groq.com/openai/v1".to_string(),
+            #[cfg(feature = "online")]
+            base_url: base_url.trim().trim_end_matches('/').to_string(),
         }
     }
 
-    #[cfg(all(test, feature = "groq"))]
+    #[cfg(all(test, feature = "online"))]
     fn with_base(key: &str, model: &str, base_url: String) -> Self {
-        let mut t = Self::new(key, model);
-        t.base_url = base_url;
-        t
+        Self::with_endpoint(key, model, &base_url)
+    }
+
+    /// The Authorization header value, or `None` when no key is configured.
+    #[cfg(feature = "online")]
+    fn auth_header(&self) -> Option<String> {
+        // Local servers run without a key; "Bearer " with an empty token is rejected
+        // by some of them and is never useful.
+        (!self.key.is_empty()).then(|| format!("Bearer {}", self.key))
     }
 
     /// The model ids the account may use, sorted (Groq GET /openai/v1/models).
     pub fn list_models(&self) -> Result<Vec<String>, TranslateError> {
-        #[cfg(feature = "groq")]
+        #[cfg(feature = "online")]
         {
-            let res = self.agent.get(&format!("{}/models", self.base_url)).set("Authorization", &format!("Bearer {}", self.key)).call();
+            let mut req = self.agent.get(&format!("{}/models", self.base_url));
+            if let Some(auth) = self.auth_header() {
+                req = req.set("Authorization", &auth);
+            }
+            let res = req.call();
             let body = read_body(res)?;
             let v: serde_json::Value = serde_json::from_str(&body).map_err(|e| TranslateError::Provider(format!("model list: {e}")))?;
             let mut ids: Vec<String> = v
@@ -89,7 +113,7 @@ impl OnlineTranslator {
             ids.sort();
             Ok(ids)
         }
-        #[cfg(not(feature = "groq"))]
+        #[cfg(not(feature = "online"))]
         Err(TranslateError::Unavailable)
     }
 
@@ -102,7 +126,7 @@ impl OnlineTranslator {
         cancel: &AtomicBool,
         progress: &mut dyn FnMut(usize, usize),
     ) -> Result<Vec<String>, TranslateError> {
-        #[cfg(feature = "groq")]
+        #[cfg(feature = "online")]
         {
             let mut out = Vec::with_capacity(texts.len());
             for batch in texts.chunks(BATCH) {
@@ -114,14 +138,14 @@ impl OnlineTranslator {
             }
             Ok(out)
         }
-        #[cfg(not(feature = "groq"))]
+        #[cfg(not(feature = "online"))]
         {
             let _ = (texts, src, tgt, glossary, cancel, progress);
             Err(TranslateError::Unavailable)
         }
     }
 
-    #[cfg(feature = "groq")]
+    #[cfg(feature = "online")]
     fn translate_batch(
         &self,
         batch: &[String],
@@ -168,7 +192,7 @@ impl OnlineTranslator {
         }
     }
 
-    #[cfg(feature = "groq")]
+    #[cfg(feature = "online")]
     fn request_once(&self, batch: &[String], src: Lang, tgt: Lang, glossary: Option<&[(String, String)]>) -> Result<Vec<String>, TranslateError> {
         let body = request_body(&self.model, batch, src, tgt, glossary);
         let raw = self.post_chat(&body)?;
@@ -193,7 +217,7 @@ impl OnlineTranslator {
     /// One chat completion with a caller-supplied prompt (the narrative drafter). Same auth,
     /// status and `Retry-After` handling as the translation call; `temperature: 0`.
     pub fn complete(&self, system: &str, user: &str) -> Result<String, TranslateError> {
-        #[cfg(feature = "groq")]
+        #[cfg(feature = "online")]
         {
             let body = chat_body(&self.model, system, user);
             let mut attempt = 0usize;
@@ -212,7 +236,7 @@ impl OnlineTranslator {
                 .map(str::to_string)
                 .ok_or_else(|| TranslateError::Provider("response has no choices[0].message.content".into()))
         }
-        #[cfg(not(feature = "groq"))]
+        #[cfg(not(feature = "online"))]
         {
             let _ = (system, user);
             Err(TranslateError::Unavailable)
@@ -220,21 +244,20 @@ impl OnlineTranslator {
     }
 
     /// POST one chat-completions body; the model's raw JSON reply on 200.
-    #[cfg(feature = "groq")]
+    #[cfg(feature = "online")]
     fn post_chat(&self, body: &str) -> Result<String, TranslateError> {
-        let res = self
-            .agent
-            .post(&format!("{}/chat/completions", self.base_url))
-            .set("Authorization", &format!("Bearer {}", self.key))
-            .set("Content-Type", "application/json")
-            .send_string(body);
+        let mut req = self.agent.post(&format!("{}/chat/completions", self.base_url)).set("Content-Type", "application/json");
+        if let Some(auth) = self.auth_header() {
+            req = req.set("Authorization", &auth);
+        }
+        let res = req.send_string(body);
         let (status, raw) = match res {
             Ok(r) => {
-                store_remaining(&r);
+                store_remaining(&r, &self.base_url);
                 (r.status(), r.into_string().map_err(|e| TranslateError::Provider(e.to_string()))?)
             }
             Err(ureq::Error::Status(code, r)) => {
-                store_remaining(&r);
+                store_remaining(&r, &self.base_url);
                 let retry = r.header("Retry-After").and_then(|v| v.trim().parse::<u64>().ok()).map(|s| s.clamp(1, 30));
                 let raw = r.into_string().map_err(|e| TranslateError::Provider(e.to_string()))?;
                 if code == 429 {
@@ -253,7 +276,7 @@ impl OnlineTranslator {
 }
 
 /// One `temperature: 0` chat completion with a caller-supplied system/user prompt.
-#[cfg(feature = "groq")]
+#[cfg(feature = "online")]
 fn chat_body(model: &str, system: &str, user: &str) -> String {
     let mut body = serde_json::json!({
         "model": model,
@@ -272,7 +295,7 @@ fn chat_body(model: &str, system: &str, user: &str) -> String {
 }
 
 /// Units per request kept at module scope for the tests that build batches.
-#[cfg(feature = "groq")]
+#[cfg(feature = "online")]
 fn request_body(model: &str, batch: &[String], src: Lang, tgt: Lang, glossary: Option<&[(String, String)]>) -> String {
     let items = serde_json::to_string(batch).unwrap_or_default();
     let mut system = format!(
@@ -308,7 +331,7 @@ fn request_body(model: &str, batch: &[String], src: Lang, tgt: Lang, glossary: O
 }
 
 /// Strip a triple-backtick json fence if present, then parse the JSON array.
-#[cfg(feature = "groq")]
+#[cfg(feature = "online")]
 fn parse_translation(content: &str) -> Result<Vec<String>, TranslateError> {
     let fence: String = "`".repeat(3);
     let mut s = content.trim();
@@ -325,7 +348,7 @@ fn parse_translation(content: &str) -> Result<Vec<String>, TranslateError> {
     Ok(arr.iter().map(|i| i.as_str().unwrap_or_default().to_string()).collect())
 }
 
-#[cfg(feature = "groq")]
+#[cfg(feature = "online")]
 fn read_body(res: Result<ureq::Response, ureq::Error>) -> Result<String, TranslateError> {
     match res {
         Ok(r) => r.into_string().map_err(|e| TranslateError::Provider(e.to_string())),
@@ -341,7 +364,7 @@ fn read_body(res: Result<ureq::Response, ureq::Error>) -> Result<String, Transla
     }
 }
 
-#[cfg(feature = "groq")]
+#[cfg(feature = "online")]
 fn truncate(s: &str, n: usize) -> &str {
     match s.char_indices().nth(n) {
         Some((i, _)) => &s[..i],
@@ -350,10 +373,10 @@ fn truncate(s: &str, n: usize) -> &str {
 }
 
 pub fn compiled_in() -> bool {
-    cfg!(feature = "groq")
+    cfg!(feature = "online")
 }
 
-#[cfg(all(test, feature = "groq"))]
+#[cfg(all(test, feature = "online"))]
 mod tests {
     use super::*;
 
@@ -493,8 +516,9 @@ mod tests {
         let out =
             t.translate(&["Kecamatan Karawang Timur".into()], Lang::Indonesian, Lang::English, None, &cancel, &mut |_, _| {}).expect("round trip");
         assert_eq!(out, vec!["Karawang Timur Subdistrict"]);
-        // The canned reply carries x-ratelimit-remaining-requests: 812; the client must surface it.
-        assert_eq!(remaining_requests(), Some(812));
+        // The canned reply carries x-ratelimit-remaining-requests: 812, but the local
+        // listener is not Groq: it must not clobber the hosted key's counter.
+        assert_eq!(remaining_requests(), None);
     }
 
     #[test]
@@ -507,5 +531,25 @@ mod tests {
             .err()
             .expect("mismatch is an error");
         assert!(matches!(err, TranslateError::Provider(_)), "{err}");
+    }
+
+    #[test]
+    fn with_endpoint_targets_the_supplied_base_url() {
+        let base = canned_server("{\"choices\":[{\"message\":{\"content\":\"[\\\"Regency\\\"]\"}}]}".to_string());
+        let mut t = OnlineTranslator::with_endpoint("", "local-model", &base);
+        let cancel = AtomicBool::new(false);
+        let out =
+            t.translate(&["Kabupaten".into()], Lang::Indonesian, Lang::English, None, &cancel, &mut |_, _| {}).expect("local endpoint round trip");
+        assert_eq!(out, vec!["Regency"]);
+    }
+
+    #[test]
+    fn empty_key_sends_no_authorization_header() {
+        // A local Ollama/LM Studio server has no key. The request must still succeed,
+        // and the client must not send "Bearer " with an empty token.
+        let base = canned_server("{\"choices\":[{\"message\":{\"content\":\"[\\\"Subdistrict\\\"]\"}}]}".to_string());
+        let mut t = OnlineTranslator::with_endpoint("   ", "m", &base);
+        let cancel = AtomicBool::new(false);
+        assert!(t.translate(&["Kecamatan".into()], Lang::Indonesian, Lang::English, None, &cancel, &mut |_, _| {}).is_ok());
     }
 }

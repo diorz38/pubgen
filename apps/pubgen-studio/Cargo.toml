@@ -17,7 +17,7 @@ workspace = true
 [dependencies]
 designcraft-engine = { workspace = true }
 pubgen-core = { workspace = true }
-designcraft-ui-egui = { workspace = true, features = ["pubgen"] }
+designcraft-ui-egui = { workspace = true, features = ["pubgen", "ai-translate-online"] }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links", "clipboard"] }
 egui = { workspace = true }
 serde = { workspace = true }

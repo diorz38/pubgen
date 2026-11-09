@@ -474,6 +474,18 @@ fn row_template_slots(
     } else if type_val.eq_ignore_ascii_case("Image") || type_val.eq_ignore_ascii_case("Graphic") {
         let note_title = title_val.trim();
         text.insert("title".into(), json!(note_title));
+        // Translated caption (T7): the explicit title_en column wins, then the session
+        // map — the same precedence the divider, chart and table branches use.
+        if st.bilingual_output {
+            let en = if !title_en_val.is_empty() {
+                title_en_val.to_string()
+            } else {
+                st.translations.get(note_title).map(String::as_str).unwrap_or_default().to_string()
+            };
+            if !en.is_empty() {
+                text.insert("title_en".into(), json!(en));
+            }
+        }
         if let Some(file_str) = file_opt
             && let Some(img_file) = resolve_image_file(&st.card1_path, file_str, &["png", "jpg", "jpeg"])
         {
@@ -1339,10 +1351,22 @@ fn execute_generate_pages_brs(
                 cur_y = margin.y0;
             }
 
+            // The caption (T7): the translation memory's English title renders when the document is
+            // bilingual, otherwise the catalogue's Indonesian title stands alone. The band at the
+            // foot of the frame area keeps the caption out of the placed image.
+            let caption = if st.bilingual_output {
+                st.translations.get(title_val.trim()).map(String::as_str).filter(|en| !en.is_empty()).unwrap_or(title_val)
+            } else {
+                title_val
+            };
+            let caption_h = if caption.trim().is_empty() { 0.0 } else { 22.0 };
+            let image_y1 = (margin.y1 - caption_h).max(cur_y + 100.0);
+
+            let mut placed = false;
             if let Some(file_str) = Some(file_val).filter(|s| !s.is_empty())
                 && let Some(img_file) = resolve_image_file(&st.card1_path, file_str, &["png", "jpg", "jpeg"])
             {
-                let img_rect = [margin.x0, cur_y, margin.x1, margin.y1];
+                let img_rect = [margin.x0, cur_y, margin.x1, image_y1];
                 if let Ok(res) = app.run(
                     "frame.create",
                     json!({
@@ -1357,7 +1381,13 @@ fn execute_generate_pages_brs(
                     let _ = app.run("object.fit", json!({"mode": "fitProportionally", "ids": [fid]}));
                     let _ = app.run("object.fit", json!({"mode": "centerContent", "ids": [fid]}));
                     inserted_images_count = inserted_images_count.saturating_add(1);
+                    placed = true;
                 }
+            }
+
+            if placed && !caption.trim().is_empty() {
+                let caption_rect = [margin.x0, image_y1, margin.x1, image_y1 + caption_h];
+                frame_with_font_and_style(app, spread_idx, caption_rect, caption, &brs_font, 9.5, None);
             }
 
             cur_y = margin.y1;
@@ -3881,6 +3911,49 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_seeded_memory_renders_the_paired_table_header_on_generate() {
+        // The plan's English table cells must reach the page a Generate builds: the state
+        // starts with the pairing gate off (`translate_with_ai: false`, the default), and
+        // `seed_pubgen_state` alone has to arm it from the worksheet's memory.
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cat_path = temp_dir.path().join("catalog.csv");
+        std::fs::write(&cat_path, "type,number,title,file\nTabel,01.01,Produksi Padi,Produksi Padi\n").unwrap();
+        std::fs::write(temp_dir.path().join("Produksi Padi.csv"), "Produksi Padi,Jumlah Panen\n150,20\n").unwrap();
+
+        let mut st = PubgenState::default();
+        load_card1_csv(&mut st, &cat_path.to_string_lossy());
+        st.card1_auto_insert_tables = true;
+        assert!(!st.translate_with_ai, "the default generation state must not pair cells");
+
+        let mut tm = pubgen_core::translation::TranslationMemory::default();
+        tm.insert(pubgen_core::translation::TmEntry {
+            source: "Produksi Padi".into(),
+            target: "Rice Production".into(),
+            origin: pubgen_core::translation::TmOrigin::Reviewed,
+            role: "table_header".into(),
+            updated: pubgen_core::translation::now_stamp(),
+        });
+        super::translate_stage::seed_pubgen_state(&mut st, &tm);
+        assert!(st.translate_with_ai, "the seed arms the pairing gate the page generator reads");
+
+        execute_generate_pages(&mut app, &st).expect("generate pages");
+        let active = app.session.active().unwrap();
+        let mut header: Option<String> = None;
+        for story in active.doc.stories.values() {
+            for table in story.tables.values() {
+                if let Some(cell) = table.cell(0, 0) {
+                    header = Some(cell.text.text.clone());
+                }
+            }
+        }
+        let header = header.expect("the auto-inserted table must exist");
+        assert_eq!(header, "Produksi Padi\u{2028}Rice Production", "the memory's English is paired under the Indonesian header");
+    }
+
+    #[test]
     fn test_execute_generate_pages_g_sheet_without_title_names_its_rtf_title() {
         // The `GXX` sheets carry no title row, only the RTF link, so the page opens with the
         // RTF's own title line. Word writes that line as direct formatting (bold, caps, centred),
@@ -6391,6 +6464,81 @@ Narrative;3;Catatan Akhir;narrative3.rtf\n";
         let total_pages = doc.page_count();
         let back_page = super::covers::find_back_cover_page(doc).expect("Back cover must exist");
         assert_eq!(back_page, total_pages - 1, "Back cover must be the very last page");
+    }
+
+    /// One BRS worksheet with a single image row. The caller sets `bilingual_output` and the
+    /// translation map that the caption must read.
+    fn brs_image_row_state(bilingual_output: bool, translations: HashMap<String, String>) -> PubgenState {
+        PubgenState {
+            active_profile_id: "bps_brs".into(),
+            bilingual_output,
+            translations,
+            card1_records: vec![vec!["Image".into(), "1".into(), "Gambar 1 Kantor BPS".into(), sample_image_path()]],
+            card1_headers: vec!["type".into(), "number".into(), "title".into(), "file".into()],
+            card1_type_col: 0,
+            card1_num_col: 1,
+            card1_title_col: 2,
+            card1_file_col: 3,
+            card1_range_all: true,
+            ..Default::default()
+        }
+    }
+
+    /// Generate one BRS image row into a fresh document; return every text frame as
+    /// `(story text, frame top)` plus the bottom edge of the placed graphic frame.
+    fn brs_image_row_layout(st: &PubgenState) -> (Vec<(String, f64)>, f64) {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"facingPages": false})).unwrap();
+        let res = execute_generate_pages(&mut app, st);
+        assert!(res.is_ok(), "BRS image generation failed: {res:?}");
+
+        let active = app.session.active().unwrap();
+        let doc = &active.doc;
+        let mut texts = Vec::new();
+        let mut graphic_bottom: Option<f64> = None;
+        for spread in &doc.spreads {
+            for it in &spread.items {
+                if it.graphic().is_some() {
+                    let bottom = it.bounds().y1;
+                    graphic_bottom = Some(graphic_bottom.map_or(bottom, |y: f64| y.max(bottom)));
+                }
+                if let Some(tf) = it.text_frame()
+                    && let Some(story) = doc.story(tf.story)
+                {
+                    texts.push((story.text.clone(), it.bounds().y0));
+                }
+            }
+        }
+        (texts, graphic_bottom.expect("the image row must place a graphic frame"))
+    }
+
+    /// T7: an image row used to produce a graphic frame and nothing else, so the translated
+    /// caption could never render. The caption frame must exist and carry the English title.
+    #[test]
+    fn test_brs_image_row_caption_renders_the_translated_title() {
+        let mut translations = HashMap::new();
+        translations.insert("Gambar 1 Kantor BPS".to_string(), "Figure 1 BPS Office".to_string());
+        let (texts, graphic_bottom) = brs_image_row_layout(&brs_image_row_state(true, translations));
+
+        let caption = texts
+            .iter()
+            .find(|(text, _)| text.trim() == "Figure 1 BPS Office")
+            .unwrap_or_else(|| panic!("the image row must render the translated caption, found: {texts:?}"));
+        assert!(
+            caption.1 >= graphic_bottom - 0.5,
+            "the caption must sit outside the graphic area: caption y0={}, graphic bottom={graphic_bottom}",
+            caption.1
+        );
+    }
+
+    /// Without a translation the same row still captions the image, in Indonesian.
+    #[test]
+    fn test_brs_image_row_caption_falls_back_to_the_indonesian_title() {
+        let (texts, _) = brs_image_row_layout(&brs_image_row_state(false, HashMap::new()));
+        assert!(
+            texts.iter().any(|(text, _)| text.trim() == "Gambar 1 Kantor BPS"),
+            "a single-language image row must caption the image with its catalogue title, found: {texts:?}"
+        );
     }
 
     #[test]
