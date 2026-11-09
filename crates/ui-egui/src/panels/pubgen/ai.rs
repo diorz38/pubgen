@@ -12,7 +12,7 @@ use std::sync::atomic::AtomicBool;
 use egui::{Color32, RichText};
 use serde_json::{Value, json};
 
-use super::{PubgenState, detect_delimiter, effective_col, parse_csv_content_with_delim, resolve_catalog_related_file};
+use super::{PubgenState, detect_delimiter, effective_col, file_en_same_as_file, parse_csv_content_with_delim, resolve_catalog_related_file};
 use crate::DesignApp;
 use designcraft_translate as translate;
 
@@ -734,9 +734,51 @@ pub fn dialog_ui(app: &mut DesignApp, st: &mut PubgenState, ui: &mut egui::Ui) {
 // Background job
 // ---------------------------------------------------------------------------
 
-/// Units per worker batch (mirrors the provider client's chunk size; small batches
-/// keep free-tier per-minute token limits from tripping).
+/// Units per worker batch, counted in *segments* (mirrors the provider client's chunk
+/// size; small batches keep free-tier per-minute token limits from tripping).
 const BATCH_UNITS: usize = 8;
+
+/// A unit's request texts: short cells stay whole, long review paragraphs become
+/// sentence-bounded segments (the narrative path's `SEGMENT_MAX_WORDS` ceiling). A
+/// whole 400-word paragraph in one request trips the provider's token ceiling and
+/// kills the job mid-run.
+fn unit_segments(source: &str) -> Vec<String> {
+    let segs = translate::segment(source);
+    if segs.is_empty() { vec![source.trim().to_string()] } else { segs }
+}
+
+/// Rebuild one unit's English from its segment outputs: every segment must be back,
+/// at least half the source's words present, and the number census identical —
+/// otherwise the unit keeps its Indonesian so a re-run retries it clean (mirrors
+/// `translate_body_with`).
+fn assembled_unit(source: &str, parts: &[Option<String>]) -> Option<String> {
+    let mut joined = String::new();
+    for part in parts {
+        let t = part.as_deref()?.trim();
+        if t.is_empty() {
+            return None;
+        }
+        if !joined.is_empty() {
+            joined.push(' ');
+        }
+        joined.push_str(t);
+    }
+    if joined.is_empty() {
+        return None;
+    }
+    if joined.split_whitespace().count() * 2 < source.split_whitespace().count() {
+        return None; // the model answered with a fragment
+    }
+    if translate::mask::number_census(source) != translate::mask::number_census(&joined) {
+        return None; // statistics must not move
+    }
+    Some(joined)
+}
+
+/// Units whose every segment has come back (progress reporting only).
+fn complete_units(spans: &[(usize, usize)], done: &[Option<String>]) -> usize {
+    spans.iter().filter(|(start, len)| done.get(*start..*start + *len).is_some_and(|window| window.iter().all(Option::is_some))).count()
+}
 
 /// One background translation run over the collected units (ID source text → EN).
 /// The receiver sits in an Arc<Mutex<_>> so the job can live in the panel's egui
@@ -782,12 +824,29 @@ impl TranslateJob {
             // OpenAI-compatible chat API; only the endpoint differs.
             let mut t = translate::OnlineTranslator::with_endpoint(&config.key, &config.model, &config.base_url);
             let mut err = None;
-            for chunk in units.chunks(BATCH_UNITS) {
+            // The flat list of segments is what `BATCH_UNITS` slices, so a batch stays
+            // small even when its units are whole review paragraphs.
+            let plan: Vec<(String, Vec<String>)> = units
+                .into_iter()
+                .map(|(key, source)| {
+                    let segs = unit_segments(&source);
+                    (key, segs)
+                })
+                .collect();
+            let mut spans: Vec<(usize, usize)> = Vec::with_capacity(plan.len());
+            let mut flat: Vec<String> = Vec::new();
+            for (_, segs) in &plan {
+                spans.push((flat.len(), segs.len()));
+                flat.extend(segs.iter().cloned());
+            }
+            let mut done: Vec<Option<String>> = vec![None; flat.len()];
+            for (offset, chunk) in flat.chunks(BATCH_UNITS).enumerate() {
                 if cancel_thread.load(std::sync::atomic::Ordering::Relaxed) {
                     err = Some(translate::TranslateError::Cancelled);
                     break;
                 }
-                let sources: Vec<String> = chunk.iter().map(|(_, s)| s.clone()).collect();
+                let base = offset * BATCH_UNITS;
+                let sources: Vec<String> = chunk.to_vec();
                 match t.translate(
                     &sources,
                     translate::Lang::Indonesian,
@@ -797,13 +856,26 @@ impl TranslateJob {
                     &mut |_, _| {},
                 ) {
                     Ok(out) => {
-                        done_pairs.extend(chunk.iter().map(|(k, _)| k.clone()).zip(out));
-                        let _ = tx_thread.send(JobMsg::Progress(done_pairs.len(), units.len()));
+                        for (i, o) in out.into_iter().enumerate() {
+                            if let Some(slot) = done.get_mut(base + i) {
+                                *slot = Some(o);
+                            }
+                        }
+                        let _ = tx_thread.send(JobMsg::Progress(complete_units(&spans, &done), plan.len()));
                     }
                     Err(e) => {
                         err = Some(e);
                         break;
                     }
+                }
+            }
+            for ((key, _), (start, len)) in plan.iter().zip(spans.iter()) {
+                let parts = done.get(*start..*start + *len).unwrap_or(&[]);
+                if parts.len() != *len {
+                    continue; // the run stopped inside this unit; a re-run retries it
+                }
+                if let Some(en) = assembled_unit(key, parts) {
+                    done_pairs.push((key.clone(), en));
                 }
             }
             let outcome = err.map_or(Ok(()), Err);
@@ -934,8 +1006,8 @@ impl TranslateJob {
 /// Walk the same records the generator will generate and gather every Indonesian text,
 /// deduped and order-stable: row titles, the cover headline lines (unless
 /// \`ai_only_reviews\`), table cells from the rows' CSV files, and RTF narrative
-/// paragraphs for rows without a \`file_en\`. Returns (source) pairs — the key IS the
-/// source text.
+/// paragraphs for rows whose \`file_en\` is blank or names the same file as \`file\`.
+/// Returns (source) pairs — the key IS the source text.
 pub fn collect_translation_units(st: &PubgenState) -> Vec<(String, String)> {
     let total = st.card1_records.len();
     let (start, end) = if st.card1_range_all {
@@ -969,7 +1041,7 @@ pub fn collect_translation_units(st: &PubgenState) -> Vec<(String, String)> {
         let file_val = row.get(file_col).map(String::as_str).unwrap_or("").trim();
         let file_en_val = row.get(file_en_col).map(String::as_str).unwrap_or("").trim();
         let lower = file_val.to_ascii_lowercase();
-        if lower.ends_with(".rtf") && file_en_val.is_empty() {
+        if lower.ends_with(".rtf") && file_en_same_as_file(file_val, file_en_val) {
             for para in rtf_paragraphs(st, file_val) {
                 push(&mut out, &mut seen, &para);
             }
@@ -2614,6 +2686,77 @@ mod tests {
             finished: true,
         };
         assert!(job_drafts.is_drafts(), "job in drafts mode must return is_drafts = true");
+    }
+
+    #[test]
+    fn file_en_same_as_file_treats_empty_or_repeated_name_as_absent() {
+        assert!(file_en_same_as_file("rtf/R03.rtf", ""));
+        assert!(file_en_same_as_file("rtf/R03.rtf", "rtf/R03.rtf"));
+        assert!(file_en_same_as_file("rtf/R03.rtf", "rtf\\R03.rtf"));
+        assert!(file_en_same_as_file("rtf/R03.rtf", "R03.rtf"), "a bare name matches the same file in a folder");
+        assert!(file_en_same_as_file("R03.rtf", "r03.RTF"), "case-insensitive");
+        assert!(!file_en_same_as_file("rtf/R03.rtf", "en/R03.rtf"), "same name in another folder is a real EN file");
+        assert!(!file_en_same_as_file("rtf/R03.rtf", "rtf/R03_en.rtf"));
+    }
+
+    #[test]
+    fn unit_segments_split_long_paragraphs_and_keep_short_cells_whole() {
+        assert_eq!(unit_segments("Produksi Padi 2024"), vec!["Produksi Padi 2024"]);
+        let long_text = "Kalimat uji nomor satu. ".repeat(40).trim().to_string();
+        let segs = unit_segments(&long_text);
+        assert!(segs.len() > 1, "a 160-word paragraph must split, got {}", segs.len());
+        assert!(segs.iter().all(|s| s.split_whitespace().count() <= 150));
+    }
+
+    #[test]
+    fn assembled_unit_rejects_missing_fragment_and_moved_numbers() {
+        let src = "Terdapat 50 SD dan 14 SMA di wilayah ini.";
+        let ok = assembled_unit(src, &[Some("There are 50 SD and 14 SMA in this area.".to_string())]);
+        assert_eq!(ok.as_deref(), Some("There are 50 SD and 14 SMA in this area."));
+        let two = assembled_unit("Satu. Dua.", &[Some("One.".to_string()), Some("Two.".to_string())]);
+        assert_eq!(two.as_deref(), Some("One. Two."));
+        assert_eq!(assembled_unit(src, &[None]), None, "a missing segment rejects the unit");
+        assert_eq!(assembled_unit(src, &[Some("fifty schools".to_string())]), None, "numbers must survive");
+        let long_src = "kalimat uji ".repeat(60);
+        assert_eq!(assembled_unit(&long_src, &[Some("short reply".to_string())]), None, "a fragment answer rejects");
+    }
+
+    #[test]
+    fn collect_includes_rtf_paragraphs_when_file_en_names_the_same_file() {
+        let dir = std::env::temp_dir();
+        let id_name = format!("dc-pubgen-collect-{}.rtf", std::process::id());
+        let id_path = dir.join(&id_name);
+        write_plain_rtf("Ulasan\nParagraf uji untuk koleksi.", &id_path).expect("write rtf");
+        let catalog = dir.join(format!("dc-pubgen-collect-{}.csv", std::process::id()));
+        std::fs::write(&catalog, "type,number,title,file\n").expect("write csv");
+        let st = PubgenState {
+            card1_path: catalog.to_string_lossy().to_string(),
+            card1_records: vec![vec![
+                "Ulasan".into(),
+                "03".into(),
+                "Profil Wilayah".into(),
+                id_name.clone(),
+                String::new(),
+                String::new(),
+                id_name.clone(),
+            ]],
+            card1_headers: vec![
+                "type".into(),
+                "number".into(),
+                "title".into(),
+                "file".into(),
+                "template".into(),
+                "title_en".into(),
+                "file_en".into(),
+            ],
+            card1_range_all: true,
+            ..Default::default()
+        };
+        let units = collect_translation_units(&st);
+        let texts: Vec<&str> = units.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(texts.contains(&"Paragraf uji untuk koleksi."), "paragraphs collected despite file_en naming the same file: {texts:?}");
+        let _ = std::fs::remove_file(&id_path);
+        let _ = std::fs::remove_file(&catalog);
     }
 
     #[test]

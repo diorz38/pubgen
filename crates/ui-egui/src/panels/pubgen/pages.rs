@@ -1888,9 +1888,9 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                     }
 
                     // Sequential EN spread for Ulasan — the preface is not processed in Dual
-                    // Lang Mode. With AI translation, a missing file_en uses the temp RTF
-                    // built from the translated paragraphs (plan §4).
-                    let en_rtf_resolved = if !file_en_val.is_empty() {
+                    // Lang Mode. With AI translation, a missing or same-as-Indonesian
+                    // file_en uses the temp RTF built from the translated paragraphs (plan §4).
+                    let en_rtf_resolved = if !file_en_val.is_empty() && !file_en_same_as_file(file_val, file_en_val) {
                         resolve_catalog_related_file(&st.card1_path, file_en_val, "rtf")
                     } else {
                         let p = std::path::Path::new(file_val);
@@ -3438,7 +3438,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                 || title_en_val.eq_ignore_ascii_case("preface");
 
             if st.bilingual_output && is_preface_card {
-                let en_rtf_resolved = if !file_en_val.is_empty() {
+                let en_rtf_resolved = if !file_en_val.is_empty() && !file_en_same_as_file(file_val, file_en_val) {
                     resolve_catalog_related_file(&st.card1_path, file_en_val, "rtf")
                 } else {
                     let p = std::path::Path::new(file_val);

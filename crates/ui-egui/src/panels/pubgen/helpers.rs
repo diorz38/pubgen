@@ -572,6 +572,24 @@ pub(crate) fn resolve_catalog_related_file(catalog_path: &str, file_str: &str, e
     candidates.into_iter().find(|p| p.is_file())
 }
 
+/// True when `file_en` names no separate English RTF: empty, or the same file as
+/// `file` (case or slash differences, or the same bare name with and without its
+/// directory). Such rows translate the Indonesian body with AI instead of reading
+/// the Indonesian file back as "English".
+pub(crate) fn file_en_same_as_file(file: &str, file_en: &str) -> bool {
+    let fen = file_en.trim();
+    if fen.is_empty() {
+        return true;
+    }
+    let norm = |s: &str| s.trim().to_ascii_lowercase().replace('\\', "/");
+    if norm(file) == norm(fen) {
+        return true;
+    }
+    let name_of = |s: &str| std::path::Path::new(s).file_name().map(|n| n.to_string_lossy().to_ascii_lowercase());
+    let has_dir = |s: &str| std::path::Path::new(s).parent().is_some_and(|p| !p.as_os_str().is_empty());
+    matches!((name_of(file), name_of(fen)), (Some(a), Some(b)) if a == b) && !(has_dir(file) && has_dir(fen))
+}
+
 /// Split chart title like "Grafik 02.01 Panjang Jalan..." into ("Grafik 02.01", "Panjang Jalan...")
 pub(crate) fn split_chart_title(title: &str, num_val: &str, type_val: &str) -> (String, String) {
     let t = title.trim();

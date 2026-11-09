@@ -173,44 +173,44 @@ pub fn badge_label(tm: &TranslationMemory, source: &str) -> Option<&'static str>
 /// The human-readable name of each specific Unit Role.
 pub fn unit_role_name(role: &str) -> &'static str {
     match role {
-        "cover_title" => "Cover Title",
-        "narrative_title" => "Narrative Title",
-        "table_title" => "Table Title",
-        "chart_title" => "Chart Title",
-        "map_title" => "Map Title",
-        "divider_title" => "Divider Title",
-        "card_title" => "Card Title",
-        "narrative_body" => "Paragraph Body",
-        "table_header" => "Table Header",
-        "table_row_label" => "Table Row Label",
-        "table_note" => "Table Note",
+        "cover_title" => "Cover Titles",
+        "narrative_title" => "Narrative Titles",
+        "table_title" => "Table Titles",
+        "chart_title" => "Chart Titles",
+        "map_title" => "Map Titles",
+        "divider_title" => "Divider Titles",
+        "card_title" => "Card Titles",
+        "narrative_body" => "Narrative Bodies",
+        "table_header" => "Table Headers",
+        "table_row_label" => "Table Row Labels",
+        "table_note" => "Table Notes",
         "header_footer" => "Headers & Footers",
         "toc_title" => "Table of Contents",
         "chart_series" => "Chart Series",
-        "image_caption" => "Image Caption",
+        "image_caption" => "Image Captions",
         _ => "Other",
     }
 }
 
-/// The 4 main group categories and their display order:
-/// 1. Page Title
-/// 2. Paragraph Content
-/// 3. Table Content
-/// 4. Other (includes Headers & Footers and Table of Contents)
+/// The 4 main group categories and their display order (wew.md):
+/// 1. Title Pages
+/// 2. Narrative Pages
+/// 3. Table Pages
+/// 4. Other Pages (includes Chart Series, Table of Contents, Divider Titles and Headers & Footers)
 pub fn role_group_info(role: &str) -> (&'static str, usize) {
     match role {
-        // 1. Page Title
-        "cover_title" | "narrative_title" | "table_title" | "chart_title" | "map_title" | "divider_title" | "card_title" => ("Page Title", 0),
+        // 1. Title Pages
+        "cover_title" | "table_title" | "chart_title" | "map_title" | "image_caption" | "card_title" => ("Title Pages", 0),
 
-        // 2. Paragraph Content
-        "narrative_body" => ("Paragraph Content", 1),
+        // 2. Narrative Pages
+        "narrative_title" | "narrative_body" => ("Narrative Pages", 1),
 
-        // 3. Table Content
-        "table_header" | "table_row_label" | "table_note" => ("Table Content", 2),
+        // 3. Table Pages
+        "table_header" | "table_row_label" | "table_note" => ("Table Pages", 2),
 
-        // 4. Other ("Headers & Footers" and "Table of Contents" added to other)
-        "header_footer" | "toc_title" | "chart_series" | "image_caption" => ("Other", 3),
-        _ => ("Other", 3),
+        // 4. Other Pages
+        "chart_series" | "toc_title" | "divider_title" | "header_footer" => ("Other Pages", 3),
+        _ => ("Other Pages", 3),
     }
 }
 
@@ -986,9 +986,9 @@ mod tests {
         });
         let mut h = review_harness(tm);
         h.run();
-        // Two groups: Page Title (order 0) and Table Content (order 2).
-        // Clicking "Accept All" for Table Content (second group) promotes Header 1 & 2 while keeping Title 1 as draft.
-        h.query_all_by_label("Accept All").nth(1).expect("Table Content Accept All button").click();
+        // Two groups: Title Pages (order 0) and Table Pages (order 2).
+        // Clicking "Accept All" for Table Pages (second group) promotes Header 1 & 2 while keeping Title 1 as draft.
+        h.query_all_by_label("Accept All").nth(1).expect("Table Pages Accept All button").click();
         h.run();
         assert_eq!(h.state().0.lookup("Header 1").map(|e| e.origin), Some(TmOrigin::Reviewed));
         assert_eq!(h.state().0.lookup("Header 2").map(|e| e.origin), Some(TmOrigin::Reviewed));
@@ -1024,8 +1024,8 @@ mod tests {
         });
         let mut h = review_harness(tm);
         h.run();
-        // Reject all for Table Content (second group)
-        h.query_all_by_label("Reject All").nth(1).expect("Table Content Reject All button").click();
+        // Reject all for Table Pages (second group)
+        h.query_all_by_label("Reject All").nth(1).expect("Table Pages Reject All button").click();
         h.run();
         assert!(h.state().0.lookup("Header 1").is_none());
         assert!(h.state().0.lookup("Header 2").is_none());
@@ -1054,7 +1054,7 @@ mod tests {
         });
         let mut h = review_harness(tm);
         h.run();
-        assert!(h.query_by_label("[-] Other (2)").is_some(), "TOC and Headers & Footers are grouped under Other");
+        assert!(h.query_by_label("[-] Other Pages (2)").is_some(), "TOC and Headers & Footers are grouped under Other Pages");
     }
 
     #[test]
@@ -1174,11 +1174,11 @@ mod tests {
         assert_eq!(format.over.font_style.as_deref(), Some("Bold"), "the third paragraph stays bold after an Indonesian fallback");
     }
 
-    /// A TM target is one paragraph. An embedded return would add a paragraph, push every later
-    /// paragraph onto the wrong format and make `Story::check` reject the body, so such a target
-    /// is treated as missing and that paragraph keeps its Indonesian text.
+    /// A TM target is one paragraph. An embedded return would add a paragraph and push every
+    /// later paragraph onto the wrong format (which `Story::check` rejects), so it is collapsed
+    /// into spaces and the translation keeps its single slot.
     #[test]
-    fn a_translation_with_an_embedded_newline_keeps_its_indonesian_paragraph() {
+    fn a_translation_with_an_embedded_newline_stays_one_paragraph() {
         let rtf = br"{\rtf1\ansi Satu.\par Dua.\par}";
         let lookup = |paragraph: &str| match paragraph {
             "Satu." => Some("One.\nInserted paragraph.".to_string()),
@@ -1188,7 +1188,7 @@ mod tests {
         let out = translated_body_rtf_bytes(&rtf[..], &lookup).expect("Dua. translates");
         let imported = designcraft_textimport::import("t.rtf", &out).expect("reimport");
         assert_eq!(imported.story.para_ranges().len(), 2, "a newline in a target must not add a paragraph");
-        assert!(imported.story.text.contains("Satu."), "the paragraph with the unusable target keeps its Indonesian text: {:?}", imported.story.text);
+        assert!(imported.story.text.contains("One. Inserted paragraph."), "the newline target is flattened into its slot: {:?}", imported.story.text);
         assert!(imported.story.text.contains("Two."), "{:?}", imported.story.text);
     }
 
