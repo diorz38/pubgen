@@ -67,6 +67,7 @@ fn thumb(app: &mut DesignApp, ctx: &egui::Context, of: ThumbOf, h: f32) -> Optio
 }
 
 /// Pre-warms the thumbnail cache for a page so panel navigation and scrolling are instant.
+#[allow(dead_code)]
 pub(crate) fn prewarm_page_thumbnail(app: &mut DesignApp, ctx: &egui::Context, abs: usize) -> bool {
     let th = app.ui.pages_panel.page_size.page_h();
     thumb(app, ctx, ThumbOf::Page(abs), th).is_some()

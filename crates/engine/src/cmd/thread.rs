@@ -70,8 +70,9 @@ fn autoflow_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let max_pages = p.get("maxPages").and_then(Value::as_u64).unwrap_or(AUTOFLOW_MAX_PAGES as u64) as usize;
+    let insert = bool_or(p, "insert", false) || bool_or(p, "primary", false);
     s.edit(|d, _| {
-        let pages = super::place_text_autoflow(d, sid, max_pages, CMD, false)?;
+        let pages = super::place_text_autoflow(d, sid, max_pages, CMD, insert)?;
         Ok(json!({"story": sid.0, "pagesAdded": pages}))
     })
 }

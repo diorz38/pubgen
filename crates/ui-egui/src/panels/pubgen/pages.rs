@@ -1892,20 +1892,36 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                     // built from the translated paragraphs (plan §4).
                     let en_rtf_resolved = if !file_en_val.is_empty() {
                         resolve_catalog_related_file(&st.card1_path, file_en_val, "rtf")
-                    } else if st.translate_with_ai && !file_val.is_empty() {
-                        ai::translated_body_rtf(st, file_val)
                     } else {
-                        None
+                        let p = std::path::Path::new(file_val);
+                        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                        let fallback_en = if !stem.is_empty() && !stem.ends_with("_en") {
+                            if let Some(parent) = p.parent().filter(|p| !p.as_os_str().is_empty()) {
+                                format!("{}/{stem}_en.rtf", parent.to_string_lossy().replace('\\', "/"))
+                            } else {
+                                format!("{stem}_en.rtf")
+                            }
+                        } else {
+                            String::new()
+                        };
+                        resolve_catalog_related_file(&st.card1_path, &fallback_en, "rtf")
+                            .or_else(|| if st.translate_with_ai && !file_val.is_empty() { ai::translated_body_rtf(st, file_val) } else { None })
                     };
+
+                    let is_preface_card = is_preface
+                        || title_val.to_lowercase().contains("pengantar")
+                        || clean_id_title.to_lowercase().contains("pengantar")
+                        || title_en_val.eq_ignore_ascii_case("preface");
+
                     if st.bilingual_output
-                        && !is_preface
+                        && !is_preface_card
                         && is_ulasan_type(type_val)
-                        && let Some(en_rtf_file) = en_rtf_resolved
+                        && let Some(en_rtf_file) = en_rtf_resolved.as_ref()
                     {
                         let (en_ch_line, en_title_line) = if has_chapter_prefix {
                             if !clean_en_title.is_empty() {
                                 (format!("CHAPTER {num_val}"), clean_en_title.to_string())
-                            } else if let Ok(en_bytes) = std::fs::read(&en_rtf_file)
+                            } else if let Ok(en_bytes) = std::fs::read(en_rtf_file)
                                 && let Ok(imp) = designcraft_textimport::import("review_en.rtf", &en_bytes)
                                 && let Some(first_para) = imp.story.text.lines().map(str::trim).find(|l| !l.is_empty())
                             {
@@ -1948,6 +1964,48 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                             post_process_template_applied_page(app, st, &en_applied, false, doc_margins, is_narrative_row, title_val, type_val);
                             let en_page_idx = app.session.active().map(|s| s.doc.page_count().saturating_sub(1)).unwrap_or(0);
                             italicize_page_stories(app, en_page_idx, en_page_idx);
+                            inserted_rtfs_count = inserted_rtfs_count.saturating_add(1);
+                            generated_count = generated_count.saturating_add(1);
+                        }
+                    } else if st.bilingual_output
+                        && is_preface_card
+                        && let Some(en_rtf_file) = en_rtf_resolved.as_ref()
+                    {
+                        let en_title = if !title_en_val.is_empty() {
+                            title_en_val.to_string()
+                        } else if !clean_en_title.is_empty() && !clean_en_title.eq_ignore_ascii_case(clean_id_title) {
+                            clean_en_title.to_string()
+                        } else {
+                            "Preface".to_string()
+                        };
+
+                        let mut en_text_slots = serde_json::Map::new();
+                        en_text_slots.insert("title".into(), json!(en_title));
+                        en_text_slots.insert("note_title".into(), json!(en_title));
+
+                        let mut en_story_slots = serde_json::Map::new();
+                        en_story_slots.insert("note_body".into(), json!(en_rtf_file.to_string_lossy()));
+
+                        let mut en_apply_params = json!({
+                            "path": tpl_path,
+                            "slots": {
+                                "text": en_text_slots,
+                                "story": en_story_slots,
+                                "image": serde_json::Map::new(),
+                            },
+                            "image_fitting": "fitProportionally",
+                            "palette": {
+                                "Primary": st.cover_color_primary.trim(),
+                                "Accent": st.cover_color_accent.trim(),
+                                "Dark": st.cover_color_dark.trim(),
+                            }
+                        });
+                        if !st.doc_language.trim().is_empty() {
+                            en_apply_params["lang"] = json!(st.doc_language.trim());
+                        }
+
+                        if let Ok(en_applied) = app.run("template.page.apply", en_apply_params) {
+                            post_process_template_applied_page(app, st, &en_applied, false, doc_margins, is_narrative_row, &en_title, type_val);
                             inserted_rtfs_count = inserted_rtfs_count.saturating_add(1);
                             generated_count = generated_count.saturating_add(1);
                         }
@@ -2155,9 +2213,8 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                 None
             };
             if st.bilingual_output && !is_preface {
-                let same_as_id = resolved_en_rtf.is_none()
-                    || resolved_en_rtf.as_ref().map(|p| p.to_string_lossy().to_string())
-                        == resolve_catalog_related_file(&st.card1_path, file_val, "rtf").as_ref().map(|p| p.to_string_lossy().to_string());
+                let id_rtf_path = resolve_catalog_related_file(&st.card1_path, file_val, "rtf").map(|p| p.to_string_lossy().to_string());
+                let same_as_id = resolved_en_rtf.is_none() || resolved_en_rtf.as_ref().map(|p| p.to_string_lossy().to_string()) == id_rtf_path;
                 if same_as_id {
                     let p = std::path::Path::new(file_val);
                     let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
@@ -2169,7 +2226,11 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                         };
                         if let Some(en_p) = resolve_catalog_related_file(&st.card1_path, &fallback_en, "rtf") {
                             resolved_en_rtf = Some(en_p);
+                        } else {
+                            resolved_en_rtf = None;
                         }
+                    } else {
+                        resolved_en_rtf = None;
                     }
                 }
                 if resolved_en_rtf.is_none() && st.translate_with_ai && !file_val.is_empty() {
@@ -2552,19 +2613,48 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                 }
 
                 // Sequential EN spread for front-matter Ulasan in procedural mode
+                let is_preface_card = is_preface
+                    || title_val.to_lowercase().contains("pengantar")
+                    || clean_id_title.to_lowercase().contains("pengantar")
+                    || title_en_val.eq_ignore_ascii_case("preface");
+
+                let mut resolved_en_spread_rtf =
+                    if !file_en_val.is_empty() { resolve_catalog_related_file(&st.card1_path, file_en_val, "rtf") } else { None };
+                let id_spread_rtf = resolve_catalog_related_file(&st.card1_path, file_val, "rtf").map(|p| p.to_string_lossy().to_string());
+                if resolved_en_spread_rtf.is_none() || resolved_en_spread_rtf.as_ref().map(|p| p.to_string_lossy().to_string()) == id_spread_rtf {
+                    let p = std::path::Path::new(file_val);
+                    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                    if !stem.is_empty() && !stem.ends_with("_en") {
+                        let fallback_en = if let Some(parent) = p.parent().filter(|p| !p.as_os_str().is_empty()) {
+                            format!("{}/{stem}_en.rtf", parent.to_string_lossy().replace('\\', "/"))
+                        } else {
+                            format!("{stem}_en.rtf")
+                        };
+                        resolved_en_spread_rtf = resolve_catalog_related_file(&st.card1_path, &fallback_en, "rtf");
+                    } else {
+                        resolved_en_spread_rtf = None;
+                    }
+                    if resolved_en_spread_rtf.is_none() && st.translate_with_ai && !file_val.is_empty() {
+                        resolved_en_spread_rtf = ai::translated_body_rtf(st, file_val);
+                    }
+                }
+
                 if st.bilingual_output
-                    && !file_en_val.is_empty()
                     && !has_chapter_prefix
-                    && let Some(en_rtf_file) = resolve_catalog_related_file(&st.card1_path, file_en_val, "rtf")
+                    && let Some(en_rtf_file) = resolved_en_spread_rtf
                 {
                     let en_title_line = if !clean_en_title.is_empty() {
                         clean_en_title.to_string()
+                    } else if is_preface_card {
+                        "Preface".to_string()
                     } else {
                         st.translations.get(title_val.trim()).map(String::as_str).filter(|s| !s.is_empty()).unwrap_or(clean_id_title).to_string()
                     };
 
-                    let _ = app.run("layout.pages.insert", json!({"count": 1}));
-                    let en_page_idx = app.session.active().map(|s| s.doc.page_count().saturating_sub(1)).unwrap_or(0);
+                    let cur_id_page = app.session.active().map(|s| s.doc.page_count().saturating_sub(1)).unwrap_or(0);
+                    let _ = app.run("layout.pages.insert", json!({"after": cur_id_page, "count": 1}));
+                    let en_page_idx = cur_id_page + 1;
+                    crate::canvas::go_to_page(app, en_page_idx);
                     let _ = app.session.edit(|doc, _| {
                         if let Some((si, pi)) = doc.page_loc(en_page_idx)
                             && let Some(sp) = doc.spreads.get_mut(si)
@@ -3274,6 +3364,108 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                             tag_page_title(app, sid, TOC_NARRATIVE_STYLE);
                         }
                     }
+                }
+            }
+
+            let is_preface_card = is_preface
+                || title_val.to_lowercase().contains("pengantar")
+                || clean_id_title.to_lowercase().contains("pengantar")
+                || title_en_val.eq_ignore_ascii_case("preface");
+
+            if st.bilingual_output && is_preface_card {
+                let en_rtf_resolved = if !file_en_val.is_empty() {
+                    resolve_catalog_related_file(&st.card1_path, file_en_val, "rtf")
+                } else {
+                    let p = std::path::Path::new(file_val);
+                    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                    let fallback_en = if !stem.is_empty() && !stem.ends_with("_en") {
+                        if let Some(parent) = p.parent().filter(|p| !p.as_os_str().is_empty()) {
+                            format!("{}/{stem}_en.rtf", parent.to_string_lossy().replace('\\', "/"))
+                        } else {
+                            format!("{stem}_en.rtf")
+                        }
+                    } else {
+                        String::new()
+                    };
+                    resolve_catalog_related_file(&st.card1_path, &fallback_en, "rtf")
+                        .or_else(|| if st.translate_with_ai && !file_val.is_empty() { ai::translated_body_rtf(st, file_val) } else { None })
+                };
+
+                if let Some(en_rtf_file) = en_rtf_resolved {
+                    let cur_id_page = app.session.active().map(|s| s.doc.page_count().saturating_sub(1)).unwrap_or(0);
+                    let _ = app.run("layout.pages.insert", json!({"after": cur_id_page, "count": 1}));
+                    let en_page_idx = cur_id_page + 1;
+                    crate::canvas::go_to_page(app, en_page_idx);
+                    let _ = app.session.edit(|doc, _| {
+                        if let Some((si, pi)) = doc.page_loc(en_page_idx)
+                            && let Some(sp) = doc.spreads.get_mut(si)
+                        {
+                            let sp = std::sync::Arc::make_mut(sp);
+                            if let Some(pg) = sp.pages.get_mut(pi) {
+                                pg.margins = doc_margins;
+                                pg.local_margins = true;
+                            }
+                            sp.relayout();
+                        }
+                        Ok(serde_json::Value::Null)
+                    });
+
+                    let (en_margin, en_spread_idx) = {
+                        if let Some(active) = app.session.active()
+                            && let Some((si, pi)) = active.doc.page_loc(en_page_idx)
+                            && let Some(spread) = active.doc.spreads.get(si)
+                            && let Some(page) = spread.pages.get(pi)
+                        {
+                            (page.margin_rect(), si)
+                        } else {
+                            (margin, spread_idx)
+                        }
+                    };
+
+                    let en_title = if !title_en_val.is_empty() {
+                        title_en_val
+                    } else if !clean_en_title.is_empty() && !clean_en_title.eq_ignore_ascii_case(clean_id_title) {
+                        clean_en_title
+                    } else {
+                        "Preface"
+                    };
+
+                    if has_header {
+                        let title_rect = [en_margin.x0, en_margin.y0, en_margin.x1, en_margin.y0 + 36.0];
+                        frame_with_centered_arial(app, en_spread_idx, title_rect, en_title.trim(), Some(TOC_NARRATIVE_STYLE));
+                    }
+
+                    let rtf_rect = if has_header {
+                        [en_margin.x0, en_margin.y0 + 44.0, en_margin.x1, en_margin.y1]
+                    } else {
+                        [en_margin.x0, en_margin.y0, en_margin.x1, en_margin.y1]
+                    };
+
+                    let created_fid = app
+                        .run(
+                            "frame.create",
+                            json!({
+                                "spread": en_spread_idx,
+                                "rect": rtf_rect,
+                                "content": "text",
+                                "caret": false
+                            }),
+                        )
+                        .ok()
+                        .and_then(|res| res.get("id").and_then(Value::as_u64));
+
+                    if let Some(fid) = created_fid {
+                        let _ = app.run("selection.set", json!({"ids": [fid]}));
+                        let mut st_copy = st.clone();
+                        let rtf_path_str = en_rtf_file.to_string_lossy().to_string();
+                        if execute_page_from_rtf(app, &mut st_copy, &rtf_path_str).is_ok() {
+                            inserted_rtfs_count = inserted_rtfs_count.saturating_add(1);
+                            if !has_header && let Some(sid) = story_of_frame(app, fid) {
+                                tag_page_title(app, sid, TOC_NARRATIVE_STYLE);
+                            }
+                        }
+                    }
+                    generated_count = generated_count.saturating_add(1);
                 }
             }
         } else {
@@ -6858,5 +7050,66 @@ Narrative;3;Catatan Akhir;narrative3.rtf\n";
         });
         assert!(title_item.is_some(), "Table title frame must exist");
         assert_eq!(title_item.unwrap().bounds().y0, margin.y0 + 26.0, "Table title must be shifted down by 26pt");
+    }
+
+    #[test]
+    fn test_kata_pengantar_dual_lang_generates_preface_page() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let id_rtf = temp_dir.path().join("B01.rtf");
+        let en_rtf = temp_dir.path().join("B01_en.rtf");
+        std::fs::write(&id_rtf, br#"{\rtf1\ansi\deff0 {\fonttbl {\f0 Arial;}}\f0\fs24 Kata Pengantar publikasi resmi.}"#).unwrap();
+        std::fs::write(&en_rtf, br#"{\rtf1\ansi\deff0 {\fonttbl {\f0 Arial;}}\f0\fs24 Official publication preface note.}"#).unwrap();
+
+        let st = PubgenState {
+            bilingual_output: true,
+            card1_preset: 0,
+            card1_range_all: true,
+            card1_headers: vec![
+                "type".into(),
+                "number".into(),
+                "title".into(),
+                "file".into(),
+                "template".into(),
+                "title_en".into(),
+                "file_en".into(),
+            ],
+            card1_records: vec![vec![
+                "Note".into(),
+                "01".into(),
+                "Kata Pengantar".into(),
+                id_rtf.to_string_lossy().to_string(),
+                "".into(),
+                "Preface".into(),
+                en_rtf.to_string_lossy().to_string(),
+            ]],
+            card1_type_col: 0,
+            card1_num_col: 1,
+            card1_title_col: 2,
+            card1_file_col: 3,
+            card1_template_col: 4,
+            card1_title_en_col: 5,
+            card1_file_en_col: 6,
+            ..Default::default()
+        };
+
+        let res = execute_generate_pages(&mut app, &st);
+        assert!(res.is_ok(), "execute_generate_pages failed: {res:?}");
+
+        let active = app.session.active().unwrap();
+        let doc = &active.doc;
+
+        // Page 1: Initial empty page from file.new
+        // Page 2: Indonesian "Kata Pengantar"
+        // Page 3: English "Preface"
+        assert!(doc.page_count() >= 3, "Both Kata Pengantar and Preface pages must be generated: total {}", doc.page_count());
+
+        let texts: Vec<String> = doc.stories.values().map(|s| s.text.clone()).collect();
+        assert!(texts.iter().any(|t| t.contains("Kata Pengantar")), "Must contain Indonesian title 'Kata Pengantar'");
+        assert!(texts.iter().any(|t| t.contains("Kata Pengantar publikasi resmi")), "Must contain Indonesian RTF content");
+        assert!(texts.iter().any(|t| t.contains("Preface")), "Must contain English title 'Preface'");
+        assert!(texts.iter().any(|t| t.contains("Official publication preface note")), "Must contain English RTF content");
     }
 }

@@ -73,7 +73,19 @@ pub fn resolve_dda_footer_lines(st: &PubgenState) -> (String, String) {
         (st.cover_title.as_str(), st.cover_title2.as_str(), st.cover_title_en.as_str(), st.cover_year.as_str(), "", "")
     };
 
-    let clean_single_line = |s: &str| -> String { s.lines().next().unwrap_or("").trim().to_string() };
+    let clean_single_line = |s: &str| -> String {
+        let first = s.lines().next().unwrap_or("").trim();
+        let stripped = first
+            .strip_prefix("Cover Release: ")
+            .or_else(|| first.strip_prefix("Sampul Rilis: "))
+            .or_else(|| first.strip_prefix("Sampul Publikasi: "))
+            .or_else(|| first.strip_prefix("Publication Cover: "))
+            .or_else(|| first.strip_prefix("Sampul: "))
+            .or_else(|| first.strip_prefix("Cover: "))
+            .unwrap_or(first)
+            .trim();
+        stripped.to_string()
+    };
 
     let title1 = clean_single_line(raw_title);
     let title2 =
@@ -82,7 +94,7 @@ pub fn resolve_dda_footer_lines(st: &PubgenState) -> (String, String) {
 
     // Line 1: Indonesian Title
     let line1 = if !title1.is_empty() {
-        if !title2.is_empty() && title2 != title_en && title_en.is_empty() { format!("{title1} {title2}") } else { title1 }
+        title1
     } else if !title2.is_empty() && title2 != title_en {
         title2.clone()
     } else {
@@ -90,10 +102,12 @@ pub fn resolve_dda_footer_lines(st: &PubgenState) -> (String, String) {
     };
 
     // Line 2: English Title and Year
-    let en = if !title_en.is_empty() {
-        title_en
-    } else if !title2.is_empty() && title2 != line1 {
+    // In BPS DDA, title2 from sheet COVER holds the official English publication title.
+    // Prefer title2, falling back to title_en if title2 is absent.
+    let en = if !title2.is_empty() && title2 != line1 {
         title2
+    } else if !title_en.is_empty() && title_en != line1 {
+        title_en
     } else {
         String::new()
     };

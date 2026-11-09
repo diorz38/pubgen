@@ -10,8 +10,8 @@
 
 #[cfg(target_os = "windows")]
 pub fn register_pubgen_file_association() {
-    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
     use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ, KEY_WRITE};
 
     let Ok(current_exe) = std::env::current_exe() else {
         return;

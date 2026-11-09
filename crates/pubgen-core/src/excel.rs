@@ -226,7 +226,9 @@ fn ingest_cover_sheet(
                 scope: CardScope::NewPage,
                 source: Some(csv_path),
                 title: if !metadata.title.is_empty() {
-                    format!("Sampul Rilis: {}", metadata.title)
+                    if metadata.profile_id == "bps_dda" { metadata.title.clone() } else { format!("Sampul Rilis: {}", metadata.title) }
+                } else if metadata.profile_id == "bps_dda" {
+                    "Sampul Publikasi".to_string()
                 } else {
                     "Sampul Berita Resmi Statistik (COV)".to_string()
                 },
@@ -360,7 +362,15 @@ fn process_narrative_sheet(
     let fen_fallback_exists = base_dir.join(&fen_fallback).is_file() || base_dir.join("rtf").join(&fen_fallback).is_file();
     let fen_choice: Option<String> = if let Some(fen) = fen_candidate {
         let fen_stem = Path::new(fen).file_stem().and_then(|s| s.to_str()).unwrap_or(fen);
-        if (fen == candidate_name.as_str() || fen_stem == stem) && fen_fallback_exists { Some(fen_fallback) } else { Some(fen.to_string()) }
+        if fen == candidate_name.as_str() || fen_stem == stem {
+            if fen_fallback_exists { Some(fen_fallback) } else { None }
+        } else if base_dir.join(fen).is_file() || base_dir.join("rtf").join(fen).is_file() {
+            Some(fen.to_string())
+        } else if fen_fallback_exists {
+            Some(fen_fallback)
+        } else {
+            None
+        }
     } else if fen_fallback_exists {
         Some(fen_fallback)
     } else {
@@ -385,6 +395,8 @@ fn process_narrative_sheet(
 
     if let Some(fen) = actual_fen_path.or(fen_choice) {
         card_settings.insert("file_en".to_string(), serde_json::Value::String(fen));
+    } else {
+        card_settings.remove("file_en");
     }
 
     if name == "U1" {

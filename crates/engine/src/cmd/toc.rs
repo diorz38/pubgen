@@ -692,11 +692,11 @@ fn generate(s: &mut Session, p: &Value) -> Result<Value> {
         let autoflow = p.get("autoflow").and_then(Value::as_bool).unwrap_or(true);
         let mut pages_added = 0;
         if autoflow {
-            let added = super::place_text_autoflow(d, story, 50, "toc.generate", false)?;
+            let added = super::place_text_autoflow(d, story, 50, "toc.generate", true)?;
             pages_added += added;
             if added > 0 {
                 let _ = fill(d, &toc, width);
-                let added2 = super::place_text_autoflow(d, story, 50, "toc.generate", false)?;
+                let added2 = super::place_text_autoflow(d, story, 50, "toc.generate", true)?;
                 pages_added += added2;
             }
         }

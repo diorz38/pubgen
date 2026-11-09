@@ -494,6 +494,14 @@ fn ai_translate(app: &mut DesignApp, ui: &mut egui::Ui, lang: &str, has_doc: boo
         });
         ui.close();
     }
+
+    ui.separator();
+    if item(ui, lang, "Setup…", true) {
+        crate::dock::pubgen::with_state(ui.ctx(), |st| {
+            st.ai_dialog = Some(crate::dock::pubgen::ai::AiSetupDialog::open(app, st));
+        });
+        ui.close();
+    }
 }
 
 /// The PubGen menu of the DesignCraft menu bar: every PubGen action in one menu.

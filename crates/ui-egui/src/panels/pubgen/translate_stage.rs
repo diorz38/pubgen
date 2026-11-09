@@ -170,9 +170,61 @@ pub fn badge_label(tm: &TranslationMemory, source: &str) -> Option<&'static str>
     }
 }
 
+/// The human-readable name of each specific Unit Role.
+pub fn unit_role_name(role: &str) -> &'static str {
+    match role {
+        "cover_title" => "Cover Title",
+        "narrative_title" => "Narrative Title",
+        "table_title" => "Table Title",
+        "chart_title" => "Chart Title",
+        "map_title" => "Map Title",
+        "divider_title" => "Divider Title",
+        "card_title" => "Card Title",
+        "narrative_body" => "Paragraph Body",
+        "table_header" => "Table Header",
+        "table_row_label" => "Table Row Label",
+        "table_note" => "Table Note",
+        "header_footer" => "Headers & Footers",
+        "toc_title" => "Table of Contents",
+        "chart_series" => "Chart Series",
+        "image_caption" => "Image Caption",
+        _ => "Other",
+    }
+}
+
+/// The 4 main group categories and their display order:
+/// 1. Page Title
+/// 2. Paragraph Content
+/// 3. Table Content
+/// 4. Other (includes Headers & Footers and Table of Contents)
+pub fn role_group_info(role: &str) -> (&'static str, usize) {
+    match role {
+        // 1. Page Title
+        "cover_title" | "narrative_title" | "table_title" | "chart_title" | "map_title" | "divider_title" | "card_title" => ("Page Title", 0),
+
+        // 2. Paragraph Content
+        "narrative_body" => ("Paragraph Content", 1),
+
+        // 3. Table Content
+        "table_header" | "table_row_label" | "table_note" => ("Table Content", 2),
+
+        // 4. Other ("Headers & Footers" and "Table of Contents" added to other)
+        "header_footer" | "toc_title" | "chart_series" | "image_caption" => ("Other", 3),
+        _ => ("Other", 3),
+    }
+}
+
+struct DraftItem {
+    source: String,
+    target: String,
+    role_label: &'static str,
+}
+
 enum ReviewAction {
     Accept { source: String, target: String, buffer: egui::Id },
     Reject { source: String, buffer: egui::Id },
+    AcceptGroup(Vec<(String, String, egui::Id)>),
+    RejectGroup(Vec<(String, egui::Id)>),
 }
 
 /// The Translation review pane: one row per unreviewed AI draft. The source is read-only, the
@@ -187,34 +239,104 @@ pub fn review_pane(ui: &mut egui::Ui, tm: &mut TranslationMemory, dirty: &mut bo
     });
 }
 
-/// The pane's rows, laid out inside [`review_pane`]'s scroll area.
+/// The pane's rows, grouped by role and laid out inside [`review_pane`]'s scroll area.
 fn review_rows(ui: &mut egui::Ui, tm: &mut TranslationMemory, dirty: &mut bool) {
-    let pending: Vec<(String, String)> = tm.pending_review().iter().map(|e| (e.source.clone(), e.target.clone())).collect();
+    let pending = tm.pending_review();
     if pending.is_empty() {
         ui.label(egui::RichText::new("No AI drafts awaiting review.").color(ui.visuals().weak_text_color()));
         return;
     }
     ui.label(egui::RichText::new(format!("{} AI draft(s) awaiting review", pending.len())).strong());
-    let mut action: Option<ReviewAction> = None;
-    for (source, target) in pending {
-        // Keyed by source *and* target: a later AI run that stores a new target gets a fresh
-        // buffer instead of editing this run's draft with the previous edit.
-        let buffer = ui.scope_id().with(("tm_review_target", &source, &target));
-        let mut draft = ui.data(|d| d.get_temp::<String>(buffer)).unwrap_or_else(|| target.clone());
-        ui.label(egui::RichText::new(&source).strong());
-        if ui.add(egui::TextEdit::singleline(&mut draft).desired_width(f32::INFINITY)).changed() {
-            ui.data_mut(|d| d.insert_temp(buffer, draft.clone()));
-        }
-        ui.horizontal(|ui| {
-            if ui.add_enabled(!draft.trim().is_empty(), egui::Button::new("Accept")).clicked() {
-                action = Some(ReviewAction::Accept { source: source.clone(), target: draft.trim().to_string(), buffer });
-            }
-            if ui.button("Reject").clicked() {
-                action = Some(ReviewAction::Reject { source, buffer });
-            }
+    ui.add_space(4.0);
+
+    let root_id = ui.scope_id();
+    let mut groups: std::collections::BTreeMap<(usize, &'static str), Vec<DraftItem>> = std::collections::BTreeMap::new();
+    for entry in pending {
+        let (group_label, sort_order) = role_group_info(&entry.role);
+        let role_label = unit_role_name(&entry.role);
+        groups.entry((sort_order, group_label)).or_default().push(DraftItem {
+            source: entry.source.clone(),
+            target: entry.target.clone(),
+            role_label,
         });
-        ui.separator();
     }
+
+    let mut action: Option<ReviewAction> = None;
+
+    for ((_order, group_label), items) in groups {
+        let collapse_id = root_id.with(("group_collapse", group_label));
+        let mut is_expanded = ui.data(|d| d.get_temp::<bool>(collapse_id)).unwrap_or(true);
+
+        egui::Frame::NONE
+            .fill(ui.visuals().faint_bg_color)
+            .corner_radius(egui::CornerRadius::same(4))
+            .inner_margin(egui::Margin::symmetric(6, 4))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let prefix = if is_expanded { "[-] " } else { "[+] " };
+                    if ui
+                        .add(egui::Button::new(egui::RichText::new(format!("{prefix}{group_label} ({})", items.len())).strong()).frame(false))
+                        .clicked()
+                    {
+                        is_expanded = !is_expanded;
+                        ui.data_mut(|d| d.insert_temp(collapse_id, is_expanded));
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Reject All").on_hover_text(format!("Reject all {} drafts in {group_label}", items.len())).clicked() {
+                            let to_reject = items
+                                .iter()
+                                .map(|item| {
+                                    let buffer = root_id.with(("tm_review_target", &item.source, &item.target));
+                                    (item.source.clone(), buffer)
+                                })
+                                .collect();
+                            action = Some(ReviewAction::RejectGroup(to_reject));
+                        }
+                        if ui.button("Accept All").on_hover_text(format!("Accept all {} drafts in {group_label}", items.len())).clicked() {
+                            let to_accept = items
+                                .iter()
+                                .map(|item| {
+                                    let buffer = root_id.with(("tm_review_target", &item.source, &item.target));
+                                    let draft = ui.data(|d| d.get_temp::<String>(buffer)).unwrap_or_else(|| item.target.clone());
+                                    let target = if draft.trim().is_empty() { item.target.clone() } else { draft.trim().to_string() };
+                                    (item.source.clone(), target, buffer)
+                                })
+                                .collect();
+                            action = Some(ReviewAction::AcceptGroup(to_accept));
+                        }
+                    });
+                });
+            });
+
+        if is_expanded {
+            for item in items {
+                let buffer = root_id.with(("tm_review_target", &item.source, &item.target));
+                let mut draft = ui.data(|d| d.get_temp::<String>(buffer)).unwrap_or_else(|| item.target.clone());
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(&item.source).strong());
+                    ui.label(
+                        egui::RichText::new(format!("[{}]", item.role_label))
+                            .font(egui::FontId::proportional(11.0))
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                });
+                if ui.add(egui::TextEdit::singleline(&mut draft).desired_width(f32::INFINITY)).changed() {
+                    ui.data_mut(|d| d.insert_temp(buffer, draft.clone()));
+                }
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(!draft.trim().is_empty(), egui::Button::new("Accept")).clicked() {
+                        action = Some(ReviewAction::Accept { source: item.source.clone(), target: draft.trim().to_string(), buffer });
+                    }
+                    if ui.button("Reject").clicked() {
+                        action = Some(ReviewAction::Reject { source: item.source, buffer });
+                    }
+                });
+                ui.separator();
+            }
+        }
+        ui.add_space(4.0);
+    }
+
     match action {
         Some(ReviewAction::Accept { source, target, buffer }) => {
             let applied =
@@ -225,11 +347,31 @@ fn review_rows(ui: &mut egui::Ui, tm: &mut TranslationMemory, dirty: &mut bool) 
             }
         }
         Some(ReviewAction::Reject { source, buffer }) => {
-            if !tm.remove(&source) {
-                return;
+            if tm.remove(&source) {
+                *dirty = true;
+                ui.data_mut(|d| d.remove_temp::<String>(buffer));
             }
-            *dirty = true;
-            ui.data_mut(|d| d.remove_temp::<String>(buffer));
+        }
+        Some(ReviewAction::AcceptGroup(items)) => {
+            for (source, target, buffer) in items {
+                let applied = if tm.lookup(&source).is_some_and(|e| e.target.trim() == target) {
+                    tm.promote(&source)
+                } else {
+                    tm.update_target(&source, &target)
+                };
+                if applied {
+                    *dirty = true;
+                    ui.data_mut(|d| d.remove_temp::<String>(buffer));
+                }
+            }
+        }
+        Some(ReviewAction::RejectGroup(items)) => {
+            for (source, buffer) in items {
+                if tm.remove(&source) {
+                    *dirty = true;
+                    ui.data_mut(|d| d.remove_temp::<String>(buffer));
+                }
+            }
         }
         None => {}
     }
@@ -321,12 +463,22 @@ pub fn translated_body_rtf_bytes(source: &[u8], lookup: &dyn Fn(&str) -> Option<
     let story = &imported.story;
     let mut translations: Vec<Option<String>> = Vec::new();
     let mut any = false;
-    for range in story.para_ranges() {
-        let english = usable_target(lookup(story.slice(range).trim()));
+    let mut any_body = false;
+    let ranges = story.para_ranges();
+    for range in &ranges {
+        let p_text = story.slice(range.clone());
+        let trimmed = p_text.trim();
+        let english = usable_target(lookup(trimmed));
+        let is_heading_only =
+            trimmed.eq_ignore_ascii_case("ulasan") || trimmed.eq_ignore_ascii_case("review") || trimmed.eq_ignore_ascii_case("overview");
+        if english.is_some() && !is_heading_only {
+            any_body = true;
+        }
         any |= english.is_some();
         translations.push(english);
     }
-    any.then(|| render_body(&rebuilt_story(story, &translations)).into_bytes())
+    let valid = if ranges.len() > 1 { any_body } else { any };
+    valid.then(|| render_body(&rebuilt_story(story, &translations)).into_bytes())
 }
 
 /// A target usable as one paragraph: trimmed, non-empty and a single line. A target carrying
@@ -808,6 +960,104 @@ mod tests {
         assert!(h.state().0.pending_review().is_empty(), "Accept promotes the draft");
         assert_eq!(h.state().0.lookup("PDRB").map(|e| e.origin), Some(TmOrigin::Reviewed));
         assert!(h.state().1, "accepting marks the workspace dirty");
+    }
+
+    #[test]
+    fn review_pane_accepts_all_drafts_in_a_group() {
+        use egui_kittest::kittest::Queryable;
+        let mut tm = TranslationMemory::default();
+        tm.insert(TmEntry {
+            source: "Title 1".into(),
+            target: "Title EN 1".into(),
+            origin: TmOrigin::Ai,
+            role: "table_title".into(),
+            updated: now_stamp(),
+        });
+        tm.insert(TmEntry {
+            source: "Header 1".into(),
+            target: "Header EN 1".into(),
+            origin: TmOrigin::Ai,
+            role: "table_header".into(),
+            updated: now_stamp(),
+        });
+        tm.insert(TmEntry {
+            source: "Header 2".into(),
+            target: "Header EN 2".into(),
+            origin: TmOrigin::Ai,
+            role: "table_header".into(),
+            updated: now_stamp(),
+        });
+        let mut h = review_harness(tm);
+        h.run();
+        // Two groups: Page Title (order 0) and Table Content (order 2).
+        // Clicking "Accept All" for Table Content (second group) promotes Header 1 & 2 while keeping Title 1 as draft.
+        h.query_all_by_label("Accept All").nth(1).expect("Table Content Accept All button").click();
+        h.run();
+        assert_eq!(h.state().0.lookup("Header 1").map(|e| e.origin), Some(TmOrigin::Reviewed));
+        assert_eq!(h.state().0.lookup("Header 2").map(|e| e.origin), Some(TmOrigin::Reviewed));
+        assert_eq!(h.state().0.lookup("Title 1").map(|e| e.origin), Some(TmOrigin::Ai));
+        assert_eq!(h.state().0.pending_review().len(), 1);
+        assert!(h.state().1, "accepting group marks workspace dirty");
+    }
+
+    #[test]
+    fn review_pane_rejects_all_drafts_in_a_group() {
+        use egui_kittest::kittest::Queryable;
+        let mut tm = TranslationMemory::default();
+        tm.insert(TmEntry {
+            source: "Title 1".into(),
+            target: "Title EN 1".into(),
+            origin: TmOrigin::Ai,
+            role: "table_title".into(),
+            updated: now_stamp(),
+        });
+        tm.insert(TmEntry {
+            source: "Header 1".into(),
+            target: "Header EN 1".into(),
+            origin: TmOrigin::Ai,
+            role: "table_header".into(),
+            updated: now_stamp(),
+        });
+        tm.insert(TmEntry {
+            source: "Header 2".into(),
+            target: "Header EN 2".into(),
+            origin: TmOrigin::Ai,
+            role: "table_header".into(),
+            updated: now_stamp(),
+        });
+        let mut h = review_harness(tm);
+        h.run();
+        // Reject all for Table Content (second group)
+        h.query_all_by_label("Reject All").nth(1).expect("Table Content Reject All button").click();
+        h.run();
+        assert!(h.state().0.lookup("Header 1").is_none());
+        assert!(h.state().0.lookup("Header 2").is_none());
+        assert!(h.state().0.lookup("Title 1").is_some());
+        assert_eq!(h.state().0.pending_review().len(), 1);
+        assert!(h.state().1, "rejecting group marks workspace dirty");
+    }
+
+    #[test]
+    fn review_pane_groups_headers_footers_and_toc_under_other() {
+        use egui_kittest::kittest::Queryable;
+        let mut tm = TranslationMemory::default();
+        tm.insert(TmEntry {
+            source: "Daftar Isi".into(),
+            target: "Table of Contents".into(),
+            origin: TmOrigin::Ai,
+            role: "toc_title".into(),
+            updated: now_stamp(),
+        });
+        tm.insert(TmEntry {
+            source: "Halaman | Badan Pusat Statistik".into(),
+            target: "Page | BPS-Statistics".into(),
+            origin: TmOrigin::Ai,
+            role: "header_footer".into(),
+            updated: now_stamp(),
+        });
+        let mut h = review_harness(tm);
+        h.run();
+        assert!(h.query_by_label("[-] Other (2)").is_some(), "TOC and Headers & Footers are grouped under Other");
     }
 
     #[test]

@@ -391,6 +391,9 @@ pub struct OrchestratorWorkspaceState {
     // Re-compilation Safety Guard Dialog state
     pub show_guard_dialog: bool,
     pub guard_is_publish: bool,
+    // AI Translation Guard Dialog state (warns user if translation data already exists)
+    #[serde(skip)]
+    pub show_translate_guard_dialog: bool,
     // Translation memory (T7): persisted inside the .pubgen package, seeded from it on open.
     #[serde(default)]
     pub tm: pubgen_core::TranslationMemory,
@@ -607,6 +610,7 @@ impl Default for OrchestratorWorkspaceState {
             status_message: None,
             show_guard_dialog: false,
             guard_is_publish: false,
+            show_translate_guard_dialog: false,
             tm: pubgen_core::TranslationMemory::default(),
             glossary_pairs: Vec::new(),
             translate_job: None,
@@ -1159,14 +1163,14 @@ pub fn apply_ingest_report_to_state(
                     }
                     if let Some(t) = pc.settings.get("title").or_else(|| pc.settings.get("title1")) {
                         if !t.is_empty() {
-                            pc.title = format!("Sampul Rilis: {t}");
+                            pc.title = if state.selected_profile == "bps_dda" { t.clone() } else { format!("Sampul Rilis: {t}") };
                         }
-                    }
-                    if let Some(ten) = pc.settings.get("title_en").or_else(|| pc.settings.get("title2")) {
-                        pc.title_en = ten.clone();
                     }
                     if let Some(t2) = pc.settings.get("title2") {
                         pc.cover_title2 = t2.clone();
+                    }
+                    if let Some(ten) = pc.settings.get("title2").or_else(|| pc.settings.get("title_en")) {
+                        pc.title_en = ten.clone();
                     }
                     if let Some(yr) = pc.settings.get("year") {
                         pc.cover_year = yr.clone();
@@ -1662,6 +1666,7 @@ pub fn sync_external_workspace(
     // The package's own memory is loaded after the import reset, so opening a `.pubgen` keeps it.
     state.tm = tm.clone();
     super::with_state(ctx, |pubgen_st| {
+        super::translate_stage::seed_pubgen_state(pubgen_st, &state.tm);
         if let Some(cov_card) = state.cards.iter().find(|c| c.kind == CardKind::Cover) {
             sync_card_to_pubgen_state(cov_card, &state, pubgen_st);
         }
@@ -1992,7 +1997,26 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
     // Poll the in-flight worksheet translation job every frame (T7). The button lives in
     // the Studio view, so a job can only exist there.
     if state.view == OrchestratorView::Studio {
-        poll_translate_job(&mut state);
+        poll_translate_job(&mut state, app, ui.ctx());
+    }
+
+    // Query Cloudflare AI cover quota on initial workspace mount if credentials exist in .env / prefs.
+    let checked_cover_quota = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("pubgen_cf_quota_initial_queried"))).unwrap_or(false);
+    if !checked_cover_quota {
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("pubgen_cf_quota_initial_queried"), true));
+        let (acct, _) = super::ai_cover::get_credentials(&app.session.prefs);
+        if !acct.is_empty() {
+            let ctx = ui.ctx().clone();
+            let _ = std::thread::Builder::new().name("pubgen-cf-quota-init".into()).spawn(move || {
+                if let Some(neurons) = designcraft_imagegen::quota::check_remaining(&acct) {
+                    let covers = (neurons / designcraft_imagegen::quota::NEURONS_PER_COVER).max(0.0) as u64;
+                    super::with_state(&ctx, |st| {
+                        st.cover_quota_covers = Some(covers);
+                    });
+                    ctx.request_repaint();
+                }
+            });
+        }
     }
 
     if state.view == OrchestratorView::Home {
@@ -2067,9 +2091,24 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
         render_guard_dialog(app, ui.ctx(), &mut state, &t, &lang);
     }
 
+    // Render AI Translation Guard Dialog if triggered
+    if state.show_translate_guard_dialog {
+        render_translate_guard_dialog(app, ui.ctx(), &mut state, &t, &lang);
+    }
+
     // Render Compile & Thumbnail Pre-warm Progress Modal if active
     if state.compile_progress.is_some() {
         render_compile_progress_modal(app, ui.ctx(), &mut state, &t, &lang);
+    }
+
+    // Render AI Quota Popup modal if triggered (0.8.4 parity)
+    let quota_popup = super::with_state(ui.ctx(), |st| st.ai_quota_popup.take());
+    if quota_popup.is_some() {
+        let mut temp_st = super::PubgenState { ai_quota_popup: quota_popup, ..Default::default() };
+        super::widgets::ai_quota_popup_ui(&mut temp_st, ui, &t);
+        if temp_st.ai_quota_popup.is_some() {
+            super::with_state(ui.ctx(), |st| st.ai_quota_popup = temp_st.ai_quota_popup);
+        }
     }
 
     set_state(ui.ctx(), state);
@@ -2303,6 +2342,16 @@ fn render_expanded_dock(
                 // and Reject persist with the package.
                 let mut dirty = state.is_dirty;
                 super::translate_stage::review_pane(ui, &mut state.tm, &mut dirty);
+                if dirty && !state.is_dirty {
+                    for card in &mut state.cards {
+                        if let Some(entry) = state.tm.lookup(&card.title) {
+                            if !entry.target.is_empty() {
+                                card.title_en = entry.target.clone();
+                                card.settings.insert("title_en".into(), entry.target.clone());
+                            }
+                        }
+                    }
+                }
                 state.is_dirty = dirty;
             }
         }
@@ -2390,7 +2439,7 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                         let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(&path);
                         let pairs = super::ai::BpsGlossary::load(&app.session.prefs.pubgen_glossary_path).prompt_pairs();
                         apply_ingest_report_to_state(&mut st, name, &report, &pairs);
-                        super::with_state(&ctx, |pubgen_st| {
+                        crate::dock::pubgen::with_state(&ctx, |pubgen_st| {
                             if let Some(cov_card) = st.cards.iter().find(|c| c.kind == CardKind::Cover) {
                                 sync_card_to_pubgen_state(cov_card, &st, pubgen_st);
                             }
@@ -2445,7 +2494,7 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
                     let name = p.file_name().and_then(|s| s.to_str()).unwrap_or(&path);
                     let pairs = super::ai::BpsGlossary::load(&app.session.prefs.pubgen_glossary_path).prompt_pairs();
                     apply_ingest_report_to_state(&mut st, name, &report, &pairs);
-                    super::with_state(&ctx, |pubgen_st| {
+                    crate::dock::pubgen::with_state(&ctx, |pubgen_st| {
                         if let Some(cov_card) = st.cards.iter().find(|c| c.kind == CardKind::Cover) {
                             sync_card_to_pubgen_state(cov_card, &st, pubgen_st);
                         }
@@ -3095,7 +3144,10 @@ fn measured_card_height(painter: &egui::Painter, card: &PublicationCard, details
     const LINE_GAP: f32 = 2.0;
     const PAD_Y: f32 = 12.0; // 6px top + 6px bottom inner padding
     let rows = [row_min, title.size().y.max(row_min), source.size().y.max(row_min), row_min];
-    let h = PAD_Y + LINE_GAP * (rows.len() - 1) as f32 + rows.iter().sum::<f32>();
+    let mut h = PAD_Y + LINE_GAP * (rows.len() - 1) as f32 + rows.iter().sum::<f32>();
+    if card.kind == CardKind::Cover {
+        h += row_min + LINE_GAP;
+    }
     painter.ctx().data_mut(|d| d.insert_temp(cache_id, h));
     h
 }
@@ -3195,6 +3247,13 @@ fn render_facing_card(
                 clicked_edit = true;
             }
         });
+
+        // Cover Cloudflare AI quota indicator
+        if card.kind == CardKind::Cover {
+            if let Some(n) = super::with_state(ui.ctx(), |st| st.cover_quota_covers) {
+                child_ui.label(RichText::new(format!("Cloudflare AI: ~{n} covers left today")).font(FontId::proportional(11.0)).color(t.text_dim));
+            }
+        }
     });
 
     if clicked_edit { Some(idx) } else { None }
@@ -3469,35 +3528,85 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
 
     // Translate Worksheet (T7): TM/glossary hits resolve locally, only misses are sent.
     let translate_enabled = super::ai::backend_config_from_prefs(app).is_some() && !state.cards.is_empty();
-    let translate_label = if state.translate_job.is_some() {
-        format!(
-            "Menerjemahkan dengan AI… {}/{}",
-            state.translate_job.as_ref().map(|j| j.done).unwrap_or(0),
-            state.translate_job.as_ref().map(|j| j.total).unwrap_or(0)
-        )
+    if let Some(job) = &state.translate_job {
+        ui.ctx().request_repaint();
+        let done = job.done;
+        let total = job.total;
+        let frac = if total > 0 { (done as f32 / total as f32).clamp(0.0, 1.0) } else { 0.0 };
+        let pct = (frac * 100.0) as usize;
+
+        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), btn_h), Sense::click());
+        let p = ui.painter();
+
+        // Base button background
+        p.rect_filled(rect, CornerRadius::same(t.radius), t.panel_darker);
+
+        // Progress fill (at least 8% if total > 0 so progress is immediately visible)
+        let fill_w = if total > 0 { (rect.width() * frac).max(rect.width() * 0.08).min(rect.width()) } else { rect.width() * 0.25 };
+        let progress_rect = Rect::from_min_size(rect.min, vec2(fill_w, rect.height()));
+        p.rect_filled(progress_rect, CornerRadius::same(t.radius), Color32::from_rgb(26, 92, 138));
+
+        // Animated running color / shimmer effect
+        let time = ui.input(|i| i.time);
+        let cycle = (time * 1.2).fract() as f32;
+        let band_w = 70.0f32;
+        let band_center_x = rect.min.x - band_w + (rect.width() + band_w * 2.0) * cycle;
+        let band_min_x = (band_center_x - band_w * 0.5).clamp(rect.min.x, rect.max.x);
+        let band_max_x = (band_center_x + band_w * 0.5).clamp(rect.min.x, rect.max.x);
+        if band_max_x > band_min_x {
+            let shimmer_rect = Rect::from_min_max(pos2(band_min_x, rect.min.y), pos2(band_max_x, rect.max.y));
+            p.rect_filled(shimmer_rect, CornerRadius::same(t.radius), Color32::from_rgba_unmultiplied(255, 255, 255, 40));
+        }
+
+        // Outline stroke
+        p.rect_stroke(rect, CornerRadius::same(t.radius), Stroke::new(1.0, t.accent), StrokeKind::Inside);
+
+        // Label with done/total and percent
+        let label = format!("Menerjemahkan dengan AI… {done}/{total} ({pct}%)");
+        let galley = p.layout_no_wrap(label, semibold(11.5), Color32::WHITE);
+        let text_pos = pos2(rect.center().x - galley.size().x / 2.0, rect.center().y - galley.size().y / 2.0);
+        p.galley(text_pos, galley, Color32::WHITE);
+
+        let resp = resp.on_hover_text(crate::i18n::tr(lang, "Translating with AI… Click to cancel"));
+        if resp.clicked() {
+            if let Some(job) = &state.translate_job {
+                job.cancel();
+            }
+            state.translate_job = None;
+            state.status_message = Some((crate::i18n::tr(lang, "AI translation cancelled").to_string(), false));
+        }
     } else {
-        crate::i18n::tr(lang, "Translate Worksheet").to_string()
-    };
-    let translate_resp = ui
-        .add_sized(
-            [ui.available_width(), btn_h],
-            egui::Button::new(RichText::new(translate_label).font(semibold(11.5)).color(if translate_enabled || state.translate_job.is_some() {
-                t.text_strong
+        let translate_label = crate::i18n::tr(lang, "Translate with AI").to_string();
+        let translate_resp = ui
+            .add_sized(
+                [ui.available_width(), btn_h],
+                egui::Button::new(RichText::new(translate_label).font(semibold(11.5)).color(if translate_enabled {
+                    t.text_strong
+                } else {
+                    t.text_dim
+                }))
+                .fill(t.panel_darker)
+                .corner_radius(CornerRadius::same(t.radius)),
+            )
+            .on_hover_text(crate::i18n::tr(
+                lang,
+                "Translate the worksheet's titles, headers and notes into English (memory and glossary hits need no request)",
+            ));
+        if !translate_enabled {
+            translate_resp.clone().on_hover_text(crate::i18n::tr(lang, "Configure an AI provider first, and add at least one card"));
+        }
+        if translate_resp.clicked() {
+            let existing = super::with_state(ui.ctx(), |st| count_existing_translations(state, Some(st)));
+            if existing > 0 {
+                state.show_translate_guard_dialog = true;
             } else {
-                t.text_dim
-            }))
-            .fill(t.panel_darker)
-            .corner_radius(CornerRadius::same(t.radius)),
-        )
-        .on_hover_text(crate::i18n::tr(
-            lang,
-            "Translate the worksheet's titles, headers and notes into English (memory and glossary hits need no request)",
-        ));
-    if !translate_enabled && state.translate_job.is_none() {
-        translate_resp.clone().on_hover_text(crate::i18n::tr(lang, "Configure an AI provider first, and add at least one card"));
+                start_translate_stage(app, ui.ctx(), state, false);
+            }
+        }
     }
-    if translate_resp.clicked() {
-        start_translate_stage(app, ui.ctx(), state);
+    // Groq rate limit quota display (mirrors 0.8.4 PubGen header counter)
+    if let Some(n) = designcraft_translate::remaining_requests() {
+        ui.label(RichText::new(format!("Groq: ~{n} requests left today")).font(FontId::proportional(11.0)).color(t.text_dim));
     }
     // The job itself is polled once per frame in `show`, whichever tab is open.
 
@@ -3956,7 +4065,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
 
                                         if card.cover_tab == 0 {
                                             let ctx = ui.ctx().clone();
-                                            super::with_state(&ctx, |pubgen_st| {
+                                            crate::dock::pubgen::with_state(&ctx, |pubgen_st| {
                                                 super::widgets::card_cover_body_ui(app, ui, pubgen_st, t);
                                                 let new_title = pubgen_st.cover_title.trim();
                                                 if !new_title.is_empty() {
@@ -4470,7 +4579,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                                         ui.add_space(3.0);
 
                                         let ctx = ui.ctx().clone();
-                                        super::with_state(&ctx, |pubgen_st| {
+                                        crate::dock::pubgen::with_state(&ctx, |pubgen_st| {
                                             ui.horizontal(|ui| {
                                                 ui.label(RichText::new(crate::i18n::tr(lang, "Apply Option:")).font(semibold(11.0)).color(t.text_strong));
                                                 let is_forward = card.hf_scope_forward;
@@ -4655,12 +4764,71 @@ fn worksheet_draft(state: &OrchestratorWorkspaceState) -> pubgen_core::workspace
     draft
 }
 
-/// "Translate Worksheet" (T7): resolve the TM and whole-string glossary hits locally,
+/// Count existing translated entries across the workspace Translation Memory, card settings, and state.
+pub fn count_existing_translations(state: &OrchestratorWorkspaceState, pubgen_st: Option<&super::PubgenState>) -> usize {
+    let mut count = state.tm.entries.iter().filter(|e| !e.target.trim().is_empty()).count();
+    for card in &state.cards {
+        if !card.title_en.trim().is_empty() && state.tm.lookup(&card.title).is_none() {
+            count += 1;
+        }
+    }
+    if count == 0 {
+        if let Some(st) = pubgen_st {
+            count = st.translations.len();
+        }
+    }
+    count
+}
+
+/// "Translate with AI" (T7): resolve the TM and whole-string glossary hits locally,
 /// then send only the misses to the provider as one background job.
-fn start_translate_stage(app: &mut DesignApp, ctx: &egui::Context, state: &mut OrchestratorWorkspaceState) {
+/// When `replace_existing` is true, previous translation memory and card English titles
+/// are reset so all units are re-translated from scratch.
+fn start_translate_stage(app: &mut DesignApp, ctx: &egui::Context, state: &mut OrchestratorWorkspaceState, replace_existing: bool) {
     if state.translate_job.is_some() || state.cards.is_empty() {
         return;
     }
+    if replace_existing {
+        let now = format_now();
+        state.execution_log.push(format!("[{now}] Menimpa data terjemahan yang ada untuk menerjemahkan ulang dengan AI."));
+        state.tm.entries.clear();
+        for card in &mut state.cards {
+            card.title_en.clear();
+            card.settings.remove("title_en");
+        }
+        super::with_state(ctx, |pubgen_st| {
+            pubgen_st.translations.clear();
+        });
+    } else {
+        // Ensure any existing card.title_en is represented in state.tm so plan_units reuses it
+        for card in &state.cards {
+            if !card.title_en.trim().is_empty() && state.tm.lookup(&card.title).is_none() {
+                state.tm.insert(pubgen_core::translation::TmEntry {
+                    source: card.title.clone(),
+                    target: card.title_en.trim().to_string(),
+                    origin: pubgen_core::translation::TmOrigin::Reviewed,
+                    role: "card_title".into(),
+                    updated: pubgen_core::translation::now_stamp(),
+                });
+            }
+        }
+        if state.tm.entries.is_empty() {
+            super::with_state(ctx, |pubgen_st| {
+                for (src, tgt) in &pubgen_st.translations {
+                    if !tgt.trim().is_empty() && state.tm.lookup(src).is_none() {
+                        state.tm.insert(pubgen_core::translation::TmEntry {
+                            source: src.clone(),
+                            target: tgt.clone(),
+                            origin: pubgen_core::translation::TmOrigin::Reviewed,
+                            role: "auto".into(),
+                            updated: pubgen_core::translation::now_stamp(),
+                        });
+                    }
+                }
+            });
+        }
+    }
+
     let glossary = super::ai::BpsGlossary::load(&app.session.prefs.pubgen_glossary_path);
     let draft = worksheet_draft(state);
     let mut tm = state.tm.clone();
@@ -4672,8 +4840,12 @@ fn start_translate_stage(app: &mut DesignApp, ctx: &egui::Context, state: &mut O
         // Everything resolved locally: no request leaves the machine.
         let now = format_now();
         state.execution_log.push(format!("[{now}] Translated 0 unit(s), reused {}, skipped 0, failed 0.", plan.reused));
-        state.status_message = Some((format!("Semua unit berasal dari memori/kosakata ({}) — tidak ada permintaan AI.", plan.reused), true));
+        state.status_message =
+            Some((format!("Semua data terjemahan sudah lengkap ({} item dari memori) — tidak ada kuota AI yang digunakan.", plan.reused), true));
         state.is_dirty = true;
+        super::with_state(ctx, |pubgen_st| {
+            super::translate_stage::seed_pubgen_state(pubgen_st, &state.tm);
+        });
         return;
     }
     let Some(cfg) = super::ai::backend_config_from_prefs(app) else {
@@ -4691,7 +4863,7 @@ fn start_translate_stage(app: &mut DesignApp, ctx: &egui::Context, state: &mut O
 /// Poll the worksheet translation job (T7): restore the masked outputs, reject any
 /// unit whose numbers did not survive, write the accepted English onto the cards and
 /// into the memory, and report one line in LogEksekusi.
-fn poll_translate_job(state: &mut OrchestratorWorkspaceState) {
+fn poll_translate_job(state: &mut OrchestratorWorkspaceState, app: &DesignApp, ctx: &egui::Context) {
     let Some(mut job) = state.translate_job.take() else { return };
     let mut scratch = super::PubgenState::default();
     let _ok = job.poll(&mut scratch);
@@ -4725,9 +4897,25 @@ fn poll_translate_job(state: &mut OrchestratorWorkspaceState) {
             ui_card.title_en = ten.to_string();
         }
     }
+
+    // Best-effort mirror of Groq rate-limit to Supabase in background (0.8.4 parity)
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let cred = super::ai::backend_config_from_prefs(app)
+            .filter(|cfg| cfg.provider == "groq")
+            .map(|cfg| designcraft_imagegen::quota::fingerprint(&cfg.key));
+        if let (Some(cred), Some(n)) = (cred, designcraft_translate::remaining_requests()) {
+            let _ = std::thread::Builder::new().name("pubgen-groq-quota".into()).spawn(move || {
+                designcraft_imagegen::quota::report_groq(&cred, n);
+            });
+        }
+    }
+
+    let provider = app.session.prefs.translation_provider.as_str();
+    let quota_suffix = super::ai::groq_quota_suffix(provider);
     let now = format_now();
     state.execution_log.push(format!(
-        "[{now}] Translated {} unit(s), reused {}, skipped {}, failed {}.",
+        "[{now}] Translated {} unit(s), reused {}, skipped {}, failed {}.{quota_suffix}",
         res.translated,
         state.translate_reused,
         res.skipped,
@@ -4742,12 +4930,17 @@ fn poll_translate_job(state: &mut OrchestratorWorkspaceState) {
         state.execution_log.push(format!("[{now}] Glossary enforced {} replacement(s) on AI output.", res.glossary_fixes));
     }
     state.status_message = Some((
-        format!("Terjemahan selesai: {} unit, {} daur ulang, {} gagal", res.translated, state.translate_reused, res.failed.len()),
+        format!("Terjemahan selesai: {} unit, {} daur ulang, {} gagal{quota_suffix}", res.translated, state.translate_reused, res.failed.len()),
         res.failed.is_empty(),
     ));
     state.is_dirty = true;
     state.translate_units.clear();
     state.translate_glossary_pairs.clear();
+
+    // Trigger AI Quota Update modal popup (0.8.4 parity)
+    super::with_state(ctx, |pubgen_st| {
+        super::ai::push_groq_quota_popup(pubgen_st, provider);
+    });
 }
 
 /// Executes compilation and automatically transitions workspace to DesignCraft Layout mode.
@@ -4818,18 +5011,29 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
                 card.settings.get("style").cloned().unwrap_or_default()
             },
             title1: if !card.title.trim().is_empty() {
-                card.title.strip_prefix("Sampul Rilis: ").or_else(|| card.title.strip_prefix("Sampul Publikasi: ")).unwrap_or(&card.title).to_string()
+                card.title
+                    .strip_prefix("Sampul Rilis: ")
+                    .or_else(|| card.title.strip_prefix("Sampul Publikasi: "))
+                    .or_else(|| card.title.strip_prefix("Sampul: "))
+                    .unwrap_or(&card.title)
+                    .to_string()
             } else {
                 state.meta_title.clone()
             },
             title2: if !card.cover_title2.trim().is_empty() {
                 card.cover_title2.clone()
-            } else if !card.subtitle.trim().is_empty() {
+            } else if let Some(t2) = card.settings.get("title2").filter(|s| !s.trim().is_empty()) {
+                t2.clone()
+            } else if !card.subtitle.trim().is_empty() && !card.subtitle.starts_with("Cover Release:") && !card.subtitle.starts_with("Sampul") {
                 card.subtitle.clone()
             } else {
                 state.meta_subtitle.clone()
             },
-            title_en: if !card.title_en.trim().is_empty() {
+            title_en: if let Some(t2) = card.settings.get("title2").filter(|s| !s.trim().is_empty()) {
+                t2.clone()
+            } else if !card.cover_title2.trim().is_empty() {
+                card.cover_title2.clone()
+            } else if !card.title_en.trim().is_empty() && !card.title_en.starts_with("Cover Release:") && !card.title_en.starts_with("Sampul") {
                 card.title_en.clone()
             } else {
                 card.settings.get("title_en").cloned().unwrap_or_default()
@@ -4914,9 +5118,11 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
             CardKind::Narrative => {
                 let id_upper = card.chapter_id.to_ascii_uppercase();
                 let is_rxx = id_upper.starts_with('R') && id_upper.len() > 1 && id_upper[1..].chars().all(|c| c.is_ascii_digit() || c == '_');
+                let is_bxx = id_upper.starts_with('B') && id_upper.len() > 1 && id_upper[1..].chars().all(|c| c.is_ascii_digit() || c == '_');
+                let is_preface = card.title.to_lowercase().contains("pengantar") || card.title_en.to_lowercase().contains("preface");
                 let title_upper = card.title.trim().to_ascii_uppercase();
                 let title_starts_bab = title_upper.starts_with("BAB ") || title_upper.starts_with("CHAPTER ");
-                if is_rxx || title_starts_bab { if file.is_empty() { "Note" } else { "Ulasan" } } else { "Note" }
+                if is_rxx || is_bxx || is_preface || title_starts_bab { if file.is_empty() { "Note" } else { "Ulasan" } } else { "Note" }
             }
             CardKind::Table => "Tabel",
             CardKind::Divider => "Divider",
@@ -4973,7 +5179,10 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         };
         let title_en =
             if !card.title_en.trim().is_empty() { card.title_en.clone() } else { card.settings.get("title_en").cloned().unwrap_or_default() };
-        let file_en = card.settings.get("file_en").and_then(|fen| staged(fen)).unwrap_or_default();
+        let raw_file_en = card.settings.get("file_en").and_then(|fen| staged(fen)).unwrap_or_default();
+        let file_en = if raw_file_en == file { String::new() } else { raw_file_en };
+        let image1 = card.settings.get("image1").and_then(|im| staged(im)).unwrap_or_default();
+        let image2 = card.settings.get("image2").and_then(|im| staged(im)).unwrap_or_default();
         let theme = if !card.table_theme.trim().is_empty() {
             card.table_theme.clone()
         } else {
@@ -5025,6 +5234,8 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
             chapter_en,
             section,
             section_en,
+            image1,
+            image2,
         ]);
     }
     if rows.is_empty() && !st.excel_had_cover {
@@ -5043,6 +5254,8 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         "chapter_en".into(),
         "section".into(),
         "section_en".into(),
+        "image1".into(),
+        "image2".into(),
     ];
     st.card1_records = rows;
     st.card1_type_col = 0;
@@ -5420,6 +5633,101 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
     }
 }
 
+/// Renders the AI Translation Guard Dialog when the project already has translated data:
+/// Allows the user to either translate only untranslated items (efficient, saves quota)
+/// or replace/overwrite all existing translation data with fresh AI translations.
+fn render_translate_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut OrchestratorWorkspaceState, t: &Tokens, lang: &str) {
+    if !state.show_translate_guard_dialog {
+        return;
+    }
+
+    let mut close = false;
+    let mut chosen_replace = None;
+    let existing_count = super::with_state(ctx, |pubgen_st| count_existing_translations(state, Some(pubgen_st)));
+
+    let guard_title = crate::i18n::tr(lang, "Existing Translations Found");
+    egui::Window::new(guard_title)
+        .collapsible(false)
+        .resizable(false)
+        .fixed_size([500.0, 230.0])
+        .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+
+            ui.label(
+                RichText::new(
+                    crate::i18n::tr(lang, "This project already contains existing translation data ({count} items).")
+                        .replace("{count}", &existing_count.to_string()),
+                )
+                .font(semibold(12.0))
+                .color(t.text_strong),
+            );
+
+            ui.label(
+                RichText::new(crate::i18n::tr(
+                    lang,
+                    "To save AI quota and processing time, you can translate only untranslated items, or replace existing data with fresh AI translations.",
+                ))
+                .font(FontId::proportional(11.0))
+                .color(t.text_dim),
+            );
+
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(6.0);
+
+            ui.horizontal(|ui| {
+                if ui
+                    .add_sized(
+                        [185.0, 26.0],
+                        egui::Button::new(
+                            RichText::new(crate::i18n::tr(lang, "Translate Untranslated Only"))
+                                .font(semibold(11.0))
+                                .color(Color32::WHITE),
+                        )
+                        .fill(t.accent_strong),
+                    )
+                    .on_hover_text(crate::i18n::tr(lang, "Keep existing translations and translate only untranslated items to conserve AI quota"))
+                    .clicked()
+                {
+                    chosen_replace = Some(false);
+                    close = true;
+                }
+
+                if ui
+                    .add_sized(
+                        [165.0, 26.0],
+                        egui::Button::new(
+                            RichText::new(crate::i18n::tr(lang, "Replace Existing Data"))
+                                .font(semibold(11.0))
+                                .color(t.caption_close_text),
+                        )
+                        .fill(t.caption_close),
+                    )
+                    .on_hover_text(crate::i18n::tr(lang, "Clear existing translations and re-translate all units from scratch with AI"))
+                    .clicked()
+                {
+                    chosen_replace = Some(true);
+                    close = true;
+                }
+
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.button(crate::i18n::tr(lang, "Cancel")).clicked() {
+                        close = true;
+                    }
+                });
+            });
+        });
+
+    if close {
+        state.show_translate_guard_dialog = false;
+    }
+
+    if let Some(replace) = chosen_replace {
+        start_translate_stage(app, ctx, state, replace);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5567,6 +5875,58 @@ mod tests {
         // Cancel dialog
         state.show_guard_dialog = false;
         assert!(!state.show_guard_dialog);
+    }
+
+    #[test]
+    fn test_ai_translation_guard_dialog_and_existing_counts() {
+        let mut state = OrchestratorWorkspaceState::default();
+        assert!(!state.show_translate_guard_dialog);
+        assert_eq!(count_existing_translations(&state, None), 0);
+
+        // Add an entry to TM
+        state.tm.insert(pubgen_core::translation::TmEntry {
+            source: "Luas Panen".into(),
+            target: "Harvested Area".into(),
+            origin: pubgen_core::translation::TmOrigin::Reviewed,
+            role: "table_header".into(),
+            updated: pubgen_core::translation::now_stamp(),
+        });
+        assert_eq!(count_existing_translations(&state, None), 1);
+
+        // Trigger translate guard dialog
+        state.show_translate_guard_dialog = true;
+        assert!(state.show_translate_guard_dialog);
+
+        // Cancel dialog
+        state.show_translate_guard_dialog = false;
+        assert!(!state.show_translate_guard_dialog);
+    }
+
+    #[test]
+    fn test_ai_translation_start_stage_replace_and_keep_modes() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        let mut state = OrchestratorWorkspaceState::default();
+        state.cards.push(PublicationCard::new_with(CardKind::Table, "Produksi Padi", "Tabel", "csv/padi.csv", 1, true));
+        state.cards[0].title_en = "Rice Production".into();
+        state.tm.insert(pubgen_core::translation::TmEntry {
+            source: "Produksi Padi".into(),
+            target: "Rice Production".into(),
+            origin: pubgen_core::translation::TmOrigin::Reviewed,
+            role: "card_title".into(),
+            updated: pubgen_core::translation::now_stamp(),
+        });
+
+        // Mode 1: Keep existing (replace_existing = false) with all units already in memory
+        start_translate_stage(&mut app, &ctx, &mut state, false);
+        assert!(state.translate_job.is_none(), "no AI job should be spawned when everything is already translated");
+        assert_eq!(state.cards[0].title_en, "Rice Production");
+        assert!(state.tm.lookup("Produksi Padi").is_some());
+
+        // Mode 2: Replace existing (replace_existing = true) resets existing data so it can be re-translated
+        start_translate_stage(&mut app, &ctx, &mut state, true);
+        assert!(state.cards[0].title_en.is_empty(), "cards title_en should be cleared for fresh translation");
+        assert!(state.tm.lookup("Produksi Padi").is_none(), "memory should be cleared for fresh translation");
     }
 
     #[test]
@@ -5926,6 +6286,9 @@ mod tests {
         let state = get_state(&ctx);
         assert_eq!(state.tm.lookup("Luas Wilayah").map(|entry| entry.target.as_str()), Some("Total Area"));
         assert_eq!(state.glossary_pairs, vec![("Kecamatan".to_string(), "Subdistrict".to_string())]);
+        crate::dock::pubgen::with_state(&ctx, |pubgen_st| {
+            assert_eq!(pubgen_st.translations.get("Luas Wilayah").map(String::as_str), Some("Total Area"));
+        });
     }
 
     #[test]
@@ -6037,6 +6400,26 @@ mod tests {
                 cover_card.cover_inside_back = true;
             }
 
+            // In DDA publications, G00, G01, G02 are TOC cards (Daftar Isi, Daftar Tabel, Daftar Grafik)
+            for card in state.cards.iter_mut() {
+                if card.chapter_id == "G00" {
+                    card.kind = CardKind::Toc;
+                    card.title = "Daftar Isi".into();
+                    card.title_en = "Table of Contents".into();
+                    card.toc_style = "TOC Paragraph".into();
+                } else if card.chapter_id == "G01" {
+                    card.kind = CardKind::Toc;
+                    card.title = "Daftar Tabel".into();
+                    card.title_en = "List of Tables".into();
+                    card.toc_style = "TOC Table".into();
+                } else if card.chapter_id == "G02" {
+                    card.kind = CardKind::Toc;
+                    card.title = "Daftar Grafik".into();
+                    card.title_en = "List of Figures".into();
+                    card.toc_style = "TOC Chart".into();
+                }
+            }
+
             // Run end-to-end generation
             let mut app = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
             app.run("file.new", serde_json::json!({})).unwrap();
@@ -6085,6 +6468,94 @@ mod tests {
                     assert!(!it.label.contains("back_cover"), "Previous spread items must not contain back_cover: {}", it.label);
                 }
             }
+
+            // Verify that TOC overflow never overlaps Kata Pengantar or Daftar Grafik
+            let kp_story = doc.stories.values().find(|s| s.text.contains("merupakan seri publikasi untuk Masyarakat")).expect("Kata Pengantar story");
+            let kp_frame = kp_story.frames[0];
+            let kp_page = doc.page_of_item(kp_frame).expect("page of Kata Pengantar");
+            let (kp_si, _kp_pi) = doc.page_loc(kp_page).unwrap();
+            let kp_spread = &doc.spreads[kp_si];
+            let kp_page_items: Vec<_> = kp_spread.items.iter().filter(|it| doc.page_of_item(it.id) == Some(kp_page)).collect();
+            for it in &kp_page_items {
+                if let Some(tf) = it.text_frame() {
+                    let story_text = &doc.stories[&tf.story].text;
+                    assert!(!story_text.contains("Daftar Isi"), "Kata Pengantar page must not contain Daftar Isi: {story_text}");
+                    assert!(!story_text.contains("Daftar Tabel"), "Kata Pengantar page must not contain Daftar Tabel: {story_text}");
+                    assert!(!story_text.contains("Daftar Grafik"), "Kata Pengantar page must not contain Daftar Grafik: {story_text}");
+                }
+                assert_ne!(it.label, "pubgen_toc_continuation_header", "Kata Pengantar page must not contain TOC continuation header");
+            }
+
+            let dg_story = doc.stories.values().find(|s| s.text.contains("Daftar Grafik")).expect("Daftar Grafik story");
+            let dg_frame = dg_story.frames[0];
+            let dg_page = doc.page_of_item(dg_frame).expect("page of Daftar Grafik");
+            let (dg_si, _dg_pi) = doc.page_loc(dg_page).unwrap();
+            let dg_spread = &doc.spreads[dg_si];
+            let dg_page_items: Vec<_> = dg_spread.items.iter().filter(|it| doc.page_of_item(it.id) == Some(dg_page)).collect();
+            for it in &dg_page_items {
+                if let Some(tf) = it.text_frame() {
+                    let story_text = &doc.stories[&tf.story].text;
+                    assert!(!story_text.contains("Daftar Tabel"), "Daftar Grafik page must not contain Daftar Tabel: {story_text}");
+                    assert!(!story_text.contains("Table 04.02.01"), "Daftar Grafik page must not contain Table entries: {story_text}");
+                }
+                if it.label == "pubgen_toc_continuation_header" {
+                    let tf = it.text_frame().unwrap();
+                    let hdr_text = &doc.stories[&tf.story].text;
+                    assert!(!hdr_text.contains("Tabel"), "Daftar Grafik page must not contain Tabel continuation header");
+                }
+            }
+
+            // Verify DDA footer text taken directly from title2 of COVER sheet
+            assert!(
+                doc.stories.values().any(|s| s.text.contains("EAST KARAWANG DISTRICT IN FIGURES\u{e006}2026")),
+                "DDA footer must contain English title from title2 and year 2026"
+            );
+            for s in doc.stories.values() {
+                assert!(!s.text.contains("Cover Release:"), "Stories must not contain 'Cover Release:' artifact: {}", s.text);
+            }
+
+            // Verify Preface (B01_en) was inserted directly after Kata Pengantar (B01)
+            let pref_story =
+                doc.stories.values().find(|s| s.text.contains("publication series designed for the public")).expect("Preface English story");
+            let pref_frame = pref_story.frames[0];
+            let pref_page = doc.page_of_item(pref_frame).expect("page of Preface");
+            assert_eq!(pref_page, kp_page + 1, "Preface page must be immediately after Kata Pengantar page");
+
+            // Verify R03 and R04 cards do NOT have file_en pointing to Indonesian RTF
+            let r03_card = state.cards.iter().find(|c| c.chapter_id == "R03").expect("R03 card exists");
+            assert_eq!(r03_card.settings.get("file_en"), None, "R03 must not have file_en set to Indonesian RTF");
+            let r04_card = state.cards.iter().find(|c| c.chapter_id == "R04").expect("R04 card exists");
+            assert_eq!(r04_card.settings.get("file_en"), None, "R04 must not have file_en set to Indonesian RTF");
+
+            // Verify that collect_units gathers narrative paragraphs for R03 and R04
+            let draft = worksheet_draft(&state);
+            let units = pubgen_core::translation_units::collect_units(&draft);
+            assert!(
+                units.iter().any(|u| u.card_id == "R03" && u.role == pubgen_core::translation_units::UnitRole::NarrativeBody),
+                "collect_units must gather paragraphs for R03"
+            );
+            assert!(
+                units.iter().any(|u| u.card_id == "R04" && u.role == pubgen_core::translation_units::UnitRole::NarrativeBody),
+                "collect_units must gather paragraphs for R04"
+            );
+
+            // Verify that when TM has translations, generate_from_workspace places translated English into right column of BAB 04
+            let mut state_with_tm = state.clone();
+            state_with_tm.tm.insert(pubgen_core::translation::TmEntry {
+                source: "Dinamika Sosio-Ekonomi dan Ketenagakerjaan Karawang Timur".into(),
+                target: "Socio-Economic Dynamics and Employment in East Karawang".into(),
+                origin: pubgen_core::translation::TmOrigin::Ai,
+                role: "narrative_body".into(),
+                updated: pubgen_core::translation::now_stamp(),
+            });
+            let mut app2 = crate::DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+            app2.run("file.new", serde_json::json!({})).unwrap();
+            let _ = generate_from_workspace(&mut app2, &state_with_tm);
+            let doc2 = &app2.session.active().unwrap().doc;
+            assert!(
+                doc2.stories.values().any(|s| s.text.contains("Socio-Economic Dynamics and Employment in East Karawang")),
+                "AI translated body must be placed in document stories for BAB 04!"
+            );
         }
     }
 

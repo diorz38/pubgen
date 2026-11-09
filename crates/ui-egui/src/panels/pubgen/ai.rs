@@ -75,16 +75,24 @@ impl AiSetupDialog {
     /// thread needed).
     pub fn open(app: &DesignApp, st: &PubgenState) -> Self {
         let prefs = &app.session.prefs;
-        let groq_model =
-            if prefs.translation_groq_model.trim().is_empty() { "llama-3.3-70b-versatile".to_string() } else { prefs.translation_groq_model.clone() };
+        let (env_groq_key, env_groq_model) = get_groq_credentials(prefs);
+        let groq_key = if prefs.translation_groq_api_key.trim().is_empty() { env_groq_key } else { prefs.translation_groq_api_key.clone() };
+        let groq_model = if prefs.translation_groq_model.trim().is_empty() { env_groq_model } else { prefs.translation_groq_model.clone() };
+        let provider = match prefs.translation_provider.as_str() {
+            "groq" => PROVIDER_GROQ,
+            "custom" => PROVIDER_CUSTOM,
+            "local" => PROVIDER_LOCAL,
+            _ => {
+                if !groq_key.is_empty() {
+                    PROVIDER_GROQ
+                } else {
+                    PROVIDER_OFFLINE
+                }
+            }
+        };
         Self {
-            provider: match prefs.translation_provider.as_str() {
-                "groq" => PROVIDER_GROQ,
-                "custom" => PROVIDER_CUSTOM,
-                "local" => PROVIDER_LOCAL,
-                _ => PROVIDER_OFFLINE,
-            },
-            groq_key: prefs.translation_groq_api_key.clone(),
+            provider,
+            groq_key,
             groq_model,
             groq_models: Vec::new(),
             groq_models_error: None,
@@ -1438,7 +1446,26 @@ pub fn translated_body_rtf(st: &PubgenState, source_rtf: &str) -> Option<PathBuf
     }
     let source = resolve_catalog_related_file(&st.card1_path, source_rtf, "rtf")?;
     let bytes = std::fs::read(&source).ok()?;
-    let english = super::translate_stage::translated_body_rtf_bytes(&bytes, &|paragraph| st.translations.get(paragraph).cloned())?;
+    let english = super::translate_stage::translated_body_rtf_bytes(&bytes, &|paragraph| {
+        let trimmed = paragraph.trim();
+        if let Some(target) = st.translations.get(trimmed) {
+            return Some(target.clone());
+        }
+        let normalized = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+        if let Some(target) = st.translations.get(&normalized) {
+            return Some(target.clone());
+        }
+        let lines: Vec<&str> = trimmed.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        if lines.len() > 1 {
+            let mut joined = Vec::new();
+            for l in &lines {
+                let en = st.translations.get(*l)?;
+                joined.push(en.clone());
+            }
+            return Some(joined.join(" "));
+        }
+        None
+    })?;
     let dir = temp_dir();
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join(format!("{}_en.rtf", super::excel::sanitize_filename(source_rtf.trim_end_matches(".rtf"))));
@@ -1537,19 +1564,71 @@ impl std::fmt::Debug for BackendConfig {
     }
 }
 
+/// Helper to read Groq credentials from engine Prefs, falling back to process env
+/// or a local `.env` file (same pattern as Cloudflare in `ai_cover.rs`).
+pub fn get_groq_credentials(prefs: &designcraft_engine::Prefs) -> (String, String) {
+    let mut key = prefs.translation_groq_api_key.trim().to_string();
+    let mut model = prefs.translation_groq_model.trim().to_string();
+
+    if key.is_empty()
+        && let Ok(v) = std::env::var("GROQ_API_KEY").or_else(|_| std::env::var("GROQ_KEY"))
+    {
+        key = v.trim().to_string();
+    }
+    if model.is_empty()
+        && let Ok(v) = std::env::var("GROQ_MODEL")
+    {
+        model = v.trim().to_string();
+    }
+
+    if (key.is_empty() || model.is_empty())
+        && let Ok(content) = std::fs::read_to_string(".env")
+    {
+        for line in content.lines() {
+            let line = line.trim();
+            if line.starts_with('#') || line.is_empty() {
+                continue;
+            }
+            if let Some((k, v)) = line.split_once('=') {
+                let k = k.trim();
+                let v = v.trim().trim_matches('"').trim_matches('\'').trim();
+                if key.is_empty() && (k.eq_ignore_ascii_case("GROQ_API_KEY") || k.eq_ignore_ascii_case("GROQ_KEY")) {
+                    key = v.to_string();
+                } else if model.is_empty() && k.eq_ignore_ascii_case("GROQ_MODEL") {
+                    model = v.to_string();
+                }
+            }
+        }
+    }
+
+    if model.is_empty() {
+        model = "llama-3.3-70b-versatile".to_string();
+    }
+    (key, model)
+}
+
 /// The backend the panel should use right now from the persisted prefs. `None` when
 /// the selected provider is not configured; never falls back to a different provider.
 pub fn backend_config_from_prefs(app: &DesignApp) -> Option<BackendConfig> {
     let p = &app.session.prefs;
-    let cfg = match p.translation_provider.as_str() {
+    let (env_groq_key, env_groq_model) = get_groq_credentials(p);
+    let selected_provider = match p.translation_provider.as_str() {
+        "groq" => "groq",
+        "custom" => "custom",
+        "local" => "local",
+        _ => {
+            if !env_groq_key.is_empty() {
+                "groq"
+            } else {
+                p.translation_provider.as_str()
+            }
+        }
+    };
+    let cfg = match selected_provider {
         "groq" => BackendConfig {
             provider: "groq".into(),
-            key: p.translation_groq_api_key.trim().to_string(),
-            model: if p.translation_groq_model.trim().is_empty() {
-                "llama-3.3-70b-versatile".to_string()
-            } else {
-                p.translation_groq_model.trim().to_string()
-            },
+            key: if !p.translation_groq_api_key.trim().is_empty() { p.translation_groq_api_key.trim().to_string() } else { env_groq_key },
+            model: if !p.translation_groq_model.trim().is_empty() { p.translation_groq_model.trim().to_string() } else { env_groq_model },
             base_url: "https://api.groq.com/openai/v1".into(),
         },
         "custom" => BackendConfig {

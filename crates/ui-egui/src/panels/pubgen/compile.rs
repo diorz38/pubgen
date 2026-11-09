@@ -2728,7 +2728,9 @@ pub(crate) fn compile_card_ui(app: &mut DesignApp, ui: &mut Ui, st: &mut PubgenS
     // Shared Cloudflare free-tier remaining (from the Supabase tracker) — shown in
     // the compile/download card as well, per the quota-notification requirement.
     if let Some(n) = st.cover_quota_covers {
-        ui.add(egui::Label::new(RichText::new(format!("Cloudflare AI: ~{n} covers left today")).size(10.0).color(t.text_dim)));
+        ui.add(egui::Label::new(
+            RichText::new(format!("Cloudflare AI: ~{n} covers left today")).font(egui::FontId::proportional(11.0)).color(t.text_dim),
+        ));
     }
 
     // Modal dialog to create a new pubgen_project.json

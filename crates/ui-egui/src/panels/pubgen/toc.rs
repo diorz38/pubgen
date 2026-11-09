@@ -611,6 +611,11 @@ pub(crate) fn enrich_toc_story(
         let section_en_col_idx = st.card1_headers.iter().position(|h| {
             h.eq_ignore_ascii_case("section_en") || h.eq_ignore_ascii_case("section_title_en") || h.eq_ignore_ascii_case("subtitle_en")
         });
+        let title_en_col_idx = st
+            .card1_headers
+            .iter()
+            .position(|h| h.eq_ignore_ascii_case("title_en") || h.eq_ignore_ascii_case("titleen") || h.eq_ignore_ascii_case("judul_en"))
+            .unwrap_or(st.card1_title_en_col);
 
         for (raw_title, page_part) in coalesced {
             // Check if this line is an existing TOC self-entry
@@ -791,8 +796,30 @@ pub(crate) fn enrich_toc_story(
                     let display_num =
                         if clean_num.split('.').count() >= 3 || has_meta { normalize_toc_number(clean_num) } else { clean_num.to_string() };
 
-                    let wrapped =
+                    let en_title_candidate = if st.bilingual_output || st.toc_pair_bilingual {
+                        matched_row
+                            .and_then(|r| r.get(title_en_col_idx))
+                            .map(String::as_str)
+                            .filter(|s| !s.trim().is_empty())
+                            .or_else(|| st.translations.get(clean_title.trim()).map(String::as_str).filter(|s| !s.trim().is_empty()))
+                            .or_else(|| st.translations.get(raw_title.trim()).map(String::as_str).filter(|s| !s.trim().is_empty()))
+                    } else {
+                        None
+                    };
+
+                    let clean_en = en_title_candidate
+                        .map(|en| strip_tablepage_title_prefix(en, &matched_num, &matched_type).to_string())
+                        .filter(|en| !en.is_empty() && !en.eq_ignore_ascii_case(&clean_title));
+
+                    let wrapped_id =
                         if plan.hanging { wrap_tablepage_title(&clean_title, width, hanging_indent, page_part.as_deref()) } else { clean_title };
+                    let wrapped = if let Some(ref en) = clean_en {
+                        let wrapped_en =
+                            if plan.hanging { wrap_tablepage_title(en, width, hanging_indent, page_part.as_deref()) } else { en.clone() };
+                        format!("{wrapped_id}{}{wrapped_en}", designcraft_doc::story::FORCED_LINE_BREAK)
+                    } else {
+                        wrapped_id
+                    };
                     let entry = if let Some(p_str) = &page_part {
                         if !display_num.is_empty() { format!("{display_num}\t{wrapped}\t{p_str}") } else { format!("{wrapped}\t{p_str}") }
                     } else {
@@ -841,10 +868,32 @@ pub(crate) fn enrich_toc_story(
                     prefix_opt = Some(expected_prefix);
                 }
 
-                let title_to_use = if let Some(prefix) = prefix_opt { format!("{prefix} {raw_title}") } else { raw_title.to_string() };
+                let title_to_use = if let Some(ref prefix) = prefix_opt { format!("{prefix} {raw_title}") } else { raw_title.to_string() };
 
-                let wrapped_title =
-                    if plan.hanging { wrap_toc_title(&title_to_use, width, hanging_indent, page_part.as_deref()) } else { title_to_use };
+                let en_title_candidate = if st.bilingual_output || st.toc_pair_bilingual {
+                    matched_row
+                        .and_then(|r| r.get(title_en_col_idx))
+                        .map(String::as_str)
+                        .filter(|s| !s.trim().is_empty())
+                        .or_else(|| st.translations.get(clean_title.trim()).map(String::as_str).filter(|s| !s.trim().is_empty()))
+                        .or_else(|| st.translations.get(raw_title.trim()).map(String::as_str).filter(|s| !s.trim().is_empty()))
+                } else {
+                    None
+                };
+
+                let clean_en = en_title_candidate
+                    .map(|en| strip_tablepage_title_prefix(en, &matched_num, &matched_type).to_string())
+                    .filter(|en| !en.is_empty() && !en.eq_ignore_ascii_case(&clean_title));
+
+                let wrapped_id = if plan.hanging { wrap_toc_title(&title_to_use, width, hanging_indent, page_part.as_deref()) } else { title_to_use };
+                let wrapped_title = if let Some(ref en) = clean_en {
+                    let en_with_prefix = if let Some(ref prefix) = prefix_opt { format!("{prefix} {en}") } else { en.clone() };
+                    let wrapped_en =
+                        if plan.hanging { wrap_toc_title(&en_with_prefix, width, hanging_indent, page_part.as_deref()) } else { en_with_prefix };
+                    format!("{wrapped_id}{}{wrapped_en}", designcraft_doc::story::FORCED_LINE_BREAK)
+                } else {
+                    wrapped_id
+                };
 
                 if let Some(p_str) = &page_part {
                     new_lines.push(format!("{wrapped_title}\t{p_str}"));
@@ -1382,7 +1431,7 @@ pub(crate) fn apply_toc_post_process(
 
     ensure_toc_entry_style(app, width, plan.hanging, hanging_indent, plan.layout, plan.entry_prefix());
 
-    if let Ok(af_res) = app.run("text.autoflow", json!({"story": sid.0, "maxPages": 50}))
+    if let Ok(af_res) = app.run("text.autoflow", json!({"story": sid.0, "maxPages": 50, "insert": true}))
         && let Some(extra) = af_res.get("pagesAdded").and_then(Value::as_u64)
     {
         pages_added += extra;
@@ -1578,7 +1627,7 @@ pub(crate) fn sync_toc_continuation_headers(
         });
 
         if resized_any {
-            if let Ok(af_res) = app.run("text.autoflow", json!({"story": sid.0, "maxPages": 50}))
+            if let Ok(af_res) = app.run("text.autoflow", json!({"story": sid.0, "maxPages": 50, "insert": true}))
                 && let Some(extra) = af_res.get("pagesAdded").and_then(Value::as_u64)
             {
                 pages_added += extra;
@@ -2368,6 +2417,58 @@ pub(crate) mod tests {
         let toc = active.doc.tocs.last().expect("table of contents");
         let text = active.doc.story(toc.story).expect("TOC story").text.clone();
         assert!(text.contains("Proporsi fisik daratan / Physical proportions of the landmass"), "the rebuild keeps the pairing: {text}");
+    }
+
+    #[test]
+    fn test_toc_tablepage_bilingual_next_line_italic() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+
+        let mut st = PubgenState {
+            bilingual_output: true,
+            toc_kind: 1,         // Daftar Tabel
+            toc_layout_style: 1, // TablePage style
+            toc_style: "TOC Entry".into(),
+            card1_headers: vec!["type".into(), "number".into(), "title".into(), "file".into(), "template".into(), "title_en".into()],
+            card1_records: vec![vec![
+                "Tabel".into(),
+                "1.1".into(),
+                "Luas Daerah Menurut Desa/Kelurahan".into(),
+                "01_01.csv".into(),
+                "".into(),
+                "Total Area by Village/Urban Village".into(),
+            ]],
+            card1_type_col: 0,
+            card1_num_col: 1,
+            card1_title_col: 2,
+            card1_file_col: 3,
+            card1_title_en_col: 5,
+            card1_preset: 0,
+            card1_range_all: true,
+            ..Default::default()
+        };
+
+        execute_generate_pages(&mut app, &st).unwrap();
+
+        // Create TOC on page 0
+        crate::canvas::go_to_page(&mut app, 0);
+        let res = execute_add_toc(&mut app, &mut st);
+        assert!(res.is_ok(), "execute_add_toc failed: {res:?}");
+
+        let active = app.session.active().unwrap();
+        let toc = active.doc.tocs.last().expect("table of contents");
+        let story = active.doc.story(toc.story).expect("TOC story");
+        let text = &story.text;
+
+        assert!(text.contains("Luas Daerah Menurut Desa/Kelurahan"), "must contain Indonesian title: {text}");
+        assert!(text.contains("Total Area by Village/Urban Village"), "must contain English title: {text}");
+        assert!(text.contains(designcraft_doc::story::FORCED_LINE_BREAK), "English must be on next line via FORCED_LINE_BREAK");
+
+        // Verify italic styling on the English portion
+        let pos = text.find(designcraft_doc::story::FORCED_LINE_BREAK).unwrap();
+        let en_start = pos + designcraft_doc::story::FORCED_LINE_BREAK.len_utf8();
+        let en_style = &story.format_after(en_start).over.font_style;
+        assert_eq!(en_style.as_deref(), Some("Italic"), "English line must be Italic");
     }
 
     #[test]

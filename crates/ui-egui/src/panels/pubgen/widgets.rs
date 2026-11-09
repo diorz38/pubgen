@@ -1310,7 +1310,7 @@ When there is no cover page yet, this behaves the same as unchecked.",
     // Shared Supabase counter (remaining neurons / 96), persisted in state after the
     // reporting job finishes so the label stays visible under the button.
     if is_ai && let Some(n) = st.cover_quota_covers {
-        ui.label(RichText::new(format!("Cloudflare AI: ~{n} covers left today")).size(10.0).color(t.text_dim));
+        ui.label(RichText::new(format!("Cloudflare AI: ~{n} covers left today")).font(egui::FontId::proportional(11.0)).color(t.text_dim));
     }
 
     if let Some(pending) = &st.cover_batch_pending {

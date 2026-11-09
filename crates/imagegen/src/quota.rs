@@ -13,6 +13,11 @@
 /// clamps steps to the 8-step ceiling (8 × 9.60 neurons).
 pub const NEURONS_PER_COVER: f64 = 96.0;
 
+/// Check remaining free-neuron budget for today (UTC) without consuming any quota.
+pub fn check_remaining(cred: &str) -> Option<f64> {
+    consume_cover(cred, 0.0)
+}
+
 /// Report `neurons` consumed on the given Cloudflare account and return the
 /// remaining free-neuron budget for today (UTC). `None` when Supabase is not
 /// configured or the report failed — never an error path for generation itself.
@@ -132,7 +137,7 @@ fn finalize_supabase_url(url: &str, id: &str) -> Option<String> {
 #[cfg(feature = "cloudflare")]
 fn supabase_creds() -> Option<(String, String)> {
     let mut url = std::env::var("SUPABASE_URL").unwrap_or_default();
-    let mut id = std::env::var("SUPABASE_ID").unwrap_or_default();
+    let mut id = std::env::var("SUPABASE_ID").or_else(|_| std::env::var("SUPABASE_PROJECT_ID")).unwrap_or_default();
     let mut key = std::env::var("SUPABASE_ANON_KEY").unwrap_or_default();
     if url.is_empty() || key.is_empty() {
         let content = std::fs::read_to_string(".env").ok()?;
@@ -145,7 +150,7 @@ fn supabase_creds() -> Option<(String, String)> {
                 let v = v.trim().trim_matches('"').trim_matches('\'').trim();
                 if url.is_empty() && k.trim().eq_ignore_ascii_case("SUPABASE_URL") {
                     url = v.to_string();
-                } else if id.is_empty() && k.trim().eq_ignore_ascii_case("SUPABASE_ID") {
+                } else if id.is_empty() && (k.trim().eq_ignore_ascii_case("SUPABASE_ID") || k.trim().eq_ignore_ascii_case("SUPABASE_PROJECT_ID")) {
                     id = v.to_string();
                 } else if key.is_empty() && k.trim().eq_ignore_ascii_case("SUPABASE_ANON_KEY") {
                     key = v.to_string();
