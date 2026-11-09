@@ -262,7 +262,20 @@ pub fn collect(d: &Document, entries: &[TocEntry], skip: &[StoryId]) -> Vec<Foun
             let first = page_titles.entry(abs).or_insert_with(|| page_first_box(d, abs));
             if !e.page_title.is_empty() {
                 let title = first.as_ref().map(|(_, t)| t.as_str());
-                if !title.is_some_and(|t| title_matches(t, &e.page_title)) {
+                if !title.is_some_and(|t| title_matches(t, &e.page_title)) && !page_has_matching_box(d, abs, &e.page_title) {
+                    continue;
+                }
+            }
+            if e.page_title.iter().any(|w| w.eq_ignore_ascii_case("bab")) {
+                let t_lower = text.trim_start().to_lowercase();
+                if t_lower.starts_with("tabel")
+                    || t_lower.starts_with("table")
+                    || t_lower.starts_with("grafik")
+                    || t_lower.starts_with("chart")
+                    || t_lower.starts_with("gambar")
+                    || t_lower.starts_with("peta")
+                    || t_lower.contains("subtitle")
+                {
                     continue;
                 }
             }
@@ -451,6 +464,27 @@ fn title_matches(text: &str, words: &[String]) -> bool {
         let w = w.trim();
         !w.is_empty() && text.get(..w.len()).is_some_and(|head| head.eq_ignore_ascii_case(w))
     })
+}
+
+fn page_has_matching_box(d: &Document, abs: usize, words: &[String]) -> bool {
+    let Some((si, _)) = d.page_loc(abs) else { return false };
+    let Some(spread) = d.spreads.get(si) else { return false };
+    for it in &spread.items {
+        if it.label.contains("header") || it.label.contains("footer") || it.label == "hf" {
+            continue;
+        }
+        let Some(tf) = it.text_frame() else { continue };
+        if d.page_of_item(it.id) != Some(abs) {
+            continue;
+        }
+        if let Some(story) = d.story(tf.story) {
+            let first_line = story.text.lines().next().unwrap_or("").trim();
+            if title_matches(first_line, words) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn ensure_styles(d: &mut Document, levels: u8, width: f64) {

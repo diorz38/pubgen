@@ -71,19 +71,21 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
         // expects; chart/map/narrative sheets keep the raw grid dump (the chart
         // renderer parses those directly).
         let merges = sheet_merges(&mut workbook, name);
-        let csv_bytes = if kind == CardKind::Table {
-            merged_table_csv(&rows, &merges, kv.get("theme").or_else(|| kv.get("tema")).map(String::as_str))
-                .map(String::into_bytes)
-                .unwrap_or(rows_to_csv(&rows)?)
+        let (csv_bytes, table_title_opt, table_settings) = if kind == CardKind::Table {
+            let (bytes, _meta, t_title, t_settings) =
+                process_table_sheet_csv_and_meta(&rows, &merges, kv.get("theme").or_else(|| kv.get("tema")).map(String::as_str))?;
+            (bytes, Some(t_title), t_settings)
         } else {
-            rows_to_csv(&rows)?
+            (rows_to_csv(&rows)?, None, BTreeMap::new())
         };
         csv.push((csv_path.clone(), csv_bytes));
 
         let mut card_source = Some(csv_path);
-        let mut card_title = kv.get("title").cloned().unwrap_or_else(|| first_nonempty_row(&rows).unwrap_or_else(|| name.clone()));
+        let mut card_title = table_title_opt
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| kv.get("title").cloned().unwrap_or_else(|| first_nonempty_row(&rows).unwrap_or_else(|| name.clone())));
 
-        let mut card_settings = BTreeMap::new();
+        let mut card_settings = table_settings;
         if let Some(ten) = kv.get("title_en").or_else(|| kv.get("judul_en")) {
             card_settings.insert("title_en".to_string(), serde_json::Value::String(ten.clone()));
         }
@@ -108,7 +110,8 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
             let upper_name = name.to_ascii_uppercase();
             let is_rxx = upper_name.starts_with('R') && upper_name[1..].chars().all(|c| c.is_ascii_digit() || c == '_');
             let div_tpl = kv.get("diivider").or_else(|| kv.get("divider")).or_else(|| kv.get("pembatas"));
-            let div_img = kv.get("image_div")
+            let div_img = kv
+                .get("image_div")
                 .or_else(|| kv.get("imagediv"))
                 .or_else(|| kv.get("image_divider"))
                 .or_else(|| kv.get("divider_image"))
@@ -357,11 +360,7 @@ fn process_narrative_sheet(
     let fen_fallback_exists = base_dir.join(&fen_fallback).is_file() || base_dir.join("rtf").join(&fen_fallback).is_file();
     let fen_choice: Option<String> = if let Some(fen) = fen_candidate {
         let fen_stem = Path::new(fen).file_stem().and_then(|s| s.to_str()).unwrap_or(fen);
-        if (fen == candidate_name.as_str() || fen_stem == stem) && fen_fallback_exists {
-            Some(fen_fallback)
-        } else {
-            Some(fen.to_string())
-        }
+        if (fen == candidate_name.as_str() || fen_stem == stem) && fen_fallback_exists { Some(fen_fallback) } else { Some(fen.to_string()) }
     } else if fen_fallback_exists {
         Some(fen_fallback)
     } else {
@@ -374,11 +373,7 @@ fn process_narrative_sheet(
     {
         let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
         let fen_stem = Path::new(fen).file_stem().and_then(|s| s.to_str()).unwrap_or(fen);
-        let fen_rtf = if ext == "rtf" {
-            Some(bytes)
-        } else {
-            designcraft_textimport::to_rtf(&format!("{fen_stem}.{ext}"), &bytes).ok()
-        };
+        let fen_rtf = if ext == "rtf" { Some(bytes) } else { designcraft_textimport::to_rtf(&format!("{fen_stem}.{ext}"), &bytes).ok() };
         if let Some(b) = fen_rtf {
             let fen_path = format!("rtf/{fen_stem}.rtf");
             if !texts.iter().any(|(p, _): &(String, Vec<u8>)| p == &fen_path) {
@@ -618,6 +613,138 @@ pub fn is_dda_chart_or_image_sheet(name: &str) -> bool {
 pub fn is_dda_divider_sheet(name: &str) -> bool {
     let upper = name.trim().to_ascii_uppercase();
     upper == "DIV" || upper.starts_with("DIV") || upper.starts_with("PEMBATAS")
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct TableSheetMetaCore {
+    pub chapter_title: Option<String>,
+    pub chapter_title_en: Option<String>,
+    pub section_title: Option<String>,
+    pub section_title_en: Option<String>,
+    pub table_title_row_idx: usize,
+}
+
+pub fn extract_table_sheet_metadata_core(rows: &[Vec<String>]) -> TableSheetMetaCore {
+    let mut meta = TableSheetMetaCore::default();
+    let max_scan = rows.len().min(12);
+
+    for (r, row) in rows.iter().enumerate().take(max_scan) {
+        let non_empty: Vec<&str> = row.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        if non_empty.is_empty() {
+            continue;
+        }
+
+        let first = non_empty[0];
+        let norm: String = first.trim_end_matches(':').chars().filter(|c| c.is_alphanumeric()).map(|c| c.to_ascii_lowercase()).collect();
+
+        let is_meta = match norm.as_str() {
+            "title" | "title1" | "chapter" | "bab" | "judul" => {
+                let val = if non_empty.len() >= 2 {
+                    non_empty[1].trim_matches('"').trim().to_string()
+                } else if let Some((_, v)) = first.split_once(':') {
+                    v.trim_matches('"').trim().to_string()
+                } else {
+                    String::new()
+                };
+                if !val.is_empty() {
+                    meta.chapter_title = Some(val);
+                }
+                true
+            }
+            "titleen" | "title1en" | "chapteren" | "baben" | "judulen" => {
+                let val = if non_empty.len() >= 2 {
+                    non_empty[1].trim_matches('"').trim().to_string()
+                } else if let Some((_, v)) = first.split_once(':') {
+                    v.trim_matches('"').trim().to_string()
+                } else {
+                    String::new()
+                };
+                if !val.is_empty() {
+                    meta.chapter_title_en = Some(val);
+                }
+                true
+            }
+            "subtitle" | "subtitle1" | "section" | "subbab" | "subjudul" => {
+                let val = if non_empty.len() >= 2 {
+                    non_empty[1].trim_matches('"').trim().to_string()
+                } else if let Some((_, v)) = first.split_once(':') {
+                    v.trim_matches('"').trim().to_string()
+                } else {
+                    String::new()
+                };
+                if !val.is_empty() {
+                    meta.section_title = Some(val);
+                }
+                true
+            }
+            "subtitleen" | "subtitle1en" | "sectionen" | "subbaben" | "subjudulen" => {
+                let val = if non_empty.len() >= 2 {
+                    non_empty[1].trim_matches('"').trim().to_string()
+                } else if let Some((_, v)) = first.split_once(':') {
+                    v.trim_matches('"').trim().to_string()
+                } else {
+                    String::new()
+                };
+                if !val.is_empty() {
+                    meta.section_title_en = Some(val);
+                }
+                true
+            }
+            "template" | "desain" | "style" | "theme" | "tabletheme" | "color" => true,
+            _ => false,
+        };
+
+        if !is_meta {
+            meta.table_title_row_idx = r;
+            return meta;
+        }
+    }
+
+    meta
+}
+
+fn process_table_sheet_csv_and_meta(
+    rows: &[Vec<String>],
+    merges: &[((usize, usize), (usize, usize))],
+    theme: Option<&str>,
+) -> Result<(Vec<u8>, TableSheetMetaCore, String, BTreeMap<String, serde_json::Value>), IngestError> {
+    let meta = extract_table_sheet_metadata_core(rows);
+    let start_r = meta.table_title_row_idx;
+    let sliced_rows = if start_r < rows.len() { &rows[start_r..] } else { rows };
+    let adjusted_merges: Vec<((usize, usize), (usize, usize))> = merges
+        .iter()
+        .filter_map(
+            |&((sc, sr), (ec, er))| {
+                if er < start_r { None } else { Some(((sc, sr.saturating_sub(start_r)), (ec, er.saturating_sub(start_r)))) }
+            },
+        )
+        .collect();
+    let bytes = merged_table_csv(sliced_rows, &adjusted_merges, theme).map(String::into_bytes).unwrap_or(rows_to_csv(sliced_rows)?);
+
+    let title =
+        rows.get(meta.table_title_row_idx).and_then(|r| r.iter().find(|c| !c.trim().is_empty())).map(|s| s.trim().to_string()).unwrap_or_default();
+
+    let mut settings = BTreeMap::new();
+    if let Some(ref ch) = meta.chapter_title {
+        settings.insert("chapter".to_string(), serde_json::Value::String(ch.clone()));
+        settings.insert("chapter_title".to_string(), serde_json::Value::String(ch.clone()));
+    }
+    if let Some(ref chen) = meta.chapter_title_en {
+        settings.insert("chapter_en".to_string(), serde_json::Value::String(chen.clone()));
+        settings.insert("chapter_title_en".to_string(), serde_json::Value::String(chen.clone()));
+    }
+    if let Some(ref sec) = meta.section_title {
+        settings.insert("section".to_string(), serde_json::Value::String(sec.clone()));
+        settings.insert("section_title".to_string(), serde_json::Value::String(sec.clone()));
+        settings.insert("subtitle".to_string(), serde_json::Value::String(sec.clone()));
+    }
+    if let Some(ref secen) = meta.section_title_en {
+        settings.insert("section_en".to_string(), serde_json::Value::String(secen.clone()));
+        settings.insert("section_title_en".to_string(), serde_json::Value::String(secen.clone()));
+        settings.insert("subtitle_en".to_string(), serde_json::Value::String(secen.clone()));
+    }
+
+    Ok((bytes, meta, title, settings))
 }
 
 fn extract_sheet_kv(rows: &[Vec<String>]) -> BTreeMap<String, String> {

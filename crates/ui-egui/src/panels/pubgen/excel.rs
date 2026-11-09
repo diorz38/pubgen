@@ -132,9 +132,8 @@ pub fn escape_csv_field(val: &str) -> String {
 }
 
 /// Parse the first row of an Excel sheet into `(type, number, title, file)`.
-///
-/// Example:
-/// Format table number into standard 4-digit dot-separated string "XX.XX" (e.g. "01.01").
+/// Format table number into standard 4-digit dot-separated string "XX.XX" (e.g. "01.01")
+/// or 6-digit dot-separated string "XX.XX.XX" (e.g. "02.01.01").
 pub fn format_table_number(num_val: &str, sheet_name: &str) -> String {
     let n = num_val.trim().trim_matches(|c| c == ':' || c == ';' || c == '.');
     let split_char = if n.contains('.') {
@@ -154,32 +153,65 @@ pub fn format_table_number(num_val: &str, sheet_name: &str) -> String {
             && let Ok(p2) = parts[1].parse::<u32>()
         {
             return format!("{p1:02}.{p2:02}");
+        } else if parts.len() == 3
+            && let Ok(p1) = parts[0].parse::<u32>()
+            && let Ok(p2) = parts[1].parse::<u32>()
+            && let Ok(p3) = parts[2].parse::<u32>()
+        {
+            return format!("{p1:02}.{p2:02}.{p3:02}");
         }
     }
 
     let f = sheet_name.trim().strip_suffix(".csv").unwrap_or(sheet_name.trim());
-    if f.contains('_') {
-        let parts: Vec<&str> = f.split('_').collect();
+    let f_clean = f.strip_suffix("_L").or_else(|| f.strip_suffix("_l")).unwrap_or(f);
+    if f_clean.contains('_') {
+        let parts: Vec<&str> = f_clean.split('_').collect();
         if parts.len() == 2
             && let Ok(p1) = parts[0].parse::<u32>()
             && let Ok(p2) = parts[1].parse::<u32>()
         {
             return format!("{p1:02}.{p2:02}");
+        } else if parts.len() == 3
+            && let Ok(p1) = parts[0].parse::<u32>()
+            && let Ok(p2) = parts[1].parse::<u32>()
+            && let Ok(p3) = parts[2].parse::<u32>()
+        {
+            return format!("{p1:02}.{p2:02}.{p3:02}");
         }
     }
 
     if !n.is_empty() { n.to_string() } else { sheet_name.to_string() }
 }
 
-/// Check if a sheet is named `XX_XX` (e.g. 01_01, 02_03, etc.).
-pub fn is_table_sheet_name(sheet_name: &str) -> bool {
-    let s = sheet_name.trim().strip_suffix(".csv").unwrap_or(sheet_name.trim());
+/// Check if a core sheet name is formatted as `XX_XX` or `XX_XX_XX` with all-numeric segments.
+pub fn is_table_sheet_core(s: &str) -> bool {
     let parts: Vec<&str> = s.split('_').collect();
-    if parts.len() == 2 && parts[0].chars().all(|c| c.is_ascii_digit()) && parts[1].chars().all(|c| c.is_ascii_digit()) {
-        !parts[0].is_empty() && !parts[1].is_empty()
+    (parts.len() == 2 || parts.len() == 3) && parts.iter().all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// Check whether an Excel sheet name represents a landscape continuation sheet (suffix "L" or "_L").
+/// For example: "02_01_L", "02_01L", "02_01_01_L", "02_01_01L".
+pub fn is_table_sheet_landscape(sheet_name: &str) -> bool {
+    let s = sheet_name.trim().strip_suffix(".csv").unwrap_or(sheet_name.trim());
+    let upper = s.to_ascii_uppercase();
+    if let Some(core) = upper.strip_suffix("_L") {
+        is_table_sheet_core(core)
+    } else if upper.ends_with('L') && upper.len() >= 2 {
+        let core = &upper[..upper.len() - 1];
+        is_table_sheet_core(core)
     } else {
         false
     }
+}
+
+/// Check if a sheet is named `XX_XX` or `XX_XX_XX` (e.g. 01_01, 02_03, 02_01_01, etc.),
+/// including landscape continuation sheets with suffix "L".
+pub fn is_table_sheet_name(sheet_name: &str) -> bool {
+    let s = sheet_name.trim().strip_suffix(".csv").unwrap_or(sheet_name.trim());
+    if is_table_sheet_core(s) {
+        return true;
+    }
+    is_table_sheet_landscape(s)
 }
 
 pub fn is_table_sheet_name_with_profile(sheet_name: &str, profile: &super::profiles::PubgenProfile) -> bool {
@@ -793,10 +825,11 @@ pub fn is_table_note_continuation_row(row: &[impl AsRef<str>]) -> bool {
         return false;
     }
     let first = non_empty[0];
-    let starts_with_marker = (first.len() >= 2 && first.chars().next().is_some_and(|c| c.is_ascii_digit()) && first.chars().nth(1).is_some_and(|c| c == '.' || c == ')'))
-        || (first.starts_with('(') && first.len() >= 3 && first.chars().nth(1).is_some_and(|c| c.is_ascii_digit()))
-        || first.starts_with('-')
-        || first.starts_with('*');
+    let starts_with_marker =
+        (first.len() >= 2 && first.chars().next().is_some_and(|c| c.is_ascii_digit()) && first.chars().nth(1).is_some_and(|c| c == '.' || c == ')'))
+            || (first.starts_with('(') && first.len() >= 3 && first.chars().nth(1).is_some_and(|c| c.is_ascii_digit()))
+            || first.starts_with('-')
+            || first.starts_with('*');
     let rest_empty = row.len() > 1 && row.iter().skip(1).all(|s| s.as_ref().trim().is_empty());
     starts_with_marker || rest_empty
 }
@@ -1566,10 +1599,123 @@ pub fn build_merged_table_headers(
     pubgen_core::excel::build_merged_table_headers(grid, merges, header_start_row, header_end_row, num_cols)
 }
 
+/// Metadata detected at the top of a table worksheet (e.g. Chapter title, Subtitle, and their English translations).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TableSheetMetadata {
+    pub chapter_title: Option<String>,
+    pub chapter_title_en: Option<String>,
+    pub section_title: Option<String>,
+    pub section_title_en: Option<String>,
+    pub table_title_row_idx: usize,
+}
+
+/// Auto-detect metadata rows (title, title_en, subtitle, subtitle_en, template, theme)
+/// at the top of an Excel table sheet, returning the metadata and the index of the actual table title row.
+pub fn extract_table_sheet_metadata(sheet: &ExcelSheetData) -> TableSheetMetadata {
+    let mut meta = TableSheetMetadata::default();
+    let max_scan = sheet.grid.len().min(12);
+
+    for (r, row) in sheet.grid.iter().enumerate().take(max_scan) {
+        let non_empty: Vec<&str> = row.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+        if non_empty.is_empty() {
+            continue;
+        }
+
+        let first = non_empty[0];
+        let norm: String = first.trim_end_matches(':').chars().filter(|c| c.is_alphanumeric()).map(|c| c.to_ascii_lowercase()).collect();
+
+        let is_meta = match norm.as_str() {
+            "title" | "title1" | "chapter" | "bab" | "judul" => {
+                let val = if non_empty.len() >= 2 {
+                    non_empty[1].trim_matches('"').trim().to_string()
+                } else if let Some((_, v)) = first.split_once(':') {
+                    v.trim_matches('"').trim().to_string()
+                } else {
+                    String::new()
+                };
+                if !val.is_empty() {
+                    meta.chapter_title = Some(val);
+                }
+                true
+            }
+            "titleen" | "title1en" | "chapteren" | "baben" | "judulen" => {
+                let val = if non_empty.len() >= 2 {
+                    non_empty[1].trim_matches('"').trim().to_string()
+                } else if let Some((_, v)) = first.split_once(':') {
+                    v.trim_matches('"').trim().to_string()
+                } else {
+                    String::new()
+                };
+                if !val.is_empty() {
+                    meta.chapter_title_en = Some(val);
+                }
+                true
+            }
+            "subtitle" | "subtitle1" | "section" | "subbab" | "subjudul" => {
+                let val = if non_empty.len() >= 2 {
+                    non_empty[1].trim_matches('"').trim().to_string()
+                } else if let Some((_, v)) = first.split_once(':') {
+                    v.trim_matches('"').trim().to_string()
+                } else {
+                    String::new()
+                };
+                if !val.is_empty() {
+                    meta.section_title = Some(val);
+                }
+                true
+            }
+            "subtitleen" | "subtitle1en" | "sectionen" | "subbaben" | "subjudulen" => {
+                let val = if non_empty.len() >= 2 {
+                    non_empty[1].trim_matches('"').trim().to_string()
+                } else if let Some((_, v)) = first.split_once(':') {
+                    v.trim_matches('"').trim().to_string()
+                } else {
+                    String::new()
+                };
+                if !val.is_empty() {
+                    meta.section_title_en = Some(val);
+                }
+                true
+            }
+            "template" | "desain" | "style" | "theme" | "tabletheme" | "color" => true,
+            _ => false,
+        };
+
+        if !is_meta {
+            meta.table_title_row_idx = r;
+            return meta;
+        }
+    }
+
+    meta
+}
+
+/// Convert a single worksheet to CSV string with merged headers, optional color theme, and custom start row.
+pub fn worksheet_to_csv_with_theme_and_row(sheet: &ExcelSheetData, fallback_theme: Option<&str>, start_row: usize) -> Option<String> {
+    let theme = extract_theme_from_sheet(sheet).or_else(|| fallback_theme.map(str::to_string));
+    if start_row == 0 {
+        pubgen_core::excel::merged_table_csv(&sheet.grid, &sheet.merges, theme.as_deref())
+    } else {
+        if start_row >= sheet.grid.len() {
+            return None;
+        }
+        let sliced_grid: Vec<Vec<String>> = sheet.grid[start_row..].to_vec();
+        let adjusted_merges: Vec<((usize, usize), (usize, usize))> = sheet
+            .merges
+            .iter()
+            .filter_map(
+                |&((sc, sr), (ec, er))| {
+                    if er < start_row { None } else { Some(((sc, sr.saturating_sub(start_row)), (ec, er.saturating_sub(start_row)))) }
+                },
+            )
+            .collect();
+        pubgen_core::excel::merged_table_csv(&sliced_grid, &adjusted_merges, theme.as_deref())
+    }
+}
+
 /// Convert a single worksheet to CSV string with merged headers and optional color theme.
 pub fn worksheet_to_csv_with_theme(sheet: &ExcelSheetData, fallback_theme: Option<&str>) -> Option<String> {
-    let theme = extract_theme_from_sheet(sheet).or_else(|| fallback_theme.map(str::to_string));
-    pubgen_core::excel::merged_table_csv(&sheet.grid, &sheet.merges, theme.as_deref())
+    worksheet_to_csv_with_theme_and_row(sheet, fallback_theme, 0)
 }
 
 /// Convert a single worksheet to CSV string with merged headers.
@@ -1588,6 +1734,7 @@ pub fn raw_sheet_to_csv(sheet: &ExcelSheetData) -> String {
     out
 }
 
+#[derive(Default)]
 struct CatalogEntryItem {
     entry_type: String,
     number: String,
@@ -1600,6 +1747,10 @@ struct CatalogEntryItem {
     title_en: Option<String>,
     file_en: Option<String>,
     theme: Option<String>,
+    chapter: Option<String>,
+    chapter_en: Option<String>,
+    section: Option<String>,
+    section_en: Option<String>,
 }
 
 /// Convert multiple Excel sheets into 1 catalog CSV and individual table CSVs.
@@ -1720,6 +1871,7 @@ pub fn convert_excel_to_csv_data_with_profile(
                 title_en: ten_val,
                 file_en: None,
                 theme: div_theme,
+                ..Default::default()
             });
             // DIV sheets are divider spreads, not tabular data
             continue;
@@ -1771,6 +1923,7 @@ pub fn convert_excel_to_csv_data_with_profile(
                         title_en: ten_val.clone(),
                         file_en: None,
                         theme: rtf_theme.clone(),
+                        ..Default::default()
                     });
                 }
             }
@@ -1786,6 +1939,7 @@ pub fn convert_excel_to_csv_data_with_profile(
                 title_en: ten_val,
                 file_en: fen_val,
                 theme: rtf_theme,
+                ..Default::default()
             });
             // Narrative chapters (RTF), not tabular data
             continue;
@@ -1820,6 +1974,7 @@ pub fn convert_excel_to_csv_data_with_profile(
                 title_en: title_en_val,
                 file_en: None,
                 theme: chart_theme,
+                ..Default::default()
             });
             // CXX sheets are graphic chart figures, not tabular data
             continue;
@@ -1885,6 +2040,7 @@ pub fn convert_excel_to_csv_data_with_profile(
                 title_en: title_en_val,
                 file_en: None,
                 theme: map_theme,
+                ..Default::default()
             });
             // MXX sheets are map chart figures, not tabular data
             continue;
@@ -1906,13 +2062,15 @@ pub fn convert_excel_to_csv_data_with_profile(
                 title_en: None,
                 file_en: None,
                 theme: note_theme,
+                ..Default::default()
             });
             // The A02 sheet carries a narrative RTF note, not tabular data
             continue;
         }
 
-        // 1. Process first row for catalog
-        let first_row = sheet.grid.first().cloned().unwrap_or_default();
+        // 1. Process table metadata and table title
+        let metadata = extract_table_sheet_metadata(sheet);
+        let first_row = sheet.grid.get(metadata.table_title_row_idx).cloned().unwrap_or_default();
         let (t_val, n_val, title_val, f_val) = parse_catalog_entry(&first_row, &safe_name);
         let tpl_val = extract_template_from_sheet(sheet);
         let tbl_theme = extract_theme_from_sheet(sheet).or_else(|| current_table_theme.clone());
@@ -1929,13 +2087,17 @@ pub fn convert_excel_to_csv_data_with_profile(
             title_en: None,
             file_en: None,
             theme: tbl_theme.clone(),
+            chapter: metadata.chapter_title,
+            chapter_en: metadata.chapter_title_en,
+            section: metadata.section_title,
+            section_en: metadata.section_title_en,
         });
 
         // 2. Process table or chart data for individual CSV
         if is_chart {
             let csv_content = raw_sheet_to_csv(sheet);
             table_csvs.push((format!("{safe_name}.csv"), csv_content));
-        } else if let Some(table_csv) = worksheet_to_csv_with_theme(sheet, tbl_theme.as_deref()) {
+        } else if let Some(table_csv) = worksheet_to_csv_with_theme_and_row(sheet, tbl_theme.as_deref(), metadata.table_title_row_idx) {
             table_csvs.push((format!("{safe_name}.csv"), table_csv));
         }
     }
@@ -1946,6 +2108,12 @@ pub fn convert_excel_to_csv_data_with_profile(
         e.title_en.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false) || e.file_en.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false)
     });
     let has_any_theme = entries.iter().any(|e| e.theme.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false));
+    let has_any_section = entries.iter().any(|e| {
+        e.chapter.as_ref().is_some_and(|s| !s.trim().is_empty())
+            || e.chapter_en.as_ref().is_some_and(|s| !s.trim().is_empty())
+            || e.section.as_ref().is_some_and(|s| !s.trim().is_empty())
+            || e.section_en.as_ref().is_some_and(|s| !s.trim().is_empty())
+    });
 
     let mut header_cols = vec!["type", "number", "title", "file"];
     if has_any_template {
@@ -1961,6 +2129,12 @@ pub fn convert_excel_to_csv_data_with_profile(
     }
     if has_any_theme {
         header_cols.push("theme");
+    }
+    if has_any_section {
+        header_cols.push("chapter");
+        header_cols.push("chapter_en");
+        header_cols.push("section");
+        header_cols.push("section_en");
     }
 
     let mut catalog_rows = Vec::with_capacity(1 + entries.len());
@@ -1981,6 +2155,12 @@ pub fn convert_excel_to_csv_data_with_profile(
         }
         if has_any_theme {
             row_cols.push(escape_csv_field(e.theme.as_deref().unwrap_or("")));
+        }
+        if has_any_section {
+            row_cols.push(escape_csv_field(e.chapter.as_deref().unwrap_or("")));
+            row_cols.push(escape_csv_field(e.chapter_en.as_deref().unwrap_or("")));
+            row_cols.push(escape_csv_field(e.section.as_deref().unwrap_or("")));
+            row_cols.push(escape_csv_field(e.section_en.as_deref().unwrap_or("")));
         }
         catalog_rows.push(row_cols.join(","));
     }
@@ -2385,6 +2565,87 @@ mod tests {
         assert_eq!(clean_excel_numeric_str("1.65"), "1.65");
         assert_eq!(clean_excel_numeric_str("42"), "42");
         assert_eq!(clean_excel_numeric_str("hello"), "hello");
+    }
+
+    #[test]
+    fn test_is_table_sheet_landscape_and_xx_xx_xx() {
+        assert!(is_table_sheet_name("01_01"));
+        assert!(is_table_sheet_name("02_03"));
+        assert!(is_table_sheet_name("02_01_01"));
+        assert!(is_table_sheet_name("02_01_L"));
+        assert!(is_table_sheet_name("02_01_01_L"));
+        assert!(is_table_sheet_name("02_01L"));
+        assert!(is_table_sheet_name("02_01_01L"));
+
+        assert!(!is_table_sheet_landscape("01_01"));
+        assert!(!is_table_sheet_landscape("02_01_01"));
+        assert!(is_table_sheet_landscape("02_01_L"));
+        assert!(is_table_sheet_landscape("02_01_01_L"));
+        assert!(is_table_sheet_landscape("02_01L"));
+        assert!(is_table_sheet_landscape("02_01_01L"));
+        assert!(is_table_sheet_landscape("02_01_L.csv"));
+
+        assert!(!is_table_sheet_name("COVER"));
+        assert!(!is_table_sheet_name("DIV"));
+        assert!(!is_table_sheet_name("R01"));
+    }
+
+    #[test]
+    fn test_extract_table_sheet_metadata_from_user_image1() {
+        // Image #1 structure:
+        // Row 1: title | Tabel 2 PEMERINTAHAN
+        // Row 2: title_en | Table 2 GOVERNMENT
+        // Row 3: subtitle | Tabel 02.01 Wilayah Administratif
+        // Row 4: subtitle_en | Table 02.01 Administrative Area
+        // Row 5: Tabel 02.01.01 Jumlah Rukun Warga (RW) dan Rukun Tetangga (RT)...
+        // Row 6: Desa/Kelurahan | Rukun Warga (RW) | Rukun Tetangga (RT)
+        let sheet = ExcelSheetData {
+            name: "02_01_01".into(),
+            grid: vec![
+                vec!["title".into(), "Tabel 2 PEMERINTAHAN".into()],
+                vec!["title_en".into(), "Table 2 GOVERNMENT".into()],
+                vec!["subtitle".into(), "Tabel 02.01 Wilayah Administratif".into()],
+                vec!["subtitle_en".into(), "Table 02.01 Administrative Area".into()],
+                vec![
+                    "Tabel 02.01.01 Jumlah Rukun Warga (RW) dan Rukun Tetangga (RT) Menurut Desa/Kelurahan di Kecamatan Karawang Timur, 2025".into(),
+                ],
+                vec!["Desa/Kelurahan".into(), "Rukun Warga (RW)".into(), "Rukun Tetangga (RT)".into()],
+            ],
+            merges: vec![],
+        };
+
+        let meta = extract_table_sheet_metadata(&sheet);
+        assert_eq!(meta.chapter_title.as_deref(), Some("Tabel 2 PEMERINTAHAN"));
+        assert_eq!(meta.chapter_title_en.as_deref(), Some("Table 2 GOVERNMENT"));
+        assert_eq!(meta.section_title.as_deref(), Some("Tabel 02.01 Wilayah Administratif"));
+        assert_eq!(meta.section_title_en.as_deref(), Some("Table 02.01 Administrative Area"));
+        assert_eq!(meta.table_title_row_idx, 4);
+
+        let first_row = sheet.grid.get(meta.table_title_row_idx).cloned().unwrap_or_default();
+        let (t, n, title, file) = parse_catalog_entry(&first_row, &sheet.name);
+        assert_eq!(t, "Tabel");
+        assert_eq!(n, "02.01.01");
+        assert!(title.starts_with("Jumlah Rukun Warga (RW)"));
+        assert_eq!(file, "02_01_01");
+
+        // Sheet without metadata rows
+        let simple_sheet = ExcelSheetData {
+            name: "01_01".into(),
+            grid: vec![vec!["Tabel 01.01 Jarak Antar Kecamatan".into()], vec!["Kecamatan".into(), "Jarak".into()]],
+            merges: vec![],
+        };
+        let simple_meta = extract_table_sheet_metadata(&simple_sheet);
+        assert_eq!(simple_meta.chapter_title, None);
+        assert_eq!(simple_meta.section_title, None);
+        assert_eq!(simple_meta.table_title_row_idx, 0);
+    }
+
+    #[test]
+    fn test_format_table_number_3_segments_and_landscape() {
+        assert_eq!(format_table_number("02.01.01", "02_01_01"), "02.01.01");
+        assert_eq!(format_table_number("", "02_01_01"), "02.01.01");
+        assert_eq!(format_table_number("", "02_01_01_L"), "02.01.01");
+        assert_eq!(format_table_number("02.01", "02_01"), "02.01");
     }
 
     #[test]

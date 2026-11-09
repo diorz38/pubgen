@@ -66,6 +66,12 @@ fn thumb(app: &mut DesignApp, ctx: &egui::Context, of: ThumbOf, h: f32) -> Optio
     Some(tex)
 }
 
+/// Pre-warms the thumbnail cache for a page so panel navigation and scrolling are instant.
+pub(crate) fn prewarm_page_thumbnail(app: &mut DesignApp, ctx: &egui::Context, abs: usize) -> bool {
+    let th = app.ui.pages_panel.page_size.page_h();
+    thumb(app, ctx, ThumbOf::Page(abs), th).is_some()
+}
+
 /// Thumbnail sizes of the Pages panel (Panel Options › Size), InDesign's six.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -488,7 +494,8 @@ pub fn show(app: &mut DesignApp, ui: &mut egui::Ui) {
                         egui::WidgetInfo::selected(egui::Role::Button, true, selected, format!("Page {}", app.session.page_label(abs)))
                     });
                     let tint = if selected { SELECTED_TINT } else { Color32::WHITE };
-                    match thumbnails.then(|| thumb(app, ui.ctx(), ThumbOf::Page(abs), th)).flatten() {
+                    let visible = ui.is_rect_visible(pr);
+                    match (thumbnails && visible).then(|| thumb(app, ui.ctx(), ThumbOf::Page(abs), th)).flatten() {
                         Some(tex) => {
                             ui.painter().image(tex.id(), pr, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), tint);
                         }

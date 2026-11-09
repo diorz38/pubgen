@@ -20,7 +20,7 @@ use serde_json::Value;
 use super::{
     PubgenState, TOC_NARRATIVE_STYLE, TocPlan, apply_excel_cover, execute_convert_excel, execute_generate_back_cover, execute_generate_front_cover,
     execute_generate_inside_cover, execute_generate_pages, generate_toc, is_chart_type, is_divider_type, is_ulasan_type, load_card1_csv,
-    toc_kind_title, toc_story_page,
+    rebuild_all_tocs, toc_kind_title, toc_story_page,
 };
 use crate::DesignApp;
 use crate::theme::Tokens;
@@ -1833,6 +1833,14 @@ pub(crate) fn compile_project(app: &mut DesignApp, p: &Value) -> Result<Value, S
     Ok(serde_json::json!({"started": true, "path": path}))
 }
 
+/// Rebuild all tables of contents in the active document.
+pub(crate) fn rebuild_project_tocs(app: &mut DesignApp, _p: &Value) -> Result<Value, String> {
+    let state_id = egui::Id::unique(super::PANEL_ID);
+    let st = app.egui_ctx.as_ref().and_then(|ctx| ctx.data(|d| d.get_temp::<PubgenState>(state_id))).unwrap_or_default();
+    let msg = rebuild_all_tocs(app, &st)?;
+    Ok(serde_json::json!({"rebuilt": true, "message": msg}))
+}
+
 /// Create a blank new publication project workspace tab.
 pub(crate) fn new_project(app: &mut DesignApp, _p: &Value) -> Result<Value, String> {
     if let Some(ctx) = app.egui_ctx.clone() {
@@ -2025,7 +2033,7 @@ pub(crate) fn save_pubgen_package_to(app: &mut DesignApp, save_path: &Path) -> R
 
     let mut content = pubgen_core::container::ProjectContent::default();
 
-    for (key, bytes) in &orch.cached_content {
+    for (key, bytes) in orch.cached_content.iter() {
         let clean = key.replace('\\', "/");
         if let Some(name) = clean.strip_prefix("csv/") {
             content.csv.push((name.to_string(), bytes.clone()));
@@ -2673,6 +2681,7 @@ pub(crate) fn compile_card_ui(app: &mut DesignApp, ui: &mut Ui, st: &mut PubgenS
     }
 
     let running = st.compile_job.is_some();
+    let has_doc = app.session.active().is_some();
     ui.horizontal(|ui| {
         let compile = ui.add_enabled(!running && !path.is_empty(), egui::Button::new(crate::i18n::tr(&lang, "Compile")));
         if compile.clicked() {
@@ -2683,6 +2692,22 @@ pub(crate) fn compile_card_ui(app: &mut DesignApp, ui: &mut Ui, st: &mut PubgenS
             && let Some(job) = &st.compile_job
         {
             job.cancel();
+        }
+        if !running && has_doc {
+            if ui
+                .button(crate::i18n::tr(&lang, "Rebuild TOC"))
+                .on_hover_text(crate::i18n::tr(&lang, "Rebuild all tables of contents in the active document without recompiling chapters"))
+                .clicked()
+            {
+                match rebuild_all_tocs(app, st) {
+                    Ok(msg) if !msg.is_empty() => st.compile_status = Some((msg, true)),
+                    Ok(_) => {
+                        st.compile_status =
+                            Some((crate::i18n::tr(&lang, "No Table of Contents found to rebuild in the active document").to_string(), false))
+                    }
+                    Err(e) => st.compile_status = Some((e, false)),
+                }
+            }
         }
     });
 
@@ -3673,6 +3698,14 @@ Grafik,01.02,Kepadatan,
     }
 
     #[test]
+    fn the_rebuild_toc_command_is_registered() {
+        let entry = crate::menus::UI_COMMANDS.iter().find(|c| c.0 == "pubgen.rebuildToc");
+        let (_, label, shortcut, _) = entry.expect("pubgen.rebuildToc must be a UI command");
+        assert_eq!(*label, "Rebuild Table of Contents");
+        assert_eq!(*shortcut, None);
+    }
+
+    #[test]
     fn the_command_names_a_missing_manifest() {
         let dir = temp_dir("command-missing");
         let mut app = app();
@@ -3791,8 +3824,8 @@ Grafik,01.02,Kepadatan,
         orch.meta_title = "Kabupaten Karawang Dalam Angka 2026".into();
         orch.meta_subtitle = "BPS Karawang".into();
         orch.meta_release_no = "1234.56".into();
-        orch.cached_content.insert("csv/test.csv".into(), b"col1,col2\nval1,val2\n".to_vec());
-        orch.cached_content.insert("md/test.md".into(), b"# Chapter 1\n".to_vec());
+        std::sync::Arc::make_mut(&mut orch.cached_content).insert("csv/test.csv".into(), b"col1,col2\nval1,val2\n".to_vec());
+        std::sync::Arc::make_mut(&mut orch.cached_content).insert("md/test.md".into(), b"# Chapter 1\n".to_vec());
         crate::dock::pubgen::workspace::set_state(&ctx, orch);
 
         let res = save_package_as(&mut app, &serde_json::json!({"path": pkg_path.to_string_lossy()})).unwrap();
@@ -3803,7 +3836,7 @@ Grafik,01.02,Kepadatan,
         // Clear state and open package
         let mut fresh = crate::dock::pubgen::workspace::OrchestratorWorkspaceState::default();
         fresh.meta_title.clear();
-        fresh.cached_content.clear();
+        std::sync::Arc::make_mut(&mut fresh.cached_content).clear();
         crate::dock::pubgen::workspace::set_state(&ctx, fresh);
 
         let open_res = open_project(&mut app, &serde_json::json!({"path": pkg_path.to_string_lossy()})).unwrap();

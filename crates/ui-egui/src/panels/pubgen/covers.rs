@@ -421,11 +421,7 @@ pub fn execute_generate_inside_cover(app: &mut DesignApp) -> Result<(), String> 
 
 pub fn find_back_cover_page(doc: &designcraft_doc::Document) -> Option<usize> {
     fn item_is_back_cover(it: &designcraft_doc::Item, doc: &designcraft_doc::Document) -> bool {
-        if it.label.contains("back_cover")
-            || it.name.contains("back_cover")
-            || it.label.contains("_back")
-            || it.name.contains("_back")
-        {
+        if it.label.contains("back_cover") || it.name.contains("back_cover") || it.label.contains("_back") || it.name.contains("_back") {
             return true;
         }
         if let designcraft_doc::Content::Graphic(g) = &it.content
@@ -658,12 +654,7 @@ pub fn resolve_agency_swatch(doc: &mut designcraft_doc::Document, color_spec: &s
 /// lone left page of its own from the start, so every copied shape stays on the back cover.
 fn ensure_back_cover_slot(app: &mut DesignApp) -> Result<(), String> {
     let needs_blank = app.session.active().is_some_and(|s| {
-        s.doc.settings.facing_pages
-            && s.doc
-                .spreads
-                .last()
-                .and_then(|sp| sp.pages.last())
-                .is_some_and(|p| p.side == designcraft_doc::PageSide::Left)
+        s.doc.settings.facing_pages && s.doc.spreads.last().and_then(|sp| sp.pages.last()).is_some_and(|p| p.side == designcraft_doc::PageSide::Left)
     });
     if !needs_blank {
         return Ok(());
@@ -951,12 +942,7 @@ pub fn execute_generate_back_cover(app: &mut DesignApp, st: &PubgenState) -> Res
         let lbl = it.label.to_lowercase();
         let nm = it.name.to_lowercase();
 
-        if lbl.contains("map")
-            || nm.contains("map")
-            || lbl.contains("peta")
-            || nm.contains("peta")
-            || lbl.contains("#slot:cover:map")
-        {
+        if lbl.contains("map") || nm.contains("map") || lbl.contains("peta") || nm.contains("peta") || lbl.contains("#slot:cover:map") {
             return false;
         }
 
