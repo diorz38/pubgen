@@ -61,7 +61,42 @@ Untuk membuat publikasi, kita hanya membutuhkan **satu folder kerja** yang beris
 
 ---
 
-### Langkah 3: Menerjemahkan ke Bahasa Inggris (Dual-Language)
+### Langkah 3: Mengenal Jenis Kartu & Aturan Format Nomor Halaman (*Page Number Style*)
+
+Di PubGen, publikasi dibagi menjadi beberapa **jenis kartu** dengan aturan penomoran halaman otomatis:
+
+#### A. Jenis-Jenis Kartu di PubGen:
+1. **Kartu Sampul (*Cover*):**
+   - Berisi informasi judul publikasi, foto sampul, dan logo instansi.
+2. **Kartu Bagian Depan (*Front Matter* / Kata Pengantar `B01` & Daftar Isi):**
+   - Berisi naskah *Kata Pengantar* (Indonesia), *Preface* (Inggris), serta *Daftar Isi*, *Daftar Tabel*, dan *Daftar Grafik*.
+3. **Kartu Pembatas Bab (*Chapter Divider*):**
+   - Menandai awal bab baru (misalnya *BAB 01 Geografi dan Iklim*). Halaman ini menampilkan nomor bab, judul bab dua bahasa, dan daftar subbab.
+4. **Kartu Ulasan Narasi (*Overview / Narrative* `R01, R02, dst.`):**
+   - Ulasan deskriptif bab yang disajikan dalam **dua kolom berdampingan** (kiri: Indonesia, kanan: Inggris).
+5. **Kartu Tabel Data (`01_01, 02_01_01, dst.`):**
+   - Menyajikan tabel statistik lengkap dengan judul bilingual, kepala kolom, baris data, catatan kaki (*Notes*), dan sumber (*Source*).
+6. **Kartu Grafik (`G01, G02, dst.`):**
+   - Berisi visualisasi grafik statistik beserta judul dan sumber data.
+
+#### B. Aturan Penomoran Halaman (*Page Numbering Rules*):
+PubGen secara otomatis menerapkan standar buku publikasi resmi:
+* **Bagian Awal (*Front Matter*): Angka Romawi Kecil (`i, ii, iii, iv, v, ...`)**
+  - **Sampul (`Cover`):** Halaman `i` (nomor disembunyikan/tidak dicetak di sampul).
+  - **Kata Pengantar:** Halaman `ii`.
+  - **Preface (Inggris):** Halaman `iii` (otomatis disisipkan setelah Kata Pengantar).
+  - **Daftar Isi & Daftar Tabel:** Halaman `iv, v, ...` seterusnya.
+* **Bagian Isi (*Body* / Bab & Tabel): Angka Arab (`1, 2, 3, 4, ...`)**
+  - Dimulai kembali dari **halaman 1** pada lembar pertama **Bab 1** (*Chapter Divider* atau *Ulasan*).
+  - Berlanjut terus sampai halaman terakhir publikasi.
+* **Aturan Posisi Nomor Halaman (Header / Footer):**
+  - **Halaman Ganjil (Kanan):** Nomor halaman berada di pojok kanan luar.
+  - **Halaman Genap (Kiri):** Nomor halaman berada di pojok kiri luar.
+  - Di sebelah nomor halaman tercantum *Running Title* (judul bab / judul publikasi) secara bilingual.
+
+---
+
+### Langkah 4: Menerjemahkan ke Bahasa Inggris (Dual-Language)
 
 PubGen menyediakan fitur terjemahan otomatis berbasis AI dan Memori Terjemahan:
 
@@ -75,7 +110,7 @@ PubGen menyediakan fitur terjemahan otomatis berbasis AI dan Memori Terjemahan:
 
 ---
 
-### Langkah 4: Menyimpan Proyek (*Save Project*)
+### Langkah 5: Menyimpan Proyek (*Save Project*)
 Sebelum mencetak halaman:
 1. Klik tombol **"Save Project"** (atau tekan `Ctrl + S`).
 2. Beri nama file, misalnya: `KECAMATAN KARAWANG TIMUR DALAM ANGKA.pubgen`.
@@ -83,7 +118,7 @@ Sebelum mencetak halaman:
 
 ---
 
-### Langkah 5: Menghasilkan Halaman Publikasi (*Generate Pages*)
+### Langkah 6: Menghasilkan Halaman Publikasi (*Generate Pages*)
 
 Ini adalah langkah utama yang menyusun seluruh buku publikasi:
 
@@ -106,7 +141,7 @@ Ini adalah langkah utama yang menyusun seluruh buku publikasi:
 
 ---
 
-### Langkah 6: Mengekspor ke PDF Siap Cetak
+### Langkah 7: Mengekspor ke PDF Siap Cetak
 1. Di menu utama, pilih **File** $\rightarrow$ **Export** $\rightarrow$ **PDF**.
 2. Pilih folder tujuan dan klik **Save**.
 3. File PDF siap dicetak atau diunggah ke website resmi BPS.
