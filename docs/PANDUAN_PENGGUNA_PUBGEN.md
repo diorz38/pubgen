@@ -33,7 +33,59 @@ Untuk membuat publikasi, kita hanya membutuhkan **satu folder kerja** yang beris
 
 ---
 
-## 3. Langkah Demi Langkah: Membuat Publikasi DDA
+## 3. Aturan Baku Penamaan Sheet Excel (*Sheet Naming Rules*)
+
+Agar aplikasi PubGen dapat mengenali, mengelompokkan, dan menyusun halaman buku dengan benar, **struktur dan penamaan sheet di file Excel wajib mengikuti aturan berikut**:
+
+### 1. Dilarang Mengubah Pola Nama Sheet Standar
+Aplikasi membaca jenis konten berdasarkan nama sheet. Jangan mengubah format nama sheet standar:
+
+| Pola Nama Sheet | Jenis Halaman / Konten | Keterangan & Contoh dari Sample XLSX |
+|---|---|---|
+| `COVER` | **Halaman Sampul Depan** | Berisi metadata buku (judul, tahun, katalog, ISSN, instansi, file foto). |
+| `A02` *(atau `AXX`)* | **Halaman Hak Cipta / Redaksi** | Informasi tim penyusun, penerbit, dan legalitas publikasi. |
+| `B01` *(atau `BXX`)* | **Halaman Kata Pengantar / Preface** | Naskah Kata Pengantar BPS dan tanda tangan pimpinan. |
+| `R01`, `R02`, `R03`, `R04` | **Ulasan Deskriptif Bab (*Review Chapter*)** | Ulasan narasi bab dalam format teks dwibahasa (Indonesia - Inggris). |
+| `G00`, `G01`, `G02` | **Halaman Grafik Statistik (*Charts*)** | Halaman infografis atau grafik visual data statistik. |
+| `M03_02` | **Halaman Peta Tematik (*Maps*)** | Halaman visualisasi peta wilayah/tematik kecamatan. |
+| `01_01`, `02_01_01`, dst. | **Tabel Data Statistik** | Tabel data lengkap dengan header baris/kolom, catatan, dan sumber. |
+| `note` | **Catatan Teknis / Penjelasan Data** | Lembar penjelasan istilah statistik atau catatan teknis tambahan. |
+
+### 2. Aturan Menambahkan Sheet Ulasan Bab (*Review Chapter*)
+Jika Anda ingin menambahkan ulasan narasi bab baru:
+* Nama sheet **wajib** diawali huruf kapital **`R`** dan diikuti **2 digit nomor bab** dengan *leading zero*.
+* **Pola:** `RXX` (di mana `XX` adalah nomor bab `01` sampai `99`).
+* **Contoh Benar:**
+  - `R01` $\rightarrow$ Ulasan Bab 1 (Geografi dan Iklim)
+  - `R02` $\rightarrow$ Ulasan Bab 2 (Pemerintahan)
+  - `R03` $\rightarrow$ Ulasan Bab 3 (Kependudukan)
+  - `R04` $\rightarrow$ Ulasan Bab 4 (Sosial)
+  - `R05` $\rightarrow$ Ulasan Bab 5 (Pertanian)
+* *Jangan gunakan nama seperti `Review01`, `R1`, atau `Ulasan Bab 1` karena aplikasi tidak akan mengenalinya sebagai kartu narasi dwibahasa.*
+
+### 3. Aturan Menambahkan Sheet Tabel Data Statistik
+Jika Anda ingin menambahkan sheet tabel baru ke dalam bab tertentu, ikuti rumus baku penamaan:
+$$\mathbf{XX\_XX\_XXZZ}$$
+* **`XX` Pertama:** 2 digit nomor Bab (*leading zero*, contoh: `01`, `02`, `03`, `04`).
+* **`XX` Kedua:** 2 digit nomor Grup Data / Subbab (*leading zero*, contoh: `01`, `02`).
+* **`XX` Ketiga:** 2 digit nomor Subgrup Data / Nomor Tabel (*leading zero*, contoh: `01`, `02`, `03`).
+* **`ZZ` (Opsional):** Huruf penanda halaman lanjutan, contoh huruf **`L`** (*Lanjutan*) jika isi tabel tersebut terpotong dan berlanjut ke halaman berikutnya.
+
+**Contoh Format Tabel:**
+* `01_01` $\rightarrow$ Bab 1, Tabel 1 (format ringkas 2 level).
+* `01_02` $\rightarrow$ Bab 1, Tabel 2.
+* `02_01_01` $\rightarrow$ Bab 2, Subbab 1, Tabel 1.
+* `02_02_01` $\rightarrow$ Bab 2, Subbab 2, Tabel 1.
+* `02_02_02` $\rightarrow$ Bab 2, Subbab 2, Tabel 2.
+* `03_01` $\rightarrow$ Bab 3, Tabel 1 (halaman pertama tabel).
+* `03_01L` $\rightarrow$ **Lanjutan** dari tabel `03_01` (aplikasi otomatis memberi judul *"Lanjutan/Continued..."* pada header).
+* `04_01_01` $\rightarrow$ Bab 4, Subbab 1, Tabel 1.
+* `04_01_02` $\rightarrow$ Bab 4, Subbab 1, Tabel 2.
+* `04_01_03` $\rightarrow$ Bab 4, Subbab 1, Tabel 3.
+
+---
+
+## 4. Langkah Demi Langkah: Membuat Publikasi DDA
 
 ### Langkah 1: Membuka Aplikasi dan Membuat Proyek Baru
 1. Buka aplikasi **PubGen Studio**.
