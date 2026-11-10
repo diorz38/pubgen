@@ -39,14 +39,32 @@ fn store_remaining(r: &ureq::Response, base_url: &str) {
     }
 }
 
-/// Units per request: small enough for free-tier rate caps, big enough to amortise.
+/// Units per request: small enough for free-tier rate caps, big enough to amortise. Raised for the
+/// larger-context endpoints (custom OpenAI-compatible, local); the caller's per-request character
+/// budget is what keeps one request from being truncated, not this count.
 #[cfg(feature = "online")]
-const BATCH: usize = 16;
+const BATCH: usize = 32;
 #[cfg(feature = "online")]
 const MAX_429_RETRIES: usize = 3;
+/// Free tiers cap at 15 requests per minute. 4.4 s between requests keeps a run at ~13.6/min so a
+/// burst never trips the limit; with the batched requests a whole publication is ~6 requests, so
+/// the pacing costs seconds, not minutes.
+#[cfg(feature = "online")]
+const MIN_REQUEST_INTERVAL: std::time::Duration = std::time::Duration::from_millis(4_400);
+
 /// Terminology pairs appended to the system prompt (bounded, sorted upstream).
 #[cfg(feature = "online")]
 const TERMS_IN_PROMPT: usize = 200;
+
+/// Shared by both request shapes: the figures are the part a translator must not touch.
+#[cfg(feature = "online")]
+const FIGURE_RULES: &str = "Figures are data, never prose. Never translate, round, spell out or \"improve\" one:\n- Keep every number exactly as written: 27, 1.234, 1,93, 1.234,56, 12,5%, 68.4, 2026.\n- Keep ratios, comparisons and scores exactly as written: 30:1, 2:3, 10:7, 1/4, 3 of 10. Never rewrite 30:1 as \"30 to 1\", \"30 - 1\", \"3:10\" or words.\n- Keep ranges, dates, years, table numbers, codes and units exactly as written.\n- Keep a figure in the same sentence it belongs to, and keep the % sign on it.\n- Do not add a figure the source does not contain, and do not drop one it does.";
+
+/// A chat model likes to wrap its answer in chatter — a preface, a note, an offer of options, a
+/// question back. That is prose the cell must not keep: a table cell came back holding
+/// "Next: what do you need data, translation, or stats?".
+#[cfg(feature = "online")]
+const ANSWER_ONLY_RULES: &str = "Answer with the translation only, as short as the source: no preface, no note, no explanation, no gloss in brackets, no options, and never a question back to the reader.";
 
 /// Online translator (Groq free tier; OpenAI-compatible chat completions).
 #[cfg_attr(not(feature = "online"), allow(dead_code))]
@@ -58,6 +76,10 @@ pub struct OnlineTranslator {
     /// Overridable for tests (a canned local listener stands in for api.groq.com).
     #[cfg(feature = "online")]
     base_url: String,
+    /// When the previous request went out, so the next one can wait out the free tier's cap
+    /// (15 requests per minute is the one the custom gateways enforce).
+    #[cfg(feature = "online")]
+    last_call: std::sync::Mutex<Option<std::time::Instant>>,
 }
 
 impl OnlineTranslator {
@@ -78,6 +100,8 @@ impl OnlineTranslator {
             agent: ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(30)).build(),
             #[cfg(feature = "online")]
             base_url: base_url.trim().trim_end_matches('/').to_string(),
+            #[cfg(feature = "online")]
+            last_call: std::sync::Mutex::new(None),
         }
     }
 
@@ -183,7 +207,7 @@ impl OnlineTranslator {
                     }
                     std::thread::sleep(std::time::Duration::from_secs(retry_after));
                 }
-                Err(TranslateError::Provider(_)) if !item_fallback => {
+                Err(TranslateError::Provider(_)) if !item_fallback && batch.len() > 1 => {
                     item_fallback = true;
                     attempt = 0;
                 }
@@ -194,9 +218,15 @@ impl OnlineTranslator {
 
     #[cfg(feature = "online")]
     fn request_once(&self, batch: &[String], src: Lang, tgt: Lang, glossary: Option<&[(String, String)]>) -> Result<Vec<String>, TranslateError> {
+        // One text does not need the array protocol, and asking for it is what broke against
+        // gateways whose model splits a single item into many (it answered 49 items for a batch
+        // of 1). A prose request has no count to get wrong.
+        if let [only] = batch {
+            return self.request_prose(only, src, tgt, glossary).map(|s| vec![s]);
+        }
         let body = request_body(&self.model, batch, src, tgt, glossary);
         let raw = self.post_chat(&body)?;
-        let v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| TranslateError::Provider(format!("bad JSON: {e}")))?;
+        let v = json_body(&raw)?;
         let content = v
             .pointer("/choices/0/message/content")
             .and_then(|c| c.as_str())
@@ -211,7 +241,38 @@ impl OnlineTranslator {
                 batch.first().map(|s| truncate(s, 40)).unwrap_or_default()
             )));
         }
-        Ok(parsed)
+        Ok(parsed.into_iter().map(|s| strip_chatter(&s)).collect())
+    }
+
+    /// One text, one prose answer: the salvage path when the array protocol is unusable (a model
+    /// that answers with a different number of items, or with commentary around them). A fenced or
+    /// array-shaped answer is still accepted — the caller only wants the words.
+    #[cfg(feature = "online")]
+    fn request_prose(&self, text: &str, src: Lang, tgt: Lang, glossary: Option<&[(String, String)]>) -> Result<String, TranslateError> {
+        if text.trim().is_empty() {
+            return Ok(String::new());
+        }
+        let body = prose_body(&self.model, text, src, tgt, glossary);
+        let raw = self.post_chat(&body)?;
+        let v = json_body(&raw)?;
+        let content = v
+            .pointer("/choices/0/message/content")
+            .and_then(|c| c.as_str())
+            .ok_or_else(|| TranslateError::Provider("response has no choices[0].message.content".into()))?
+            .trim();
+        let answer = if content.starts_with('[') || content.starts_with('`') {
+            match parse_translation(content) {
+                Ok(items) if !items.is_empty() => items.join(" "),
+                _ => content.to_string(),
+            }
+        } else {
+            content.trim_matches('"').trim().to_string()
+        };
+        let answer = strip_chatter(&answer);
+        if answer.trim().is_empty() {
+            return Err(TranslateError::Provider("the model returned an empty translation".into()));
+        }
+        Ok(answer)
     }
 
     /// One chat completion with a caller-supplied prompt (the narrative drafter). Same auth,
@@ -230,7 +291,7 @@ impl OnlineTranslator {
                     other => break other?,
                 }
             };
-            let v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| TranslateError::Provider(format!("bad JSON: {e}")))?;
+            let v = json_body(&raw)?;
             v.pointer("/choices/0/message/content")
                 .and_then(|c| c.as_str())
                 .map(str::to_string)
@@ -243,9 +304,27 @@ impl OnlineTranslator {
         }
     }
 
+    /// Wait out the free tier's request spacing before sending. Spacing is cheaper than being
+    /// rate-limited: a 429 costs a retry plus the gateway's own advertised wait.
+    #[cfg(feature = "online")]
+    fn pace(&self) {
+        if cfg!(test) {
+            return; // the suite's canned listener must not pay the pacing delay
+        }
+        let mut last = self.last_call.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(prev) = *last {
+            let gap = MIN_REQUEST_INTERVAL.saturating_sub(prev.elapsed());
+            if !gap.is_zero() {
+                std::thread::sleep(gap);
+            }
+        }
+        *last = Some(std::time::Instant::now());
+    }
+
     /// POST one chat-completions body; the model's raw JSON reply on 200.
     #[cfg(feature = "online")]
     fn post_chat(&self, body: &str) -> Result<String, TranslateError> {
+        self.pace();
         let mut req = self.agent.post(&format!("{}/chat/completions", self.base_url)).set("Content-Type", "application/json");
         if let Some(auth) = self.auth_header() {
             req = req.set("Authorization", &auth);
@@ -263,6 +342,11 @@ impl OnlineTranslator {
                 if code == 429 {
                     return Err(TranslateError::RateLimited(retry.unwrap_or(2)));
                 }
+                // Some gateways wrap their rate limit in a 503 and put the real 429 in the body.
+                // Treating that as a plain provider error ended a 178-text run after 64 of them.
+                if let Some(wait) = rate_limit_wait(&raw) {
+                    return Err(TranslateError::RateLimited(retry.unwrap_or(wait)));
+                }
                 // Never echo the key: the body names the endpoint problem only.
                 (code, raw)
             }
@@ -275,12 +359,57 @@ impl OnlineTranslator {
     }
 }
 
+/// The wait a rate-limited answer asks for, when a gateway reports its 429 inside another status
+/// (`HTTP 503 ... "[429]: Rate limit exceeded. Max 15 requests per minute ... Retry in 24s."`).
+/// `None` when the body says nothing about a rate limit.
+#[cfg(feature = "online")]
+fn rate_limit_wait(raw: &str) -> Option<u64> {
+    let lower = raw.to_ascii_lowercase();
+    if !(lower.contains("429") || lower.contains("rate limit") || lower.contains("too many requests")) {
+        return None;
+    }
+    let asked = lower.find("retry").and_then(|at| {
+        lower[at..].chars().skip_while(|c| !c.is_ascii_digit()).take_while(char::is_ascii_digit).collect::<String>().parse::<u64>().ok()
+    });
+    Some(asked.unwrap_or(2).clamp(1, 60))
+}
+
+/// Trailing lines a chat model wraps around its answer: a preface label, a note, an offer of
+/// options, a question back. Only the END of the answer is trimmed — a "Note:" that is part of the
+/// source text stays.
+#[cfg(feature = "online")]
+fn strip_chatter(text: &str) -> String {
+    let mut lines: Vec<&str> = text.lines().collect();
+    while let Some(last) = lines.last() {
+        let line = last.trim();
+        if line.is_empty() || is_chatter_line(line) {
+            lines.pop();
+        } else {
+            break;
+        }
+    }
+    if lines.is_empty() { text.trim().to_string() } else { lines.join("\n") }
+}
+
+#[cfg(feature = "online")]
+fn is_chatter_line(line: &str) -> bool {
+    let low = line.to_ascii_lowercase();
+    const PREFIXES: [&str; 10] =
+        ["next:", "next :", "note:", "note :", "translation:", "here is", "here's", "would you", "do you want", "let me know"];
+    if PREFIXES.iter().any(|p| low.starts_with(p)) {
+        return true;
+    }
+    // A question offering the reader choices instead of a translation.
+    low.contains('?') && ["do you", "would you", "shall i", "want me", "need me", "let me know", "what do you need"].iter().any(|p| low.contains(p))
+}
+
 /// One `temperature: 0` chat completion with a caller-supplied system/user prompt.
 #[cfg(feature = "online")]
 fn chat_body(model: &str, system: &str, user: &str) -> String {
     let mut body = serde_json::json!({
         "model": model,
         "temperature": 0,
+        "stream": false,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -294,6 +423,49 @@ fn chat_body(model: &str, system: &str, user: &str) -> String {
     body.to_string()
 }
 
+/// Read a chat-completion answer the way "OpenAI-compatible" gateways actually send it: as plain
+/// JSON, as an SSE `data: {...}` stream (several ignore `stream: false`), or as one object with
+/// something after it. A strict `from_str` reported those last two as
+/// `bad JSON: trailing characters at line 1 column N`, which blamed the base URL for a server
+/// quirk. Only the FIRST JSON value is kept.
+#[cfg(feature = "online")]
+fn json_body(raw: &str) -> Result<serde_json::Value, TranslateError> {
+    let text = raw.trim_start_matches('\u{feff}');
+    if let Some(v) = sse_body(text) {
+        return Ok(v);
+    }
+    match serde_json::Deserializer::from_str(text).into_iter::<serde_json::Value>().next() {
+        Some(Ok(v)) => Ok(v),
+        Some(Err(e)) => Err(TranslateError::Provider(format!("bad JSON: {e} — the endpoint answered: {}", truncate(text.trim(), 160)))),
+        None => Err(TranslateError::Provider("the endpoint returned an empty body".into())),
+    }
+}
+
+/// The whole answer rebuilt from an SSE stream, if `text` is one: a streamed chunk carries its
+/// words in `choices[0].delta.content`, a non-streamed object in `choices[0].message.content`.
+#[cfg(feature = "online")]
+fn sse_body(text: &str) -> Option<serde_json::Value> {
+    if !text.trim_start().starts_with("data:") {
+        return None;
+    }
+    let mut prose = String::new();
+    let mut whole = None;
+    for line in text.lines() {
+        let Some(payload) = line.trim_start().strip_prefix("data:") else { continue };
+        let payload = payload.trim();
+        if payload.is_empty() || payload == "[DONE]" {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) else { continue };
+        if v.pointer("/choices/0/message/content").is_some() {
+            whole = Some(v);
+        } else if let Some(t) = v.pointer("/choices/0/delta/content").and_then(|c| c.as_str()) {
+            prose.push_str(t);
+        }
+    }
+    whole.or_else(|| (!prose.is_empty()).then(|| serde_json::json!({"choices": [{"message": {"content": prose}}]})))
+}
+
 /// Units per request kept at module scope for the tests that build batches.
 #[cfg(feature = "online")]
 fn request_body(model: &str, batch: &[String], src: Lang, tgt: Lang, glossary: Option<&[(String, String)]>) -> String {
@@ -301,22 +473,19 @@ fn request_body(model: &str, batch: &[String], src: Lang, tgt: Lang, glossary: O
     let mut system = format!(
         "You are a translation engine. Translate each array item from {} to {}. Return a JSON \
          array of the same length and order. Keep numbers, proper nouns and formatting unchanged. \
-         Output only the JSON array.",
+         Output only the JSON array.\n\n{}\n\n{}",
         src.label(),
-        tgt.label()
+        tgt.label(),
+        FIGURE_RULES,
+        ANSWER_ONLY_RULES
     );
-    // Secondary net behind the deterministic whole-cell aliases: the terms shape the
-    // model's word choice inside sentences. Sorted and capped so the prompt is stable
-    // and bounded; `None` and an empty list keep today's prompt byte for byte.
-    if let Some(terms) = glossary.filter(|t| !t.is_empty()) {
-        let pairs: Vec<String> = terms.iter().take(TERMS_IN_PROMPT).map(|(id, en)| format!("{id} = {en}")).collect();
-        system.push_str(&format!("\n\nOfficial terminology you MUST use: {}.", pairs.join("; ")));
-    }
+    push_glossary_terms(&mut system, glossary);
     // Reasoning models burn hidden reasoning tokens that count against the provider's
     // TPM and add nothing to a translation. Pin the effort to low when supported.
     let mut body = serde_json::json!({
         "model": model,
         "temperature": 0,
+        "stream": false,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": items},
@@ -328,6 +497,55 @@ fn request_body(model: &str, batch: &[String], src: Lang, tgt: Lang, glossary: O
         obj.insert("reasoning_effort".into(), serde_json::json!("low"));
     }
     body.to_string()
+}
+
+/// The one-text request of the salvage path: no array, no count to get wrong.
+#[cfg(feature = "online")]
+fn prose_body(model: &str, text: &str, src: Lang, tgt: Lang, glossary: Option<&[(String, String)]>) -> String {
+    let mut system = format!(
+        "You are a translation engine. Translate the text from {} to {}. Keep the paragraph \
+         breaks. Return only the translation: no commentary, no quotes, no code fence.\n\n{}\n\n{}",
+        src.label(),
+        tgt.label(),
+        FIGURE_RULES,
+        ANSWER_ONLY_RULES
+    );
+    push_glossary_terms(&mut system, glossary);
+    let mut body = serde_json::json!({
+        "model": model,
+        "temperature": 0,
+        "stream": false,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": text},
+        ],
+    });
+    if model.contains("gpt-oss")
+        && let Some(obj) = body.as_object_mut()
+    {
+        obj.insert("reasoning_effort".into(), serde_json::json!("low"));
+    }
+    body.to_string()
+}
+
+/// Secondary net behind the deterministic whole-cell aliases: the terms shape the model's word
+/// choice inside sentences. Sorted and capped so the prompt is stable and bounded; `None` and an
+/// empty list leave the prompt unchanged.
+#[cfg(feature = "online")]
+fn push_glossary_terms(system: &mut String, glossary: Option<&[(String, String)]>) {
+    if let Some(terms) = glossary.filter(|t| !t.is_empty()) {
+        // An identity pair is a "don't translate" term: say so instead of listing `X = X` among the
+        // terminology, which would read as a translation. Masking already keeps it out of the text.
+        let is_keep = |(id, en): &(String, String)| id.eq_ignore_ascii_case(en);
+        let translate: Vec<String> = terms.iter().filter(|p| !is_keep(p)).take(TERMS_IN_PROMPT).map(|(id, en)| format!("{id} = {en}")).collect();
+        if !translate.is_empty() {
+            system.push_str(&format!("\n\nOfficial terminology you MUST use: {}.", translate.join("; ")));
+        }
+        let kept: Vec<String> = terms.iter().filter(|p| is_keep(p)).take(TERMS_IN_PROMPT).map(|(id, _)| id.clone()).collect();
+        if !kept.is_empty() {
+            system.push_str(&format!("\n\nNever translate these terms, keep them exactly as written: {}.", kept.join("; ")));
+        }
+    }
 }
 
 /// Strip a triple-backtick json fence if present, then parse the JSON array.
@@ -416,6 +634,17 @@ mod tests {
         let empty = request_body("m", &["Jumlah".into()], Lang::Indonesian, Lang::English, Some(&[]));
         assert_eq!(plain, empty);
         assert!(!plain.contains("Official terminology"), "{plain}");
+    }
+
+    #[test]
+    fn a_keep_term_is_asked_as_never_translate_not_as_a_translation() {
+        let terms = vec![("Citeureup".to_string(), "Citeureup".to_string()), ("Kecamatan".to_string(), "Subdistrict".to_string())];
+        let body = request_body("m", &["Kecamatan Citeureup".into()], Lang::Indonesian, Lang::English, Some(&terms));
+        let v: serde_json::Value = serde_json::from_str(&body).expect("request body is valid JSON");
+        let system = v.pointer("/messages/0/content").and_then(|c| c.as_str()).expect("system message");
+        assert!(system.contains("Never translate these terms, keep them exactly as written: Citeureup."), "{system}");
+        assert!(system.contains("Kecamatan = Subdistrict"), "{system}");
+        assert!(!system.contains("Citeureup = Citeureup"), "an identity pair is not a translation: {system}");
     }
 
     #[test]
@@ -551,5 +780,86 @@ mod tests {
         let mut t = OnlineTranslator::with_endpoint("   ", "m", &base);
         let cancel = AtomicBool::new(false);
         assert!(t.translate(&["Kecamatan".into()], Lang::Indonesian, Lang::English, None, &cancel, &mut |_, _| {}).is_ok());
+    }
+
+    #[test]
+    fn a_gateway_that_streams_anyway_is_read_as_whole_chunks() {
+        // Several "OpenAI-compatible" gateways answer with `data: {...}` even though the body
+        // asked for `stream: false`. That used to fail the setup check with
+        // "bad JSON: trailing characters at line 1 column N" and blame the base URL.
+        let chunk = |t: &str| format!("data: {}\n\n", serde_json::json!({"choices": [{"delta": {"content": t}}]}));
+        let reply = format!("{}{}data: [DONE]\n\n", chunk("[\"Regency\""), chunk("]"));
+        let base = canned_server(reply);
+        let mut t = OnlineTranslator::with_endpoint("", "m", &base);
+        let cancel = AtomicBool::new(false);
+        let out = t
+            .translate(&["Kabupaten".into()], Lang::Indonesian, Lang::English, None, &cancel, &mut |_, _| {})
+            .expect("a streamed reply is still a reply");
+        assert_eq!(out, vec!["Regency"]);
+    }
+
+    #[test]
+    fn a_second_object_after_the_answer_is_ignored() {
+        let reply = format!("{}", serde_json::json!({"choices": [{"message": {"content": "[\"Village\"]"}}]}));
+        let reply = format!("{reply}{}", serde_json::json!({"note": "a gateway log line"}));
+        let base = canned_server(reply);
+        let mut t = OnlineTranslator::with_endpoint("", "m", &base);
+        let cancel = AtomicBool::new(false);
+        let out =
+            t.translate(&["Desa".into()], Lang::Indonesian, Lang::English, None, &cancel, &mut |_, _| {}).expect("the first object is the answer");
+        assert_eq!(out, vec!["Village"]);
+    }
+
+    #[test]
+    fn requests_ask_for_a_non_streamed_answer() {
+        let body = request_body("m", &["Desa".into()], Lang::Indonesian, Lang::English, None);
+        let v: serde_json::Value = serde_json::from_str(&body).expect("body is JSON");
+        assert_eq!(v.get("stream").and_then(|s| s.as_bool()), Some(false), "{body}");
+        let plain = chat_body("m", "system", "user");
+        let v: serde_json::Value = serde_json::from_str(&plain).expect("body is JSON");
+        assert_eq!(v.get("stream").and_then(|s| s.as_bool()), Some(false), "{plain}");
+    }
+
+    #[test]
+    fn a_429_hidden_inside_a_503_is_read_as_a_rate_limit() {
+        // The gateway answered HTTP 503 with the real 429 in the body; that used to end a run.
+        let body = r#"{"error":{"message":"[x/free/deepseek-v4.1-flash] [429]: {\"error\":{\"message\":\"Rate limit exceeded. Max 15 requests per minute for this account. Retry in 24s.\"}}"}}"#;
+        assert_eq!(rate_limit_wait(body), Some(24));
+        assert_eq!(rate_limit_wait("HTTP 503: upstream unavailable"), None);
+        assert_eq!(rate_limit_wait("rate limited, retry soon"), Some(2));
+    }
+
+    #[test]
+    fn requests_are_spaced_under_the_free_tier_limit() {
+        // 15 requests per minute is the cap the custom gateways enforce; 4.4 s is ~13.6/min.
+        let secs = MIN_REQUEST_INTERVAL.as_secs_f32();
+        assert!((4.0..5.0).contains(&secs), "{secs}");
+    }
+
+    #[test]
+    fn the_chatter_after_a_translation_is_cut_off() {
+        let answered = "MA = Madrasah Aliyah\nLevel: SMA-equivalent (Grade 10-12)\nNext: what do you need data, translation, or stats?";
+        let cut = strip_chatter(answered);
+        assert!(!cut.contains("Next:"), "{cut}");
+        assert!(cut.contains("MA = Madrasah Aliyah"), "{cut}");
+
+        // A question back with no label goes too; a source sentence that asks something stays.
+        assert_eq!(strip_chatter("Terjemahan\nWould you like a shorter version?"), "Terjemahan");
+        assert_eq!(strip_chatter("Apakah data tersedia?"), "Apakah data tersedia?");
+
+        // Both request shapes ask for the answer alone.
+        let prose = prose_body("m", "teks", Lang::Indonesian, Lang::English, None);
+        assert!(prose.contains("question back"), "{prose}");
+        let array = request_body("m", &["teks".to_string(), "dua".to_string()], Lang::Indonesian, Lang::English, None);
+        assert!(array.contains("question back"), "{array}");
+    }
+
+    #[test]
+    fn a_single_text_is_asked_as_prose_not_as_an_array() {
+        // Asking one text with the array protocol is what a gateway answered with 49 items.
+        let body = prose_body("m", "Kecamatan Karawang Timur", Lang::Indonesian, Lang::English, None);
+        assert!(body.contains("Kecamatan Karawang Timur"));
+        assert!(!body.contains("same length and order"), "{body}");
+        assert!(body.contains("30:1"), "the figure rules ride along: {body}");
     }
 }

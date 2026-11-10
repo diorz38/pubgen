@@ -13,8 +13,8 @@ use crate::{Result, Session};
 pub fn specs() -> Vec<CommandSpec> {
     vec![cmd!(query "preflight.pubgen", "Pubgen Preflight Audit", ["Window", "Output", "Pubgen Audit"], None,
         "{profile?: \"print\"|\"digital\", minPpi?: 300|150} → {profile, errors, warnings, issues}: the generic preflight \
-         plus the Pubgen rules (missing Sumber:/Catatan: lines, table-number sequence, dual-lang parity; print adds \
-         spine/bleed guards and a 300 ppi floor)", has_doc, run)]
+         plus the Pubgen rules (missing Sumber:/Catatan: lines, table-number sequence, dual-lang parity, \
+         dual-lang figure parity; print adds spine/bleed guards and a 300 ppi floor)", has_doc, run)]
 }
 
 /// The keywords a table note line starts with
@@ -112,6 +112,7 @@ pub fn pubgen_issues(s: &Session, print: bool) -> Vec<Issue> {
     }
     sequence_issues(s, &mut titles, &mut out);
     parity_issues(s, &mut out);
+    figure_issues(s, &mut out);
     if print {
         cover_guards(s, &mut out);
     }
@@ -208,6 +209,144 @@ fn parity_issues(s: &Session, out: &mut Vec<Issue>) {
             severity: "warning",
             kind: "dualLangParity",
             message: format!("Dual-lang review page: the English body is {reason}"),
+            item: Some(rp.en_frame.0),
+            page: d.item(rp.en_frame).and_then(|it| page_of(d, SpreadRef::Doc(si), it, Affine::IDENTITY)),
+        });
+    }
+}
+
+// --- PRF-08: the figures of both columns agree ---------------------------------------------
+
+/// Whether `c` can appear inside a figure. Separators are part of it so `1.234` and `12,5%` are
+/// one run, not three.
+fn is_figure_char(c: char) -> bool {
+    c.is_ascii_digit() || c == '.' || c == ','
+}
+
+/// The next digits of a figure run, separators dropped, cursor left past the run.
+fn figure_digits(chars: &[char], i: &mut usize) -> String {
+    let mut digits = String::new();
+    while *i < chars.len() && is_figure_char(chars[*i]) {
+        if chars[*i].is_ascii_digit() {
+            digits.push(chars[*i]);
+        }
+        *i += 1;
+    }
+    digits
+}
+
+/// Every figure of a body column as a comparable token: digits only, so `1.234`, `1,234` and
+/// `1234` from either language match, and `1,93` matches `1.93`. A ratio keeps its shape
+/// (`30:1`, `2 : 3` → `30:1`) because the operator is the statistic, and a trailing `%` is kept
+/// because dropping it changes the number.
+fn figure_tokens(text: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < chars.len() {
+        if !is_figure_char(chars[i]) {
+            i += 1;
+            continue;
+        }
+        let first = figure_digits(&chars, &mut i);
+        if first.is_empty() {
+            continue;
+        }
+        let mut token = first;
+        // A ratio: `:` or `/` with optional spaces, then another figure group.
+        let mut j = i;
+        while j < chars.len() && chars[j] == ' ' {
+            j += 1;
+        }
+        if j < chars.len() && (chars[j] == ':' || chars[j] == '/') {
+            let mut k = j + 1;
+            while k < chars.len() && chars[k] == ' ' {
+                k += 1;
+            }
+            let second_start = k;
+            let second = figure_digits(&chars, &mut k);
+            if !second.is_empty() {
+                token = format!("{token}:{second}");
+                i = k;
+            } else {
+                i = second_start;
+            }
+        }
+        if i < chars.len() && chars[i] == '%' {
+            token.push('%');
+            i += 1;
+        }
+        out.push(token);
+    }
+    out
+}
+
+/// Tokens of `a` that `b` does not carry often enough, as (token, how many).
+fn missing_figures(a: &[String], b: &[String]) -> Vec<(String, usize)> {
+    let mut have = std::collections::HashMap::new();
+    for t in b {
+        *have.entry(t.as_str()).or_insert(0usize) += 1;
+    }
+    let mut out: Vec<(String, usize)> = Vec::new();
+    for t in a {
+        let left = have.entry(t.as_str()).or_insert(0);
+        if *left > 0 {
+            *left -= 1;
+        } else if let Some(slot) = out.iter_mut().find(|(s, _)| s == t) {
+            slot.1 += 1;
+        } else {
+            out.push((t.clone(), 1));
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The figures a side is missing, printed as `3x 30:1, 1.234`.
+fn describe(missing: &[(String, usize)]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for (token, n) in missing.iter().take(6) {
+        parts.push(if *n > 1 { format!("{n}x {token}") } else { token.clone() });
+    }
+    if missing.len() > 6 {
+        parts.push(format!("and {} more", missing.len() - 6));
+    }
+    parts.join(", ")
+}
+
+/// PRF-08: a review page's English column must carry the same figures as the Indonesian one.
+/// Translations legitimately reorder and reformat them (`1.234,56` ↔ `1,234.56`, `12,5%` ↔
+/// `12.5%`), so this compares multisets of digits, not strings — a lost ratio, a rounded
+/// percentage or an invented figure still shows up, on the page, before it prints.
+/// Pages whose English column is empty, a placeholder or the untranslated Indonesian are left to
+/// `parity_issues`, which names that defect more precisely.
+fn figure_issues(s: &Session, out: &mut Vec<Issue>) {
+    let Some(st) = s.active() else { return };
+    let d = &st.doc;
+    for si in 0..d.spreads.len() {
+        let Some(rp) = detect_review_page(d, si) else { continue };
+        let en = rp.en_text.trim();
+        if en.is_empty() || is_placeholder(en) || en == rp.id_text.trim() {
+            continue;
+        }
+        let id_tokens = figure_tokens(&rp.id_text);
+        let en_tokens = figure_tokens(en);
+        let missing = missing_figures(&id_tokens, &en_tokens);
+        let added = missing_figures(&en_tokens, &id_tokens);
+        if missing.is_empty() && added.is_empty() {
+            continue; // same figures, possibly reordered or reformatted
+        }
+        let mut parts: Vec<String> = Vec::new();
+        if !missing.is_empty() {
+            parts.push(format!("the English body is missing {}", describe(&missing)));
+        }
+        if !added.is_empty() {
+            parts.push(format!("it adds {}", describe(&added)));
+        }
+        out.push(Issue {
+            severity: "warning",
+            kind: "numberStatsParity",
+            message: format!("Dual-lang review page: the figures do not match — {}", parts.join(" and ")),
             item: Some(rp.en_frame.0),
             page: d.item(rp.en_frame).and_then(|it| page_of(d, SpreadRef::Doc(si), it, Affine::IDENTITY)),
         });
@@ -475,25 +614,77 @@ mod command_tests {
 mod parity_tests {
     use serde_json::json;
 
+    use super::figure_tokens;
     use crate::Session;
 
     /// A generated dual-lang review page: BAB line, Indonesian title, EN "Chapter" header and
     /// two body columns; the English column carries `en_text`.
     fn review_page(en_text: &str) -> Session {
+        review_page_with(&"Penduduk kecamatan ini meningkat ".repeat(8), en_text)
+    }
+
+    /// The same page with a caller-chosen Indonesian body (the figure rule compares the two).
+    fn review_page_with(id_body: &str, en_text: &str) -> Session {
         let mut s = Session::new();
         s.execute("file.new", &json!({})).unwrap();
-        let id_body = "Penduduk kecamatan ini meningkat ".repeat(8);
         let frames: [(&str, [f64; 4]); 5] = [
             ("BAB 01", [20.0, 20.0, 300.0, 50.0]),
             ("Geografi", [20.0, 55.0, 300.0, 85.0]),
             ("Chapter 01 Geography", [20.0, 90.0, 300.0, 120.0]),
-            (id_body.as_str(), [20.0, 130.0, 290.0, 400.0]),
+            (id_body, [20.0, 130.0, 290.0, 400.0]),
             (en_text, [300.0, 130.0, 570.0, 400.0]),
         ];
         for (text, rect) in frames {
             s.execute("frame.create", &json!({"rect": rect, "content": "text", "text": text})).unwrap();
         }
         s
+    }
+
+    fn figures(s: &mut Session) -> Vec<String> {
+        let r = s.execute("preflight.pubgen", &json!({})).unwrap();
+        r["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|i| i["kind"] == "numberStatsParity")
+            .map(|i| i["message"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn figures_compare_across_language_formatting() {
+        // Different separators, same statistics; the ratio and the percent keep their shape.
+        assert_eq!(figure_tokens("Total 1.234,56 jiwa, 12,5% dari rasio 30:1"), vec!["123456", "125%", "30:1"]);
+        assert_eq!(figure_tokens("Total 1,234.56 people, 12.5% on a 30:1 ratio"), vec!["123456", "125%", "30:1"]);
+        assert_eq!(figure_tokens("2 : 3 dan 1/4"), vec!["2:3", "1:4"]);
+        assert_eq!(figure_tokens("tanpa angka apa pun"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_lost_ratio_or_percent_is_flagged_and_a_reformatted_one_is_not() {
+        let id_body = "Rasio 30:1 pada tahun 2026 dengan cakupan 12,5% dari 1.234 jiwa. ".repeat(3);
+        // The model kept the numbers but rewrote them English-style: not a defect.
+        let faithful = "The 30:1 ratio in 2026 covered 12.5% of 1,234 people. ".repeat(3);
+        let mut s = review_page_with(&id_body, &faithful);
+        assert!(figures(&mut s).is_empty(), "{:?}", figures(&mut s));
+        // A dropped ratio and a rounded percentage are.
+        let thin = "The ratio in 2026 covered 12% of 1,234 people. ".repeat(3);
+        let mut s = review_page_with(&id_body, &thin);
+        let msgs = figures(&mut s);
+        assert_eq!(msgs.len(), 1, "{msgs:?}");
+        assert!(msgs[0].contains("30:1"), "the lost ratio must be named: {msgs:?}");
+        assert!(msgs[0].contains("125%"), "the rounded percentage must be named: {msgs:?}");
+        assert!(msgs[0].contains("missing"), "{msgs:?}");
+    }
+
+    /// The empty/placeholder/untranslated column is the parity rule's finding, not a figure one.
+    #[test]
+    fn an_empty_english_column_is_left_to_the_parity_rule() {
+        for en in ["", "...", "TODO"] {
+            let mut s = review_page(en);
+            assert!(figures(&mut s).is_empty(), "{en:?}");
+            assert_eq!(parity(&mut s).len(), 1, "{en:?}");
+        }
     }
 
     fn parity(s: &mut Session) -> Vec<String> {

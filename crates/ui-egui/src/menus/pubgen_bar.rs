@@ -487,6 +487,16 @@ fn ai_translate(app: &mut DesignApp, ui: &mut egui::Ui, lang: &str, has_doc: boo
     }
 
     let total_pages = app.session.active().map(|s| s.doc.page_count()).unwrap_or(0);
+    // No bilingual gate here: the pages were already generated as dual-language columns, and the
+    // scan itself decides whether any of them still owes a translation.
+    let can_batch_reviews = has_doc && total_pages > 0 && backend_ready;
+    if item(ui, lang, "Translate Review Pages", can_batch_reviews) {
+        crate::dock::pubgen::with_state(ui.ctx(), |st| {
+            crate::dock::pubgen::ai::execute_translate_untranslated_reviews(app, st, ui.ctx().clone());
+        });
+        ui.close();
+    }
+
     let can_batch_tables = has_doc && total_pages > 0;
     if item(ui, lang, "Translate Table Pages…", can_batch_tables) {
         crate::dock::pubgen::with_state(ui.ctx(), |st| {

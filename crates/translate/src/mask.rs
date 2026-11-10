@@ -123,13 +123,19 @@ pub fn mask(text: &str, glossary: &[(String, String)]) -> Masked {
                     i += 1;
                 }
                 if run.chars().any(|c| c.is_ascii_digit()) {
+                    // A run ends on a digit: the separators it swallowed are punctuation that
+                    // belongs to the sentence, so `2020,` restores as `2020` plus its comma
+                    // instead of doubling it after the placeholder.
+                    let body = run.trim_end_matches(['.', ',']);
+                    let tail = &run[body.len()..];
                     tokens.push(Token {
                         index: tokens.len(),
-                        original: if has_percent { format!("{run}%") } else { run },
+                        original: if has_percent { format!("{body}%") } else { body.to_string() },
                         replacement: None,
                         kind: TokenKind::Number,
                     });
                     out.push_str(&format!("[[{}]]", tokens.len() - 1));
+                    out.push_str(tail);
                     continue;
                 }
                 // No digit (e.g. an ellipsis): keep verbatim.
@@ -212,6 +218,29 @@ pub fn unmask(output: &str, masked: &Masked) -> Result<String, MaskError> {
     }
     out.push_str(&output[pos..]);
     Ok(out)
+}
+
+/// Restore an answer whose placeholders the model mangled, instead of throwing the unit away.
+/// A known index is filled with its original text (so numbers still cannot be rewritten by the
+/// model); an unknown or duplicated one is dropped rather than shipped as literal `[[7]]`.
+pub fn unmask_tolerant(output: &str, masked: &Masked) -> String {
+    if let Ok(clean) = unmask(output, masked) {
+        return clean;
+    }
+    let mut out = String::with_capacity(output.len());
+    let mut pos = 0usize;
+    for (range, n) in placeholders(output) {
+        out.push_str(&output[pos..range.start]);
+        if let Some(token) = masked.tokens.get(n) {
+            match &token.replacement {
+                Some(r) => out.push_str(r),
+                None => out.push_str(&token.original),
+            }
+        }
+        pos = range.end;
+    }
+    out.push_str(&output[pos..]);
+    out
 }
 
 /// Normalize a numeric run for cross-language statistical comparison:
@@ -298,9 +327,34 @@ pub fn number_census(text: &str) -> Vec<String> {
     out
 }
 
+/// Whether two texts carry the same numbers, in any order.
+///
+/// Kept as a building block for callers that want the old guard; the translation gates no
+/// longer use it, because the figures are restored from their mask tokens and a paragraph the
+/// model did translate is worth more than a statistic nobody can read.
+pub fn same_numbers(source: &str, target: &str) -> bool {
+    let mut a = number_census(source);
+    let mut b = number_census(target);
+    a.sort();
+    b.sort();
+    a == b
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn same_numbers_ignores_order_but_not_a_lost_number() {
+        // Real pair: the English moved "1" after "13", the ordered census called that a drift.
+        let id = "27 aparatur, 1 orang pindah, 13 desa, 33,3 persen";
+        let en = "27 staff, 13 villages moved 1 person, 33.3 percent";
+        assert_ne!(number_census(id), number_census(en), "the ordered census still sees a reorder");
+        assert!(same_numbers(id, en), "a reordered translation is the same statistics");
+
+        assert!(!same_numbers("12 desa dan 0 kasus", "12 villages"), "a lost number must still fail");
+        assert!(!same_numbers("12 desa", "12 villages in 3 districts"), "an invented number must still fail");
+    }
 
     fn glossary() -> Vec<(String, String)> {
         vec![("Kecamatan".into(), "Subdistrict".into()), ("Luas Wilayah".into(), "Total Area".into())]

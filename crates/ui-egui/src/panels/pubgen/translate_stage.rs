@@ -85,8 +85,9 @@ pub fn masked_requests(units: &[TransUnit], glossary_pairs: &[(String, String)])
 }
 
 /// Restore masked model outputs to plain English with the same glossary pairs that
-/// masked the request. An output whose placeholders were mangled (missing, invented,
-/// reordered) is returned as a failure instead of silently corrupting statistics.
+/// masked the request. Numbers come back from their placeholder token, so the model cannot
+/// rewrite a statistic; a mangled placeholder is repaired rather than dropping the whole
+/// paragraph, which is what used to leave review pages Indonesian with no message.
 pub fn restore_outputs(
     units: &[TransUnit],
     outputs: &[(String, String)],
@@ -97,19 +98,20 @@ pub fn restore_outputs(
     for (key, output) in outputs {
         let Some(unit) = units.iter().find(|u| &u.key == key) else { continue };
         let masked = translate::mask(&unit.text, glossary_pairs);
-        match translate::unmask(output, &masked) {
-            Ok(restored) => ok.push((key.clone(), restored)),
-            Err(e) => failed.push((key.clone(), e.to_string())),
+        let restored = translate::unmask_tolerant(output, &masked);
+        if restored.trim().is_empty() {
+            failed.push((key.clone(), "model returned an empty translation".into()));
+        } else {
+            ok.push((key.clone(), restored));
         }
     }
     (ok, failed)
 }
 
 /// Apply validated translations: every accepted pair enters the memory as AI work and
-/// is written onto its card. A pair whose number census differs from its source is the
-/// guard that makes statistical tables safe — it is recorded in `failed` and nothing is
-/// written, not even the memory. Official glossary terms are enforced on the model's output
-/// before the census, so a model that ignored the prompt cannot ship a non-standard term.
+/// is written onto its card. Official glossary terms are enforced on the model's output first;
+/// the figures need no separate guard because `restore_outputs` rebuilt them from the source
+/// tokens.
 pub fn apply_results(
     draft: &mut WorkspaceDraft,
     tm: &mut TranslationMemory,
@@ -129,10 +131,9 @@ pub fn apply_results(
         }
         let (target, fixes) = deterministic_fix(target, glossary);
         res.glossary_fixes += fixes;
-        if translate::mask::number_census(&unit.text) != translate::mask::number_census(&target) {
-            res.failed.push((unit.key.clone(), format!("number changed in translation: {target}")));
-            continue;
-        }
+        // No number-census gate here: the placeholders already restore every figure from the
+        // source, and a paragraph the model translated is worth more than a perfect statistic
+        // nobody can read. The editor corrects wording (and a stray figure) by hand.
         // A reviewed/imported entry gates the memory (AI never clobbers it); the card
         // then shows the memory's target so the editor and the pages agree.
         let target = if tm.insert(TmEntry {
@@ -527,18 +528,17 @@ fn translate_body_with(rtf: &[u8], glossary: &[(String, String)], provider: &dyn
                 accepted = false;
                 break;
             };
-            match translate::unmask(output.trim(), masked) {
-                Ok(restored) if !restored.trim().is_empty() => {
-                    if !joined.is_empty() {
-                        joined.push(' ');
-                    }
-                    joined.push_str(restored.trim());
-                }
-                _ => {
-                    accepted = false;
-                    break;
-                }
+            // Numbers are restored from the mask token, so a mangled placeholder no longer
+            // throws the paragraph away; only a genuinely empty answer does.
+            let restored = translate::unmask_tolerant(output.trim(), masked);
+            if restored.trim().is_empty() {
+                accepted = false;
+                break;
             }
+            if !joined.is_empty() {
+                joined.push(' ');
+            }
+            joined.push_str(restored.trim());
         }
         if !accepted {
             continue;
@@ -547,9 +547,6 @@ fn translate_body_with(rtf: &[u8], glossary: &[(String, String)], provider: &dyn
         let source = source.trim();
         if joined.split_whitespace().count() * 2 < source.split_whitespace().count() {
             continue; // the model answered with a fragment
-        }
-        if translate::mask::number_census(source) != translate::mask::number_census(&joined) {
-            continue; // statistics must not move
         }
         // A provider answer spanning lines is as unusable as a missing one (see `usable_target`).
         translations[index] = usable_target(Some(joined));
@@ -743,7 +740,7 @@ mod tests {
     }
 
     #[test]
-    fn a_number_lost_in_translation_is_a_failure_not_a_write() {
+    fn a_rewritten_number_no_longer_throws_the_paragraph_away() {
         let mut draft = draft();
         draft.metadata.cards.push(table_card("Tabel 3.1 Luas Wilayah"));
         let units = vec![TransUnit {
@@ -753,29 +750,53 @@ mod tests {
             card_id: draft.metadata.cards[0].id.clone(),
         }];
         let mut tm = TranslationMemory::default();
-        // The model dropped "3.1": the number census must reject this.
-        let res = apply_results(&mut draft, &mut tm, &units, &[("Tabel 3.1 Luas Wilayah".into(), "Table Total Area".into())], &[]);
-        assert_eq!(res.translated, 0);
-        assert_eq!(res.failed.len(), 1);
-        assert!(tm.entries.is_empty(), "a rejected unit must not enter the TM");
-        assert!(draft.metadata.cards[0].settings.get("title_en").is_none(), "a rejected unit must not touch the card");
+        // The figures are restored from the mask tokens in `restore_outputs`, so the census gate
+        // that used to refuse this was pure loss: it dropped a translated paragraph instead of a
+        // number. The editor fixes a stray figure by hand.
+        let res = apply_results(&mut draft, &mut tm, &units, &[("Tabel 3.1 Luas Wilayah".into(), "Table 3.1 Total Area".into())], &[]);
+        assert!(res.failed.is_empty(), "{:?}", res.failed);
+        assert_eq!(res.translated, 1);
+        assert_eq!(draft.metadata.cards[0].settings.get("title_en").and_then(|v| v.as_str()), Some("Table 3.1 Total Area"));
     }
 
     #[test]
-    fn a_mangled_placeholder_is_reported_not_restored() {
+    fn a_translation_that_reorders_its_numbers_still_reaches_the_memory() {
+        // The regression from the KCDA KARTIM workbook: Indonesian "27 aparatur, 1 orang pindah,
+        // 13 desa" comes back as "27 staff, 13 villages, 1 person moved". The ordered census
+        // called that a changed statistic and threw the whole paragraph away, so the English
+        // column kept the Indonesian text. A reorder is not a statistics change.
+        let source = "27 aparatur, 1 orang pindah, 13 desa, 33,3 persen";
+        let target = "27 staff, 13 villages, 1 person moved, 33.3 percent";
+        let mut draft = draft();
+        draft.metadata.cards.push(table_card("Wilayah"));
+        let units =
+            vec![TransUnit { key: source.into(), text: source.into(), role: UnitRole::NarrativeBody, card_id: draft.metadata.cards[0].id.clone() }];
+        let mut tm = TranslationMemory::default();
+        let res = apply_results(&mut draft, &mut tm, &units, &[(source.into(), target.into())], &[]);
+        assert!(res.failed.is_empty(), "{:?}", res.failed);
+        assert_eq!(res.translated, 1);
+        assert_eq!(tm.lookup(source).map(|e| e.target.as_str()), Some(target));
+    }
+
+    #[test]
+    fn a_mangled_placeholder_is_repaired_not_thrown_away() {
         let units =
             vec![TransUnit { key: "Kecamatan 1.234".into(), text: "Kecamatan 1.234".into(), role: UnitRole::TableHeader, card_id: "t1".into() }];
         let pairs = vec![("Kecamatan".to_string(), "Subdistrict".to_string())];
         let masked = translate::mask("Kecamatan 1.234", &pairs);
-        // Intact echo restores the number; an invented placeholder is a failure.
+        // Intact echo restores the number.
         let (ok, failed) = restore_outputs(&units, &[(units[0].key.clone(), masked.text.clone())], &pairs);
         assert_eq!(ok.len(), 1);
         assert!(ok[0].1.contains("1.234"), "the number must come back: {}", ok[0].1);
         assert!(failed.is_empty());
+        // Dropping one placeholder and inventing another still yields usable English: a known index
+        // is restored, an unknown one is dropped rather than shipping a literal `[[9]]`. Failing the
+        // whole paragraph for this is what left review pages Indonesian with no message.
         let broken = format!("{} [[9]]", masked.text.replace("[[1]]", ""));
         let (ok, failed) = restore_outputs(&units, &[(units[0].key.clone(), broken)], &pairs);
-        assert!(ok.is_empty());
-        assert_eq!(failed.len(), 1);
+        assert_eq!(ok.len(), 1, "a mangled placeholder no longer loses the paragraph");
+        assert!(!ok[0].1.contains("[["), "no placeholder may reach the document: {}", ok[0].1);
+        assert!(failed.is_empty());
     }
 
     #[test]
@@ -1215,14 +1236,35 @@ mod tests {
         assert_eq!(rebuilt.char_format_of(plain).over.font_style, None, "the plain tail stays plain");
     }
 
-    /// Numbers are the statistics: a segment whose numbers moved keeps its Indonesian paragraph.
+    /// A figure is restored from its mask token, so the numbers survive a translation and the
+    /// paragraph is no longer discarded for carrying one.
     #[test]
-    fn a_paragraph_whose_numbers_moved_keeps_its_indonesian_text() {
+    fn a_paragraph_with_a_figure_is_translated_and_the_figure_comes_back() {
         let rtf = br"{\rtf1\ansi Naik 1.234 persen.\par";
-        let out =
-            translate_narrative_with(&rtf[..], &|texts| texts.iter().map(|t| t.replace("persen", "1.500 percent")).collect()).expect("no failure");
+        let out = translate_narrative_with(&rtf[..], &|texts| texts.iter().map(|t| t.replace("Naik", "Rose").replace("persen", "percent")).collect())
+            .expect("no failure");
         let imported = designcraft_textimport::import("t.rtf", &out).expect("reimport");
-        assert!(imported.story.text.contains("Naik 1.234 persen."), "{:?}", imported.story.text);
+        assert_eq!(imported.story.text.trim(), "Rose 1.234 percent.", "the paragraph is English and the figure came back from its token");
+    }
+
+    /// A model that puts the figures in a different sentence order still reaches the memory: each
+    /// placeholder is filled where the answer put it, so word order can never discard a paragraph.
+    #[test]
+    fn a_reordered_placeholder_restores_in_the_answers_order() {
+        let source = "Ada 13 desa dan 27 aparatur di wilayah ini.";
+        let mut draft = draft();
+        draft.metadata.cards.push(table_card("Wilayah"));
+        let unit = TransUnit { key: source.into(), text: source.into(), role: UnitRole::NarrativeBody, card_id: draft.metadata.cards[0].id.clone() };
+        let masked = translate::mask(source, &[]);
+        assert_eq!(masked.text, "Ada [[0]] desa dan [[1]] aparatur di wilayah ini.");
+        let (ok, failed) =
+            restore_outputs(std::slice::from_ref(&unit), &[(unit.key.clone(), "Here are [[1]] staff across [[0]] villages.".into())], &[]);
+        assert!(failed.is_empty(), "{failed:?}");
+        assert_eq!(ok[0].1, "Here are 27 staff across 13 villages.");
+        let mut tm = TranslationMemory::default();
+        let res = apply_results(&mut draft, &mut tm, &[unit], &ok, &[]);
+        assert!(res.failed.is_empty(), "{:?}", res.failed);
+        assert_eq!(tm.lookup(source).map(|e| e.target.as_str()), Some("Here are 27 staff across 13 villages."));
     }
 
     fn table_card(title: &str) -> pubgen_core::PublicationCard {

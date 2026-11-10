@@ -17,7 +17,7 @@ pub mod nllb;
 pub mod online;
 pub mod system;
 
-pub use mask::{MaskError, Masked, mask, unmask};
+pub use mask::{MaskError, Masked, mask, unmask, unmask_tolerant};
 
 use std::path::Path;
 use std::sync::atomic::AtomicBool;

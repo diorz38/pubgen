@@ -193,6 +193,14 @@ pub(crate) fn pubgen_header_band(app: &mut DesignApp, ui: &mut Ui, st: &mut Pubg
         if ai_setup_resp.clicked() {
             st.ai_dialog = Some(ai::AiSetupDialog::open(app, st));
         }
+        // Translate every review page whose English column still holds the copied Indonesian body
+        // (the copy that keeps the dual-language layout intact until a translation exists).
+        if outline_button(ui, "Translate Review", 108.0)
+            .on_hover_text("Translate the English column of every review page still showing the copied Indonesian body.")
+            .clicked()
+        {
+            ai::execute_translate_untranslated_reviews(app, st, ui.ctx().clone());
+        }
         // Groq's own rate-limit header (per API key): shown once the first
         // translation has been made this session.
         if let Some(n) = designcraft_translate::remaining_requests() {

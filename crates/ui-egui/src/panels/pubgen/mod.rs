@@ -180,6 +180,15 @@ pub fn poll_active_jobs(app: &mut DesignApp, st: &mut PubgenState) {
                     st.header_status = Some((format!("Table page translated with AI.{}", ai::groq_quota_suffix(&provider)), true));
                     return;
                 }
+                if !st.ai_page_targets_batch.is_empty() {
+                    let targets = std::mem::take(&mut st.ai_page_targets_batch);
+                    let count: usize = targets.iter().map(|t| ai::apply_page_result(app, st, t)).sum();
+                    st.header_status = Some((
+                        format!("{count} item(s) across {} review page(s) translated with AI.{}", targets.len(), ai::groq_quota_suffix(&provider)),
+                        true,
+                    ));
+                    return;
+                }
                 if !st.ai_table_targets_batch.is_empty() {
                     let targets = std::mem::take(&mut st.ai_table_targets_batch);
                     let mut count = 0;
@@ -212,6 +221,7 @@ pub fn poll_active_jobs(app: &mut DesignApp, st: &mut PubgenState) {
             st.ai_pending_excel_path.clear();
             st.ai_page_target = None;
             st.ai_table_target = None;
+            st.ai_page_targets_batch.clear();
             st.ai_table_targets_batch.clear();
         } else {
             st.translate_job = Some(job);
@@ -314,6 +324,16 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
                     ui.data_mut(|d| d.insert_temp(state_id, st));
                     return;
                 }
+                if !st.ai_page_targets_batch.is_empty() {
+                    let targets = std::mem::take(&mut st.ai_page_targets_batch);
+                    let count: usize = targets.iter().map(|t| ai::apply_page_result(app, &st, t)).sum();
+                    st.header_status = Some((
+                        format!("{count} item(s) across {} review page(s) translated with AI.{}", targets.len(), ai::groq_quota_suffix(&provider)),
+                        true,
+                    ));
+                    ui.data_mut(|d| d.insert_temp(state_id, st));
+                    return;
+                }
                 if !st.ai_table_targets_batch.is_empty() {
                     let targets = std::mem::take(&mut st.ai_table_targets_batch);
                     let mut count = 0;
@@ -352,6 +372,7 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
             st.ai_pending_excel_path.clear();
             st.ai_page_target = None;
             st.ai_table_target = None;
+            st.ai_page_targets_batch.clear();
             st.ai_table_targets_batch.clear();
         } else {
             st.translate_job = Some(job);

@@ -46,12 +46,17 @@ Pressing **Translate Worksheet** runs this pipeline:
    many units were reused.
 4. **Mask.** For the misses, numbers and glossary terms are replaced with `[[0]]`, `[[1]]`,
    … placeholders (capped) before the text leaves the machine. The model translates prose
-   around tokens it cannot corrupt.
+   around tokens it cannot corrupt, and the system prompt repeats the rule the mask enforces:
+   keep every figure, ratio (`30:1`), percentage, range, date and unit exactly as written.
 5. **Request.** The misses go to the provider as one background job. Strict servers are
    respected: the optional `reasoning_effort` field is only sent for `gpt-oss` models.
-6. **Unmask and verify.** Placeholders are restored; a **number census** then rejects any
-   unit whose numbers do not match the source exactly. A wrong item count from the model is
-   an error, with item-by-item salvage for the rest.
+6. **Unmask and verify.** Placeholders are restored **from their source token**, so a figure
+   cannot come back changed. A mangled, reordered or invented placeholder is repaired rather
+   than dropping the paragraph: the known figures go back, an unknown `[[9]]` is removed and
+   never shipped. Nothing is discarded for its numbers; a unit is only left out for an empty or
+   fragmentary answer, and that is reported (`AI left N text(s) untranslated: ...`) instead of
+   vanishing. A wrong item count from the model is an error, with item-by-item salvage for the
+   rest.
 7. **Enforce the glossary.** Official glossary wording (e.g. BPS terms) is applied
    deterministically after unmasking — the same substitution the masking already
    guaranteed, as a second, non-AI net.
@@ -269,8 +274,18 @@ pgs-cli translate <project.pubgen> --provider <groq|custom|local> \
 
 ## What is deliberately never translated
 
-Numbers and statistical figures (masked and census-checked), identifiers and codes, dates,
+Numbers and statistical figures (masked, restored from their token, and checked again by the
+audit below), identifiers and codes, dates,
 region proper nouns, person names, and the layout itself (frames, styles, templates).
+
+## Checking the figures on the page
+
+**Audit Publication** (`preflight.pubgen`) compares the figures of each dual-language review
+spread: the Indonesian column's numbers, ratios (`30:1`), percentages and reformatting variants
+(`1.234,56` ↔ `1,234.56`, `12,5%` ↔ `12.5%`) against the English column's, as a multiset — order
+and separators are free, a lost, rounded or invented figure is a `numberStatsParity` warning on
+that page. Run it before exporting; it catches a statistic the model changed after masking was
+capped, or one you edited by hand.
 
 ## Known limits
 

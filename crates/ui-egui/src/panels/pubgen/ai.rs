@@ -12,7 +12,10 @@ use std::sync::atomic::AtomicBool;
 use egui::{Color32, RichText};
 use serde_json::{Value, json};
 
-use super::{PubgenState, detect_delimiter, effective_col, file_en_same_as_file, parse_csv_content_with_delim, resolve_catalog_related_file};
+use super::{
+    PUBGEN_EN_TRANSLATED_LABEL, PUBGEN_EN_UNTRANSLATED_LABEL, PubgenState, detect_delimiter, effective_col, en_body_untranslated,
+    file_en_same_as_file, parse_csv_content_with_delim, resolve_catalog_related_file, set_en_frame_label,
+};
 use crate::DesignApp;
 use designcraft_translate as translate;
 
@@ -511,10 +514,13 @@ fn terminology_pane(app: &mut DesignApp, st: &mut PubgenState, dialog: &mut AiSe
     let needle = dialog.terms_filter.trim().to_lowercase();
     let mut remove: Option<usize> = None;
     egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-        egui::Grid::new("pubgen_terminology_grid").num_columns(5).striped(true).show(ui, |ui| {
+        egui::Grid::new("pubgen_terminology_grid").num_columns(6).striped(true).show(ui, |ui| {
             ui.label(RichText::new("Indonesian").size(10.0).strong());
             ui.label(RichText::new("AI English").size(10.0).strong());
             ui.label(RichText::new("Official English").size(10.0).strong());
+            ui.label(RichText::new("Keep").size(10.0).strong()).on_hover_text(
+                "Tick to never translate this term: it is masked out of the AI request, a whole cell keeps the term as it is, and the prompt lists it under \"never translate\". Save keeps the tick.",
+            );
             ui.label(RichText::new("Seen").size(10.0).strong());
             ui.label("");
             ui.end_row();
@@ -527,6 +533,7 @@ fn terminology_pane(app: &mut DesignApp, st: &mut PubgenState, dialog: &mut AiSe
                 ui.add_sized([130.0, 22.0], egui::TextEdit::singleline(&mut term.ai)).accessible_name(format!("Term {} AI English", idx + 1));
                 ui.add_sized([150.0, 22.0], egui::TextEdit::singleline(&mut term.official))
                     .accessible_name(format!("Term {} Official English", idx + 1));
+                ui.checkbox(&mut term.keep, "").accessible_name(format!("Term {} keep as is", idx + 1));
                 ui.label(RichText::new(if term.count > 0 { term.count.to_string() } else { String::new() }).size(10.0).weak());
                 if ui.small_button("Remove").clicked() {
                     remove = Some(idx);
@@ -736,7 +743,15 @@ pub fn dialog_ui(app: &mut DesignApp, st: &mut PubgenState, ui: &mut egui::Ui) {
 
 /// Units per worker batch, counted in *segments* (mirrors the provider client's chunk
 /// size; small batches keep free-tier per-minute token limits from tripping).
-const BATCH_UNITS: usize = 8;
+const BATCH_UNITS: usize = 32;
+
+/// Characters of source text per request. The bigger-context endpoints (custom OpenAI-compatible,
+/// local) take a lot more, and fewer requests also means fewer rate-limit waits; this ceiling is
+/// what keeps a long review chapter from producing an answer the provider truncates.
+const BATCH_CHARS: usize = 8_000;
+
+/// How many unusable units get the individual retry after a run (cost bound, not a quality knob).
+const MAX_RETRY_UNITS: usize = 40;
 
 /// A unit's request texts: short cells stay whole, long review paragraphs become
 /// sentence-bounded segments (the narrative path's `SEGMENT_MAX_WORDS` ceiling). A
@@ -747,16 +762,28 @@ fn unit_segments(source: &str) -> Vec<String> {
     if segs.is_empty() { vec![source.trim().to_string()] } else { segs }
 }
 
-/// Rebuild one unit's English from its segment outputs: every segment must be back,
-/// at least half the source's words present, and the number census identical —
-/// otherwise the unit keeps its Indonesian so a re-run retries it clean (mirrors
-/// `translate_body_with`).
-fn assembled_unit(source: &str, parts: &[Option<String>]) -> Option<String> {
+/// Why a unit's English never came back. Reported to the user instead of vanishing: a silently
+/// dropped paragraph is what made the R03/R04 review pages look "still Indonesian" for days.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DropReason {
+    NoAnswer = 0,
+    TooShort = 1,
+}
+
+/// Rebuild one unit's English from its segment outputs: every segment must be back with some
+/// words in it. Nothing else is a reason to throw the paragraph away — the figures were masked to
+/// `[[n]]` placeholders and `restore_outputs` puts the original numbers back, so the model cannot
+/// move a statistic and the editor is free to correct the wording by hand.
+///
+/// `source` is the MASKED request text (what the model was asked to translate).
+fn assembled_unit(source: &str, parts: &[Option<String>]) -> Result<String, DropReason> {
     let mut joined = String::new();
     for part in parts {
-        let t = part.as_deref()?.trim();
+        let Some(t) = part.as_deref().map(str::trim) else {
+            return Err(DropReason::NoAnswer);
+        };
         if t.is_empty() {
-            return None;
+            return Err(DropReason::NoAnswer);
         }
         if !joined.is_empty() {
             joined.push(' ');
@@ -764,15 +791,55 @@ fn assembled_unit(source: &str, parts: &[Option<String>]) -> Option<String> {
         joined.push_str(t);
     }
     if joined.is_empty() {
-        return None;
+        return Err(DropReason::NoAnswer);
     }
     if joined.split_whitespace().count() * 2 < source.split_whitespace().count() {
-        return None; // the model answered with a fragment
+        return Err(DropReason::TooShort); // the model answered with a fragment
     }
-    if translate::mask::number_census(source) != translate::mask::number_census(&joined) {
-        return None; // statistics must not move
+    Ok(joined)
+}
+
+/// "AI left 18 text(s) untranslated: 3 empty answer(s), 15 too short" — the one line that turns a
+/// silent drop into something the user can act on.
+fn drop_note(dropped: &[(String, DropReason)]) -> String {
+    if dropped.is_empty() {
+        return String::new();
     }
-    Some(joined)
+    let mut counts = [0usize; 2];
+    for (_, reason) in dropped {
+        counts[*reason as usize] = counts[*reason as usize].saturating_add(1);
+    }
+    format!(
+        "AI left {} text(s) untranslated: {} empty answer(s), {} too short — run Translate with AI again to retry them.",
+        dropped.len(),
+        counts[DropReason::NoAnswer as usize],
+        counts[DropReason::TooShort as usize]
+    )
+}
+
+/// How the flat segment list is cut into requests: `(start, len)` ranges of at most
+/// `BATCH_UNITS` segments and at most `BATCH_CHARS` characters. A single segment longer than the
+/// character budget still goes alone — splitting a paragraph mid-sentence translates worse than
+/// one large request.
+fn request_ranges(flat: &[String]) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut i = 0usize;
+    while i < flat.len() {
+        let mut len = 0usize;
+        let mut chars = 0usize;
+        while i + len < flat.len() && len < BATCH_UNITS {
+            let c = flat.get(i + len).map_or(0, |s| s.chars().count());
+            if len > 0 && chars.saturating_add(c) > BATCH_CHARS {
+                break;
+            }
+            chars = chars.saturating_add(c);
+            len += 1;
+        }
+        let len = len.max(1);
+        out.push((i, len));
+        i += len;
+    }
+    out
 }
 
 /// Units whose every segment has come back (progress reporting only).
@@ -799,9 +866,10 @@ pub struct TranslateJob {
 
 enum JobMsg {
     Progress(usize, usize),
-    Done(Vec<(String, String)>),
-    /// Error message + everything already translated before the failure.
-    Failed(String, Vec<(String, String)>),
+    /// Pairs + the note naming what could not be translated (empty when everything landed).
+    Done(Vec<(String, String)>, String),
+    /// Error message + everything already translated before the failure + the same note.
+    Failed(String, Vec<(String, String)>, String),
 }
 
 impl TranslateJob {
@@ -826,27 +894,29 @@ impl TranslateJob {
             let mut err = None;
             // The flat list of segments is what `BATCH_UNITS` slices, so a batch stays
             // small even when its units are whole review paragraphs.
-            let plan: Vec<(String, Vec<String>)> = units
+            // `(key, masked source, segments)`: the masked text is what the model was asked to
+            // translate, so it is what the answer is checked against here. Comparing the key's
+            // real numbers against an answer that still holds `[[0]]` placeholders never matched.
+            let plan: Vec<(String, String, Vec<String>)> = units
                 .into_iter()
                 .map(|(key, source)| {
                     let segs = unit_segments(&source);
-                    (key, segs)
+                    (key, source, segs)
                 })
                 .collect();
             let mut spans: Vec<(usize, usize)> = Vec::with_capacity(plan.len());
             let mut flat: Vec<String> = Vec::new();
-            for (_, segs) in &plan {
+            for (_, _, segs) in &plan {
                 spans.push((flat.len(), segs.len()));
                 flat.extend(segs.iter().cloned());
             }
             let mut done: Vec<Option<String>> = vec![None; flat.len()];
-            for (offset, chunk) in flat.chunks(BATCH_UNITS).enumerate() {
+            for (base, len) in request_ranges(&flat) {
                 if cancel_thread.load(std::sync::atomic::Ordering::Relaxed) {
                     err = Some(translate::TranslateError::Cancelled);
                     break;
                 }
-                let base = offset * BATCH_UNITS;
-                let sources: Vec<String> = chunk.to_vec();
+                let sources: Vec<String> = flat.get(base..base + len).unwrap_or(&[]).to_vec();
                 match t.translate(
                     &sources,
                     translate::Lang::Indonesian,
@@ -864,30 +934,78 @@ impl TranslateJob {
                         let _ = tx_thread.send(JobMsg::Progress(complete_units(&spans, &done), plan.len()));
                     }
                     Err(e) => {
-                        err = Some(e);
-                        break;
+                        // One batch the provider refused must not end the whole run: with 178
+                        // texts and a 15-requests-per-minute cap, stopping at 8 of 178 threw away
+                        // everything the user had already waited for. Keep the first error for the
+                        // report and translate the remaining batches.
+                        if matches!(e, translate::TranslateError::Cancelled) {
+                            err = Some(e);
+                            break;
+                        }
+                        if err.is_none() {
+                            err = Some(e);
+                        }
+                        continue;
                     }
                 }
             }
-            for ((key, _), (start, len)) in plan.iter().zip(spans.iter()) {
+            let mut dropped: Vec<(String, DropReason)> = Vec::new();
+            for ((key, masked, _), (start, len)) in plan.iter().zip(spans.iter()) {
                 let parts = done.get(*start..*start + *len).unwrap_or(&[]);
                 if parts.len() != *len {
                     continue; // the run stopped inside this unit; a re-run retries it
                 }
-                if let Some(en) = assembled_unit(key, parts) {
-                    done_pairs.push((key.clone(), en));
+                match assembled_unit(masked, parts) {
+                    Ok(en) => done_pairs.push((key.clone(), en)),
+                    Err(reason) => dropped.push((key.clone(), reason)),
                 }
             }
+            // One individual retry per unusable unit, before the drop is reported: a truncated or
+            // fragmentary batch answer usually lands when asked alone. Bounded, so a provider that
+            // keeps failing cannot multiply the run.
+            if err.is_none() || !dropped.is_empty() {
+                let mut still: Vec<(String, DropReason)> = Vec::new();
+                let mut retried = 0usize;
+                for (key, reason) in std::mem::take(&mut dropped) {
+                    let Some((_, masked, segs)) = plan.iter().find(|(k, _, _)| *k == key) else {
+                        still.push((key, reason));
+                        continue;
+                    };
+                    if retried >= MAX_RETRY_UNITS {
+                        still.push((key, reason));
+                        continue;
+                    }
+                    retried = retried.saturating_add(1);
+                    let mut parts: Vec<Option<String>> = Vec::with_capacity(segs.len());
+                    for seg in segs {
+                        let one = t.translate(
+                            std::slice::from_ref(seg),
+                            translate::Lang::Indonesian,
+                            translate::Lang::English,
+                            Some(glossary.as_slice()),
+                            &cancel_thread,
+                            &mut |_, _| {},
+                        );
+                        parts.push(one.ok().and_then(|mut o| if o.len() == 1 { o.pop() } else { None }));
+                    }
+                    match assembled_unit(masked, &parts) {
+                        Ok(en) => done_pairs.push((key, en)),
+                        Err(r) => still.push((key, r)),
+                    }
+                }
+                dropped = still;
+            }
+            let note = drop_note(&dropped);
             let outcome = err.map_or(Ok(()), Err);
             let _ = match outcome {
-                Ok(()) => tx_thread.send(JobMsg::Done(done_pairs)),
-                Err(e) => tx_thread.send(JobMsg::Failed(e.to_string(), done_pairs)),
+                Ok(()) => tx_thread.send(JobMsg::Done(done_pairs, note)),
+                Err(e) => tx_thread.send(JobMsg::Failed(e.to_string(), done_pairs, note)),
             };
             ctx.request_repaint();
         });
         if spawned.is_err() {
             // The worker could not start: surface it as a normal job failure.
-            let _ = tx.send(JobMsg::Failed("could not start the translation thread".into(), Vec::new()));
+            let _ = tx.send(JobMsg::Failed("could not start the translation thread".into(), Vec::new(), String::new()));
         }
         Self { rx: Arc::new(std::sync::Mutex::new(rx)), cancel, drafts: false, done: 0, total, finished: false }
     }
@@ -939,7 +1057,7 @@ impl TranslateJob {
                         st.card3_status = Some((msg.clone(), true));
                         st.header_status = Some((msg, true));
                     }
-                    JobMsg::Done(pairs) => {
+                    JobMsg::Done(pairs, note) => {
                         if self.drafts {
                             let filled = pairs.iter().filter(|(k, en)| st.glossary.set_ai(k, en)).count();
                             let msg = format!("{filled} AI draft(s) filled from {} term(s) requested.", pairs.len());
@@ -953,11 +1071,16 @@ impl TranslateJob {
                                 st.translations.insert(k.clone(), en.clone());
                                 st.glossary.set_ai(&k, &en);
                             }
+                            if !note.is_empty() {
+                                // Never let a drop stay invisible: the caller logs this line.
+                                eprintln!("pubgen ai: {note}");
+                                st.header_status = Some((note, false));
+                            }
                         }
                         self.finished = true;
                         finished_ok = true;
                     }
-                    JobMsg::Failed(err, partial) => {
+                    JobMsg::Failed(err, partial, note) => {
                         // Keep whatever finished before the failure/cancel; the caller
                         // clears the slice signature so the next run translates only the
                         // rest.
@@ -978,7 +1101,7 @@ impl TranslateJob {
                         self.finished = true;
                         self.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
                         let msg = format!(
-                            "AI translation stopped at {}/{}: {err} — run the same action again to translate the remaining texts",
+                            "AI translation reached {}/{} text(s): {err} — run the same action again to translate the rest. {note}",
                             self.done, self.total
                         );
                         eprintln!("pubgen ai: {msg}");
@@ -1108,11 +1231,16 @@ pub struct GlossaryTerm {
     /// How often the collector saw the term; the editor sorts by it.
     #[serde(default)]
     pub count: usize,
+    /// Keep this term as it is: "don't translate" for names and local terms. It is masked out of
+    /// the request (the model never sees it), a whole cell resolves to the term itself, and the
+    /// prompt lists it under "never translate".
+    #[serde(default)]
+    pub keep: bool,
 }
 
 impl GlossaryTerm {
     fn new(id: &str) -> Self {
-        Self { id: id.trim().to_string(), ai: String::new(), official: String::new(), count: 0 }
+        Self { id: id.trim().to_string(), ai: String::new(), official: String::new(), count: 0, keep: false }
     }
 
     /// Case-insensitive term identity: the trimmed, lowercased comparison every caller
@@ -1186,6 +1314,7 @@ impl BpsGlossary {
                     ai: s("ai"),
                     official: s("official"),
                     count: t.get("count").and_then(Value::as_u64).unwrap_or(0) as usize,
+                    keep: t.get("keep").and_then(Value::as_bool).unwrap_or(false),
                 });
             }
             return Some(Self { terms });
@@ -1213,15 +1342,25 @@ impl BpsGlossary {
 
     /// The official English for a whole cell, case-insensitively; `None` while the term
     /// has no official English yet (a collected or AI-draft-only term is never applied).
+    /// A "don't translate" term resolves to the term itself.
     pub fn lookup(&self, cell: &str) -> Option<&str> {
-        self.terms.iter().find(|t| t.matches(cell)).filter(|t| !t.official.is_empty()).map(|t| t.official.as_str())
+        self.terms
+            .iter()
+            .find(|t| t.matches(cell))
+            .and_then(|t| if t.keep { Some(t.id.as_str()) } else { (!t.official.is_empty()).then_some(t.official.as_str()) })
     }
 
     /// Sorted `(term, official)` pairs: a stable system-prompt addition. AI drafts and
     /// untranslated collected terms stay out — the prompt carries official terms only.
+    /// A "don't translate" term is its own English, so the pair is an identity.
     pub fn prompt_pairs(&self) -> Vec<(String, String)> {
-        let mut pairs: Vec<(String, String)> =
-            self.terms.iter().filter(|t| !t.official.is_empty()).map(|t| (t.id.clone(), t.official.clone())).collect();
+        let mut pairs: Vec<(String, String)> = self
+            .terms
+            .iter()
+            .filter_map(|t| {
+                if t.keep { Some((t.id.clone(), t.id.clone())) } else { (!t.official.is_empty()).then(|| (t.id.clone(), t.official.clone())) }
+            })
+            .collect();
         pairs.sort();
         pairs
     }
@@ -1281,6 +1420,26 @@ impl BpsGlossary {
                 true
             }
         }
+    }
+
+    /// Mark a term "don't translate" (or clear the mark), creating it when unseen. Returns true
+    /// when the mark changed.
+    pub fn set_keep(&mut self, id: &str, keep: bool) -> bool {
+        match self.find_mut(id) {
+            Some(t) => std::mem::replace(&mut t.keep, keep) != keep,
+            None if keep => {
+                let mut t = GlossaryTerm::new(id);
+                t.keep = true;
+                self.terms.push(t);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The terms marked "don't translate", in editor order: what the run must not send.
+    pub fn kept_terms(&self) -> Vec<String> {
+        self.terms.iter().filter(|t| t.keep && !t.id.trim().is_empty()).map(|t| t.id.trim().to_string()).collect()
     }
 
     /// Remove a term (case-insensitive); true when it existed.
@@ -1412,6 +1571,18 @@ pub fn glossary_save_error(terms: &[GlossaryTerm]) -> Option<String> {
     (!terms.iter().any(|t| !t.id.trim().is_empty())).then(|| "The glossary is empty — add at least one term before saving.".to_string())
 }
 
+/// True when the English says exactly what the Indonesian says once case, spacing and surrounding
+/// punctuation are set aside. Such a cell (or title) keeps one line: pairing it would print the
+/// same words twice, in two languages that are not two languages.
+pub fn same_words(id: &str, en: &str) -> bool {
+    fn norm(s: &str) -> String {
+        let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+        s.trim_matches(|c: char| c.is_whitespace() || matches!(c, '.' | ',' | ';' | ':' | '-' | '–' | '—')).to_lowercase()
+    }
+    let a = norm(id);
+    !a.is_empty() && a == norm(en)
+}
+
 /// One table, two lines per cell: \`id\u{2028}en\` for translatable cells with a
 /// translation; every skipped cell stays single-line. Same rows × cols by construction.
 pub fn pair_cells(matrix: &[Vec<String>], translations: &HashMap<String, String>, glossary: &BpsGlossary) -> Vec<Vec<String>> {
@@ -1428,7 +1599,7 @@ pub fn pair_cells(matrix: &[Vec<String>], translations: &HashMap<String, String>
                         return cell.clone();
                     }
                     if let Some(en) = alias_en(t, glossary) {
-                        if t.eq_ignore_ascii_case(en) {
+                        if same_words(t, en) {
                             return cell.clone();
                         }
                         return format!("{t}\u{2028}{en}");
@@ -1437,7 +1608,7 @@ pub fn pair_cells(matrix: &[Vec<String>], translations: &HashMap<String, String>
                         return cell.clone();
                     }
                     match translations.get(t).map(String::as_str).filter(|s| !s.is_empty()) {
-                        Some(en) if !t.eq_ignore_ascii_case(en) => format!("{t}\u{2028}{en}"),
+                        Some(en) if !same_words(t, en) => format!("{t}\u{2028}{en}"),
                         _ => cell.clone(),
                     }
                 })
@@ -1839,11 +2010,13 @@ pub fn detect_page_target(app: &DesignApp, page_idx: usize) -> Option<PageTarget
         .max_by_key(|(_, y, _, _)| y.to_bits())
         .map(|(id, _, _, t)| (*id, t.trim().to_string()))?;
 
-    // Body columns: text frames below the header, plenty of text, two side by side.
+    // Body columns: text frames below the header, two side by side. A short review page has a
+    // body well under the old 120-character floor, so only the tiny frames (page numbers,
+    // folios) are filtered out here.
     let mut bodies: Vec<(u64, f64)> = frames
         .iter()
         .filter(|(id, y, _, t)| {
-            *id != en_header_fid && *id != bab_fid && Some(*id) != Some(title_fid) && *y > en_header_y && t.trim().chars().count() > 120
+            *id != en_header_fid && *id != bab_fid && Some(*id) != Some(title_fid) && *y > en_header_y && t.trim().chars().count() > 20
         })
         .map(|(id, _, x, _)| (*id, *x))
         .collect();
@@ -1903,13 +2076,21 @@ pub fn apply_page_result(app: &mut DesignApp, st: &PubgenState, target: &PageTar
 
     // 2. Right-column body: replace paragraph-by-paragraph so every paragraph keeps its
     //    own paragraph style (the paragraph TOC is generated from those styles).
-    replaced += replace_frame_paragraphs(app, target.en_body_fid, map);
+    let body_replaced = replace_frame_paragraphs(app, target.en_body_fid, map, Some(target.id_body_fid));
+    replaced += body_replaced;
+    if body_replaced > 0 {
+        // The English column now holds English, so it no longer owes a translation.
+        set_en_frame_label(app, target.en_body_fid, PUBGEN_EN_TRANSLATED_LABEL);
+    }
     replaced
 }
 
 /// Replace each paragraph of the frame whose trimmed text has a translation, keeping
 /// every paragraph's own paragraph style. Returns the number of paragraphs replaced.
-fn replace_frame_paragraphs(app: &mut DesignApp, fid: u64, map: &HashMap<String, String>) -> usize {
+/// When a paragraph's own text is not in the memory, `id_fid`'s paragraph at the same
+/// index supplies the key: the English column is initially a copy of the Indonesian one,
+/// but soft wrapping (`\line`) can split it differently from the Indonesian `\par` runs.
+fn replace_frame_paragraphs(app: &mut DesignApp, fid: u64, map: &HashMap<String, String>, id_fid: Option<u64>) -> usize {
     let snapshot = (|| -> Option<(designcraft_doc::StoryId, Vec<(usize, String, String)>)> {
         let active = app.session.active()?;
         let item = active.doc.item(designcraft_doc::ItemId(fid))?;
@@ -1929,11 +2110,20 @@ fn replace_frame_paragraphs(app: &mut DesignApp, fid: u64, map: &HashMap<String,
     })();
     let Some((sid, paras)) = snapshot else { return 0 };
 
+    // The Indonesian column's paragraphs, by index, as fallback keys.
+    let id_paras: Vec<String> =
+        id_fid.and_then(|f| frame_text(app, f)).map(|t| t.split('\n').map(|p| p.trim().to_string()).collect()).unwrap_or_default();
+
     // Apply from the last paragraph backwards so earlier byte offsets stay valid.
     let mut replaced = 0usize;
-    for (start, content, _style) in paras.iter().rev() {
+    for (i, (start, content, _style)) in paras.iter().enumerate().rev() {
         let key = content.trim();
-        let Some(en) = map.get(key).map(String::as_str).filter(|s| !s.is_empty()) else {
+        let en = map
+            .get(key)
+            .map(String::as_str)
+            .filter(|s| !s.is_empty())
+            .or_else(|| id_paras.get(i).and_then(|k| map.get(k)).map(String::as_str).filter(|s| !s.is_empty()));
+        let Some(en) = en else {
             continue;
         };
         let _ = app.run("text.select", json!({"story": sid, "anchor": *start, "focus": start + content.len()}));
@@ -2279,7 +2469,12 @@ pub fn apply_table_page_result(app: &mut DesignApp, st: &PubgenState, target: &T
         let lines: Vec<&str> = text.split(['\n', '\u{2028}']).collect();
         let first_line = lines.first().copied().unwrap_or(text.as_str()).trim();
         let (clean_title, prefix_opt) = extract_table_title_parts(first_line);
-        let en_opt = map.get(&clean_title).or_else(|| map.get(first_line)).map(String::as_str).filter(|s| !s.is_empty());
+        let en_opt = map
+            .get(&clean_title)
+            .or_else(|| map.get(first_line))
+            .map(String::as_str)
+            .filter(|s| !s.is_empty())
+            .filter(|s| !same_words(first_line, s));
         if let Some(en) = en_opt {
             let en_line = match prefix_opt {
                 Some(p) => {
@@ -2359,7 +2554,7 @@ pub fn apply_table_page_result(app: &mut DesignApp, st: &PubgenState, target: &T
                 let en_opt = alias_en(&cur, &st.glossary).map(|s| s.to_string()).or_else(|| map.get(&cur).cloned());
                 if let Some(en) = en_opt
                     && !en.is_empty()
-                    && !cur.eq_ignore_ascii_case(&en)
+                    && !same_words(&cur, &en)
                 {
                     let is_bold = story_is_bold(&cell.text);
                     let insert_pos = cell.text.len();
@@ -2628,6 +2823,58 @@ pub fn execute_translate_table_range(app: &mut DesignApp, st: &mut PubgenState, 
     }
 }
 
+/// Every review page whose English column still shows the copied Indonesian body: the frame was
+/// labelled by the generator, or the two body columns hold the same text (a copy made before the
+/// labels existed).
+pub fn collect_untranslated_review_targets(app: &DesignApp) -> Vec<PageTarget> {
+    let Some(active) = app.session.active() else { return Vec::new() };
+    let mut out = Vec::new();
+    for p in 0..active.doc.page_count() {
+        let Some(target) = detect_page_target(app, p) else { continue };
+        let labeled = active.doc.item(designcraft_doc::ItemId(target.en_body_fid)).is_some_and(|it| it.label == PUBGEN_EN_UNTRANSLATED_LABEL);
+        if labeled
+            || en_body_untranslated(
+                &frame_text(app, target.id_body_fid).unwrap_or_default(),
+                &frame_text(app, target.en_body_fid).unwrap_or_default(),
+            )
+        {
+            out.push(target);
+        }
+    }
+    out
+}
+
+/// Translate every review page whose English column shows the copied Indonesian body — the action
+/// that turns the "copied to keep the layout" state into real English, in one job.
+pub fn execute_translate_untranslated_reviews(app: &mut DesignApp, st: &mut PubgenState, ctx: egui::Context) {
+    let targets = collect_untranslated_review_targets(app);
+    if targets.is_empty() {
+        st.header_status = Some(("No review page is showing untranslated Indonesian.".into(), true));
+        return;
+    }
+    let mut all_units = Vec::new();
+    for t in &targets {
+        all_units.extend(collect_page_units(app, t));
+    }
+    all_units.retain(|(k, _)| !st.translations.contains_key(k));
+    all_units.sort_by(|a, b| a.0.cmp(&b.0));
+    all_units.dedup_by(|a, b| a.0 == b.0);
+
+    if !all_units.is_empty() {
+        let Some(config) = backend_config_from_prefs(app) else {
+            st.header_status = Some(("AI translation: no backend configured — open Setup to configure API key.".into(), false));
+            return;
+        };
+        let terms = st.glossary.prompt_pairs();
+        st.translate_job = Some(TranslateJob::spawn(&config, all_units, terms, ctx));
+        st.ai_page_targets_batch = targets;
+        st.header_status = Some(("Translating review pages with AI...".into(), true));
+        return;
+    }
+    let count: usize = targets.iter().map(|t| apply_page_result(app, st, t)).sum();
+    st.header_status = Some((format!("{count} item(s) across {} review page(s) translated from cache.", targets.len()), true));
+}
+
 /// Applies glossary terms to existing translations on the active review or table page.
 pub fn execute_fix_terms(app: &mut DesignApp, st: &mut PubgenState) {
     let page_idx = app.session.active().and_then(|s| s.selection.page).or_else(|| crate::canvas::current_page(app));
@@ -2659,6 +2906,49 @@ mod tests {
 
     fn glossary() -> BpsGlossary {
         BpsGlossary::load("")
+    }
+
+    #[test]
+    fn requests_group_units_up_to_the_batch_budget() {
+        let short: Vec<String> = (0..40).map(|i| format!("para {i}")).collect();
+        let ranges = request_ranges(&short);
+        assert_eq!(ranges.iter().map(|(_, len)| len).sum::<usize>(), 40, "every segment is sent once");
+        assert!(ranges.iter().all(|(_, len)| *len <= BATCH_UNITS));
+
+        // Long paragraphs stop on the character budget before the count budget (3 x 3000 > 8000).
+        let long: Vec<String> = (0..12).map(|_| "kata ".repeat(600)).collect();
+        let ranges = request_ranges(&long);
+        assert_eq!(ranges.first().map(|(_, len)| *len), Some(2));
+
+        // One segment bigger than the whole budget still travels alone rather than be split.
+        let one = vec!["x".repeat(BATCH_CHARS + 1)];
+        assert_eq!(request_ranges(&one), vec![(0, 1)]);
+    }
+
+    #[test]
+    fn a_keep_term_stays_itself_in_a_cell_and_inside_a_paragraph() {
+        let mut g = BpsGlossary::default();
+        g.set_official("Kecamatan", "Subdistrict");
+        assert!(g.set_keep("Citeureup", true));
+        assert_eq!(g.kept_terms(), vec!["Citeureup".to_string()]);
+
+        // A whole cell resolves to the term itself, and the pair told to the model is an identity.
+        assert_eq!(g.lookup("citeureup"), Some("Citeureup"));
+        assert_eq!(g.lookup("Kecamatan"), Some("Subdistrict"));
+        assert!(g.prompt_pairs().contains(&("Citeureup".to_string(), "Citeureup".to_string())));
+
+        // Inside a paragraph it is masked out, so the model never sees it and the answer keeps it.
+        let pairs = g.prompt_pairs();
+        let source = "Desa Citeureup dan Kecamatan Citeureup";
+        let masked = translate::mask(source, &pairs);
+        assert!(!masked.text.contains("Citeureup"), "the term must not reach the model: {}", masked.text);
+        let restored = translate::unmask_tolerant("Citeureup village and Citeureup subdistrict were mapped.", &masked);
+        assert!(restored.contains("Citeureup"), "{restored}");
+
+        // Clearing the mark brings the term back into the request.
+        assert!(g.set_keep("Citeureup", false));
+        assert!(!g.prompt_pairs().iter().any(|(id, en)| id == "Citeureup" && en == "Citeureup"));
+        assert_eq!(g.lookup("Citeureup"), None, "no official English means nothing is applied");
     }
 
     #[test]
@@ -2709,16 +2999,47 @@ mod tests {
     }
 
     #[test]
-    fn assembled_unit_rejects_missing_fragment_and_moved_numbers() {
+    fn assembled_unit_rejects_only_an_empty_or_fragmentary_answer() {
         let src = "Terdapat 50 SD dan 14 SMA di wilayah ini.";
         let ok = assembled_unit(src, &[Some("There are 50 SD and 14 SMA in this area.".to_string())]);
-        assert_eq!(ok.as_deref(), Some("There are 50 SD and 14 SMA in this area."));
+        assert_eq!(ok.ok().as_deref(), Some("There are 50 SD and 14 SMA in this area."));
         let two = assembled_unit("Satu. Dua.", &[Some("One.".to_string()), Some("Two.".to_string())]);
-        assert_eq!(two.as_deref(), Some("One. Two."));
-        assert_eq!(assembled_unit(src, &[None]), None, "a missing segment rejects the unit");
-        assert_eq!(assembled_unit(src, &[Some("fifty schools".to_string())]), None, "numbers must survive");
+        assert_eq!(two.ok().as_deref(), Some("One. Two."));
+        assert_eq!(assembled_unit(src, &[None]), Err(DropReason::NoAnswer), "a missing segment rejects the unit");
+        assert_eq!(assembled_unit(src, &[Some(String::new())]), Err(DropReason::NoAnswer), "an empty answer rejects the unit");
+        // The number census used to reject this and every R03/R04 body paragraph with it. The
+        // figures are restored from the mask tokens, so the paragraph itself must survive.
+        let changed = "There are 60 SD and 14 SMA in this area.";
+        assert_eq!(assembled_unit(src, &[Some(changed.to_string())]).ok().as_deref(), Some(changed));
         let long_src = "kalimat uji ".repeat(60);
-        assert_eq!(assembled_unit(&long_src, &[Some("short reply".to_string())]), None, "a fragment answer rejects");
+        assert_eq!(assembled_unit(&long_src, &[Some("short reply".to_string())]), Err(DropReason::TooShort), "a fragment answer rejects");
+        // A reordered sentence keeps every number, so it is accepted and the reorder is not a drop.
+        let reordered = "There are 14 SMA and 50 SD in this area.";
+        assert_eq!(assembled_unit(src, &[Some(reordered.to_string())]).ok().as_deref(), Some(reordered));
+    }
+
+    #[test]
+    fn a_masked_answer_reaches_the_memory_and_its_figures_come_back_from_the_source() {
+        // What the worker sees: `[[0]]`/`[[1]]` where the numbers were, and the answer still holds
+        // those placeholders. This is the R03/R04 case: every numbered paragraph used to be
+        // dropped because the real numbers were compared against placeholder indices.
+        let masked = "Pada tahun [[0]], jumlah penduduk [[1]] jiwa.";
+        let en = "In [[0]], the population was [[1]] people.";
+        assert_eq!(assembled_unit(masked, &[Some(en.to_string())]).ok().as_deref(), Some(en));
+        // Restoring that answer puts the original figures back, so the editor never has to fix a
+        // translated statistic by hand.
+        let masked_source = translate::mask::mask(&"Pada tahun 2020, jumlah penduduk 1.234 jiwa.".to_string(), &[]);
+        assert_eq!(translate::mask::unmask_tolerant(en, &masked_source), "In 2020, the population was 1.234 people.");
+    }
+
+    #[test]
+    fn drop_note_names_every_reason_instead_of_swallowing_the_unit() {
+        assert_eq!(drop_note(&[]), "", "a clean run says nothing");
+        let dropped = vec![("a".to_string(), DropReason::NoAnswer), ("b".to_string(), DropReason::TooShort), ("c".to_string(), DropReason::TooShort)];
+        let note = drop_note(&dropped);
+        assert!(note.contains("3 text(s)"), "{note}");
+        assert!(note.contains("1 empty"), "{note}");
+        assert!(note.contains("2 too short"), "{note}");
     }
 
     #[test]
@@ -2915,7 +3236,13 @@ mod tests {
     #[test]
     fn saving_is_refused_for_a_termless_row_or_an_empty_list() {
         let empty = Some("The glossary is empty — add at least one term before saving.".to_string());
-        let term = |id: &str, ai: &str, official: &str| GlossaryTerm { id: id.into(), ai: ai.into(), official: official.into(), count: 0 };
+        let term = |id: &str, ai: &str, official: &str| GlossaryTerm {
+            id: id.into(),
+            ai: ai.into(),
+            official: official.into(),
+            count: 0,
+            ..Default::default()
+        };
         assert_eq!(glossary_save_error(&[term("Kecamatan", "", "Subdistrict")]), None);
         assert_eq!(glossary_save_error(&[]), empty);
         assert_eq!(glossary_save_error(&[term("", "", "")]), empty);
@@ -3048,6 +3375,29 @@ mod tests {
     }
 
     #[test]
+    fn a_cell_whose_english_is_the_same_words_stays_one_line() {
+        let g = glossary();
+        let translations = HashMap::from([
+            ("Total".to_string(), "total".to_string()),
+            ("Kecamatan Citeureup".to_string(), "Kecamatan Citeureup .".to_string()),
+            ("Jumlah Penduduk".to_string(), "Population".to_string()),
+        ]);
+        let matrix = vec![
+            vec!["Total".into(), "Kecamatan Citeureup".into(), "Jumlah Penduduk".into()],
+            vec!["Posyandu".into(), "Dokter".into(), "Bidan".into()],
+        ];
+        let paired = pair_cells(&matrix, &translations, &g);
+        assert_eq!(paired[0][0], "Total", "same word in both languages is not a pair");
+        assert_eq!(paired[0][1], "Kecamatan Citeureup", "only the punctuation differed");
+        assert_eq!(paired[0][2], "Jumlah Penduduk\u{2028}Population");
+        assert_eq!(paired[1][0], "Posyandu", "no translation means the cell is untouched");
+
+        assert!(same_words("Total", "total"));
+        assert!(same_words("Luas / Total Area", "Luas / Total Area."));
+        assert!(!same_words("Jumlah", "Total"));
+    }
+
+    #[test]
     fn test_is_pure_kicker_or_num() {
         assert!(is_pure_kicker_or_num("Tabel"));
         assert!(is_pure_kicker_or_num("Tabel\nTable"));
@@ -3101,6 +3451,7 @@ mod tests {
             ai: String::new(),
             official: "Central Statistics Agency Of Karawang Regency".into(),
             count: 1,
+            ..Default::default()
         });
         let mut ai_map = HashMap::new();
         ai_map.insert("BPS Kabupaten Karawang".into(), "BPS Karawang Regency".into());

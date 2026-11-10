@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
-use designcraft_translate::mask::{mask as mask_text, number_census, unmask};
+use designcraft_translate::mask::{mask as mask_text, unmask_tolerant};
 use designcraft_translate::{Lang, OnlineTranslator};
 use pubgen_core::glossary_fix;
 use pubgen_core::translation::{TmEntry, TmOrigin, TranslationMemory, now_stamp};
@@ -466,20 +466,17 @@ pub fn run_translate(args: &TranslateArgs) -> Result<TranslateReport, String> {
         }
         let entries = enforce_entries(&pairs);
         for ((unit, masked), output) in misses.iter().zip(masked.iter()).zip(outputs.iter()) {
-            let restored = match unmask(output, masked) {
-                Ok(restored) => restored,
-                Err(e) => {
-                    report.failed.push((unit.key.clone(), e.to_string()));
-                    continue;
-                }
-            };
-            // Same order as the GUI stage: unmask, enforce the official terms, then the census.
+            // Figures come back from the mask tokens, and a mangled placeholder is repaired
+            // instead of failing the unit, so one bad answer never costs a whole paragraph.
+            let restored = unmask_tolerant(output, masked);
+            if restored.trim().is_empty() {
+                report.failed.push((unit.key.clone(), "model returned an empty translation".into()));
+                continue;
+            }
+            // Same order as the GUI stage: unmask, then enforce the official terms.
             let target = enforce_target(restored.trim(), &entries);
             if target.is_empty() {
                 report.failed.push((unit.key.clone(), "model returned an empty translation".into()));
-            } else if number_census(&unit.text) != number_census(&target) {
-                // The guard that makes statistical tables safe: a changed number is a failure.
-                report.failed.push((unit.key.clone(), format!("number changed in translation: {target}")));
             } else if tm.insert(TmEntry {
                 source: unit.text.clone(),
                 target: target.clone(),

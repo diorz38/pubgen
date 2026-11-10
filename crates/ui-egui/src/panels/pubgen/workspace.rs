@@ -5184,7 +5184,10 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         let title_en =
             if !card.title_en.trim().is_empty() { card.title_en.clone() } else { card.settings.get("title_en").cloned().unwrap_or_default() };
         let raw_file_en = card.settings.get("file_en").and_then(|fen| staged(fen)).unwrap_or_default();
-        let file_en = if raw_file_en == file { String::new() } else { raw_file_en };
+        // A `file_en` that names the same file as `file` (same path, case, slash or bare name) is not
+        // a separate English RTF, so it must export blank: otherwise a re-import reads the Indonesian
+        // file back as "English" instead of translating it.
+        let file_en = if super::file_en_same_as_file(&file, &raw_file_en) { String::new() } else { raw_file_en };
         let image1 = card.settings.get("image1").and_then(|im| staged(im)).unwrap_or_default();
         let image2 = card.settings.get("image2").and_then(|im| staged(im)).unwrap_or_default();
         let theme = if !card.table_theme.trim().is_empty() {
@@ -5368,7 +5371,16 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         let _ = super::toc::generate_toc(app, &toc_st, target_page, &plan, false);
     }
 
-    Ok(gen_res)
+    // A translation job still in flight has not written any memory entry yet, so the pages above
+    // rendered the previous memory and the English column keeps the Indonesian body — which looks
+    // exactly like the bug being fixed. Say so instead of letting the user re-report it.
+    Ok(if state.translate_job.is_some() {
+        format!(
+            "{gen_res} AI translation is still running — the English columns use the memory as it was before this run; generate again when it finishes."
+        )
+    } else {
+        gen_res
+    })
 }
 
 fn start_compile_job(app: &mut DesignApp, ctx: &egui::Context, state: &mut OrchestratorWorkspaceState, publish: bool, lang: &str) {

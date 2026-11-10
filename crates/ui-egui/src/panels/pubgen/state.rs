@@ -211,6 +211,9 @@ pub struct PubgenState {
     /// Table page-targeted translation: the table page awaiting the AI result.
     #[serde(skip)]
     pub ai_table_target: Option<ai::TablePageTarget>,
+    /// Review pages whose English column still shows the copied Indonesian body, awaiting AI translation.
+    #[serde(skip)]
+    pub ai_page_targets_batch: Vec<ai::PageTarget>,
     /// Range of table pages awaiting batch AI translation.
     #[serde(skip)]
     pub ai_table_targets_batch: Vec<ai::TablePageTarget>,
@@ -612,6 +615,7 @@ impl Default for PubgenState {
             ai_pending_excel_path: String::new(),
             ai_page_target: None,
             ai_table_target: None,
+            ai_page_targets_batch: Vec::new(),
             ai_table_targets_batch: Vec::new(),
             ai_table_range_from: 1,
             ai_table_range_to: 1,

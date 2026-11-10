@@ -2207,7 +2207,8 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
             // Ulasan / Editorial Chapter layout:
             // Split title "BAB 01 Pemerintahan" into "BAB 01" and "Pemerintahan"
             let (ch_line, title_line) = split_chapter_title(clean_id_title, num_val);
-            let mut resolved_en_rtf = if st.bilingual_output && !file_en_val.is_empty() && !is_preface {
+            let mut resolved_en_rtf = if st.bilingual_output && !file_en_val.is_empty() && !file_en_same_as_file(file_val, file_en_val) && !is_preface
+            {
                 resolve_catalog_related_file(&st.card1_path, file_en_val, "rtf")
             } else {
                 None
@@ -2424,6 +2425,10 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                             let sid = en_story_id.map(designcraft_doc::StoryId);
                             en_over = val.get("overset").and_then(Value::as_bool).unwrap_or(false) || sid.is_some_and(|s| story_is_overset(app, s));
                             inserted_rtfs_count = inserted_rtfs_count.saturating_add(1);
+                            // The English column now shows the Indonesian body, so the layout reads as
+                            // bilingual while the English still owes a translation: flag it so
+                            // "Translate Review" can find this page and replace the body afterwards.
+                            set_en_frame_label(app, fid, PUBGEN_EN_UNTRANSLATED_LABEL);
                         }
                     } else {
                         // Symmetrical dual-language column fallback: place Indonesian RTF and replace header with REVIEW
@@ -2443,6 +2448,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                                     val.get("overset").and_then(Value::as_bool).unwrap_or(false) || sid.is_some_and(|s| story_is_overset(app, s));
                                 inserted_rtfs_count = inserted_rtfs_count.saturating_add(1);
                                 placed = true;
+                                set_en_frame_label(app, fid, PUBGEN_EN_UNTRANSLATED_LABEL);
                                 if let Some(sid) = sid {
                                     let _ = app.session.edit(|doc, _| {
                                         if let Some(story) = doc.story_mut(sid) {
@@ -2470,6 +2476,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                                 }
                                 Ok(serde_json::Value::Null)
                             });
+                            set_en_frame_label(app, fid, PUBGEN_EN_UNTRANSLATED_LABEL);
                         }
                     }
                 }
@@ -2683,8 +2690,11 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                     || clean_id_title.to_lowercase().contains("pengantar")
                     || title_en_val.eq_ignore_ascii_case("preface");
 
-                let mut resolved_en_spread_rtf =
-                    if !file_en_val.is_empty() { resolve_catalog_related_file(&st.card1_path, file_en_val, "rtf") } else { None };
+                let mut resolved_en_spread_rtf = if !file_en_val.is_empty() && !file_en_same_as_file(file_val, file_en_val) {
+                    resolve_catalog_related_file(&st.card1_path, file_en_val, "rtf")
+                } else {
+                    None
+                };
                 let id_spread_rtf = resolve_catalog_related_file(&st.card1_path, file_val, "rtf").map(|p| p.to_string_lossy().to_string());
                 if resolved_en_spread_rtf.is_none() || resolved_en_spread_rtf.as_ref().map(|p| p.to_string_lossy().to_string()) == id_spread_rtf {
                     let p = std::path::Path::new(file_val);
@@ -3967,6 +3977,18 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
         details.push(format!("{inserted_tables_count} tables auto-inserted"));
     }
     let tbl_msg = if !details.is_empty() { format!(" (with {})", details.join(", ")) } else { String::new() };
+    // Review pages that kept the copied Indonesian body in the English column: the dual-language
+    // layout is intact, but the English still owes a translation — tell the user which action fixes it.
+    let untranslated_reviews = app
+        .session
+        .active()
+        .map(|s| s.doc.spreads.iter().flat_map(|sp| sp.items.iter()).filter(|it| it.label == PUBGEN_EN_UNTRANSLATED_LABEL).count())
+        .unwrap_or(0);
+    let review_msg = if untranslated_reviews > 0 {
+        format!(" {untranslated_reviews} review page(s) show Indonesian in the English column — run Translate Review.")
+    } else {
+        String::new()
+    };
     ensure_back_cover_at_end(app);
 
     let is_dda = is_facing
@@ -4004,7 +4026,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
         let _ = super::header_footer::execute_apply_header_footer(app, &hf_st);
     }
 
-    Ok(format!("Successfully generated {generated_count} pages{tbl_msg}!"))
+    Ok(format!("Successfully generated {generated_count} pages{tbl_msg}!{review_msg}"))
 }
 
 #[cfg(test)]
@@ -6044,6 +6066,100 @@ pub(crate) mod tests {
             let style = run.format.over.font_style.as_deref().unwrap_or("Regular");
             assert!(!style.eq_ignore_ascii_case("italic"), "Indonesian story runs should NOT be converted to italic, got: {style}");
         }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn en_body_untranslated_flags_a_copied_body() {
+        assert!(en_body_untranslated("Ulasan wilayah.", " ulasan   WILAYAH. "));
+        assert!(!en_body_untranslated("Ulasan wilayah.", "Region review."));
+        assert!(!en_body_untranslated("", ""));
+        // A `file_en` naming the same file as `file` is not a separate English RTF.
+        assert!(file_en_same_as_file("dir/R03.rtf", "R03.rtf"));
+        assert!(file_en_same_as_file("dir/R03.rtf", "DIR\\R03.rtf"));
+        assert!(!file_en_same_as_file("dir/R03.rtf", "dir/R03_en.rtf"));
+    }
+
+    #[test]
+    fn copied_english_column_is_flagged_then_replaced_by_ai() {
+        // Blank `file_en` (and no `_en.rtf` sibling): the generator copies the Indonesian body into
+        // the English column to keep the dual-language layout intact. That copy must be flagged, and
+        // once the translation exists the flagged column must be replaced by the English text.
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+
+        let dir = std::env::temp_dir().join(format!("pubgen_en_flag_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let id_rtf = dir.join("R01.rtf");
+        let id_body = "Kecamatan Karawang Timur merupakan bagian tak terpisahkan.";
+        std::fs::write(&id_rtf, format!(r"{{\rtf1\ansi\deff0 {{\fonttbl {{\f0 Arial;}}}}\f0\fs24 {id_body}}}")).unwrap();
+
+        let mut st = PubgenState {
+            card1_preset: 0,
+            bilingual_output: true,
+            card1_records: vec![vec![
+                "Ulasan".into(),
+                "01".into(),
+                "Bab 01 Geografi".into(),
+                id_rtf.to_string_lossy().to_string(),
+                "".into(),
+                "Chapter 01 Geography".into(),
+                "".into(),
+            ]],
+            card1_headers: vec![
+                "type".into(),
+                "number".into(),
+                "title".into(),
+                "file".into(),
+                "template".into(),
+                "title_en".into(),
+                "file_en".into(),
+            ],
+            card1_type_col: 0,
+            card1_num_col: 1,
+            card1_title_col: 2,
+            card1_range_all: true,
+            toc_style: "TOC Entry".into(),
+            ..Default::default()
+        };
+
+        let msg = execute_generate_pages(&mut app, &st).expect("generate should succeed");
+        assert!(msg.contains("run Translate Review"), "the summary must point at the fix: {msg}");
+
+        let found = {
+            let active = app.session.active().expect("active session");
+            let mut found = None;
+            for sp in active.doc.spreads.iter() {
+                for it in &sp.items {
+                    if it.label == PUBGEN_EN_UNTRANSLATED_LABEL {
+                        found = active.doc.page_of_item(it.id).map(|p| (it.id.0, p));
+                    }
+                }
+            }
+            found
+        };
+        let (en_fid, page_idx) = found.expect("the copied English column must be flagged");
+
+        let en_text = |app: &DesignApp| -> String {
+            let active = app.session.active().expect("active session");
+            let sid = active.doc.item(designcraft_doc::ItemId(en_fid)).and_then(|it| it.text_frame()).map(|tf| tf.story).expect("EN body frame");
+            active.doc.story(sid).map(|s| s.text.clone()).unwrap_or_default()
+        };
+        assert!(en_text(&app).contains("Kecamatan Karawang Timur"), "the copy keeps the layout filled");
+
+        // The batch scan finds the page without a manual selection.
+        let targets = ai::collect_untranslated_review_targets(&app);
+        assert_eq!(targets.len(), 1, "the flagged review page must be found");
+        assert_eq!(targets[0].page_idx, page_idx);
+        assert_eq!(targets[0].en_body_fid, en_fid);
+
+        // After the AI result lands, the English column holds English and is no longer flagged.
+        st.translations.insert(id_body.to_string(), "East Karawang District is an integral part of Karawang.".to_string());
+        assert!(ai::apply_page_result(&mut app, &st, &targets[0]) > 0, "the copied paragraph must be replaced");
+        assert!(en_text(&app).contains("East Karawang District"), "EN body replaced: {}", en_text(&app));
+        let active = app.session.active().expect("active session");
+        assert_eq!(active.doc.item(designcraft_doc::ItemId(en_fid)).map(|it| it.label.clone()), Some(PUBGEN_EN_TRANSLATED_LABEL.to_string()));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

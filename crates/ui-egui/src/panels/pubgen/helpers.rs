@@ -590,6 +590,32 @@ pub(crate) fn file_en_same_as_file(file: &str, file_en: &str) -> bool {
     matches!((name_of(file), name_of(fen)), (Some(a), Some(b)) if a == b) && !(has_dir(file) && has_dir(fen))
 }
 
+/// Frame label on an English column whose body still holds the copied Indonesian text.
+pub(crate) const PUBGEN_EN_UNTRANSLATED_LABEL: &str = "pubgen_en_untranslated";
+/// Frame label on an English column whose body holds the AI-translated English.
+pub(crate) const PUBGEN_EN_TRANSLATED_LABEL: &str = "pubgen_en_translated";
+
+/// True when the English column still carries the Indonesian source: both sides normalize to the
+/// same text (whitespace collapsed, case-folded). Copying the Indonesian body into the English
+/// frame is allowed to keep the dual-language layout intact; this is how the copy is then marked
+/// as owing a translation.
+pub(crate) fn en_body_untranslated(id_body: &str, en_body: &str) -> bool {
+    let norm = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+    let id = norm(id_body);
+    !id.is_empty() && id == norm(en_body)
+}
+
+/// Mark an English column frame as holding the copied Indonesian body (`PUBGEN_EN_UNTRANSLATED_LABEL`)
+/// or the AI-translated English (`PUBGEN_EN_TRANSLATED_LABEL`).
+pub(crate) fn set_en_frame_label(app: &mut DesignApp, fid: u64, label: &str) {
+    let _ = app.session.edit(|doc, _| {
+        if let Some(it) = doc.item_mut(designcraft_doc::ItemId(fid)) {
+            it.label = label.to_string();
+        }
+        Ok(serde_json::Value::Null)
+    });
+}
+
 /// Split chart title like "Grafik 02.01 Panjang Jalan..." into ("Grafik 02.01", "Panjang Jalan...")
 pub(crate) fn split_chart_title(title: &str, num_val: &str, type_val: &str) -> (String, String) {
     let t = title.trim();
