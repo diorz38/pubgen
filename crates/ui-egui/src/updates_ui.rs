@@ -5,42 +5,11 @@ use serde_json::Value;
 use crate::DesignApp;
 
 #[cfg(not(target_arch = "wasm32"))]
-use craft_update::updater::{Action, Status, Updater};
-
-/// The app entry for update checks — points at this fork's releases.
+use craft_update::updater::Status;
 #[cfg(not(target_arch = "wasm32"))]
-const THIS_APP: craft_update::app::App =
-    craft_update::app::App::new("designcraft", "DesignCraft", "Page layout and publishing", "diorz38/designcraft-pubgen");
-
-/// Builds a [`craft_update::updater::CheckSource`] that includes pre-releases.
-///
-/// This fork uses versions like `0.13.0-pubgen.0.7.9`, which carry a semver pre-release
-/// identifier. The upstream `check_for_update` helper hard-codes `allow_prerelease = false`
-/// and would silently skip every one of our releases, so we supply our own source that
-/// passes `true` to `parse_github_release_list`.
+use craft_update::updater::{Action, Updater};
 #[cfg(not(target_arch = "wasm32"))]
-fn make_check_source() -> craft_update::updater::CheckSource {
-    use craft_update::{Http, http::Fetched, is_newer, parse_github_release_list, parse_version};
-    use std::sync::Arc;
-
-    let version = env!("CARGO_PKG_VERSION").to_owned();
-    Arc::new(move || {
-        let http = Http::new(&format!("{}/Update", THIS_APP.name)).map_err(|e| format!("could not create HTTP client: {e}"))?;
-        let url = format!("https://api.github.com/repos/{}/releases?per_page=30", THIS_APP.repo,);
-        match http.get_api(&url, None)? {
-            Fetched::Body { text, .. } => {
-                // allow_prerelease = true so versions like `0.13.0-pubgen.0.7.9` are found.
-                let latest = parse_github_release_list(&text, THIS_APP.repo, true)?;
-                let Some(release) = latest else { return Ok(None) };
-                let Some(rel_v) = &release.version else { return Ok(None) };
-                let Some(cur_v) = parse_version(&version) else { return Ok(None) };
-                if is_newer(rel_v, &cur_v) { Ok(Some(release)) } else { Ok(None) }
-            }
-            Fetched::RateLimited { .. } => Err("GitHub's request limit was reached".into()),
-            Fetched::NotModified | Fetched::NotFound => Ok(None),
-        }
-    })
-}
+use craft_update::{CheckResultDialog, CheckResultResponse};
 
 pub(crate) struct Runtime {
     #[cfg(not(target_arch = "wasm32"))]
@@ -53,23 +22,24 @@ pub(crate) struct Runtime {
     /// The context of the last frame, to wake the UI when a check is queued from a menu callback.
     #[cfg(not(target_arch = "wasm32"))]
     repaint: Option<egui::Context>,
+    /// The web build has no updater; its Help ▸ Check for Updates opens a window with a fixed message.
+    #[cfg(target_arch = "wasm32")]
     pub(crate) manual_window_open: bool,
-    pub(crate) status_message: Option<String>,
 }
 
 impl Default for Runtime {
     fn default() -> Self {
         Self {
             #[cfg(not(target_arch = "wasm32"))]
-            updater: Updater::new(&THIS_APP, env!("CARGO_PKG_VERSION")).with_source(make_check_source()),
+            updater: Updater::new(&crate::UPDATE_APP, env!("CARGO_PKG_VERSION")),
             #[cfg(not(target_arch = "wasm32"))]
             startup_check: false,
             #[cfg(not(target_arch = "wasm32"))]
             check_requested: false,
             #[cfg(not(target_arch = "wasm32"))]
             repaint: None,
+            #[cfg(target_arch = "wasm32")]
             manual_window_open: false,
-            status_message: None,
         }
     }
 }
@@ -94,7 +64,6 @@ pub(crate) fn check(app: &mut DesignApp) -> Result<Value, String> {
     #[cfg(target_arch = "wasm32")]
     {
         app.updates_rt.manual_window_open = true;
-        app.updates_rt.status_message = Some("Update check is not supported in the web browser.".into());
         Ok(Value::Null)
     }
 }
@@ -115,32 +84,38 @@ pub(crate) fn tick(app: &mut DesignApp, ctx: &egui::Context) {
     let _ = (app, ctx);
 }
 
+/// Whether the check result window shows: for every status but idle (a requested check, and the
+/// first start after an update, which reports that it installed or why it failed), and never over
+/// the startup prompt.
+#[cfg(not(target_arch = "wasm32"))]
+fn result_window_shows(status: &Status, prompt_open: bool) -> bool {
+    !prompt_open && !matches!(status, Status::Idle)
+}
+
 pub(crate) fn show(app: &mut DesignApp, ctx: &egui::Context) {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        // The restart helper is scheduled before the app closes, so no update starts over unsaved work.
+        // The updater asks to close only when no document has unsaved changes; the install starts when the app exits.
         let clean = !app.session.documents().iter().any(|d| d.is_dirty());
         match app.updates_rt.updater.show_if(ctx, clean) {
             Action::OpenUrl(url) => ctx.open_url(egui::OpenUrl::new_tab(url)),
             Action::Close => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Action::None => {}
         }
-        // The window answers Help ▸ Check for Updates, so it follows the updater's status.
-        let rt = &mut app.updates_rt;
-        (rt.manual_window_open, rt.status_message) = match rt.updater.status() {
-            Status::Idle => (false, None),
-            Status::Checking => (true, Some(crate::i18n::tr(&app.ui.language, "Checking for updates…").to_string())),
-            Status::UpToDate => (
-                true,
-                Some(
-                    crate::i18n::tr(&app.ui.language, "DesignCraft {version} is currently the newest version available.")
-                        .replace("{version}", env!("CARGO_PKG_VERSION")),
-                ),
-            ),
-            Status::Failed(e) => (true, Some(crate::i18n::tr(&app.ui.language, "Could not check for updates:\n{error}").replace("{error}", e))),
-        };
+        // Help ▸ Check for Updates answers in the shared dialog, which follows the updater's status.
+        if result_window_shows(app.updates_rt.updater.status(), app.updates_rt.updater.prompt_open()) {
+            let dialog = CheckResultDialog::new(&crate::UPDATE_APP, env!("CARGO_PKG_VERSION"));
+            match dialog.show(ctx, app.updates_rt.updater.status()) {
+                CheckResultResponse::None => {}
+                CheckResultResponse::Close => app.updates_rt.updater.dismiss_status(),
+                CheckResultResponse::CheckAgain => app.updates_rt.check_requested = true,
+                // The next `show_if` asks the window to close once no document has unsaved changes.
+                CheckResultResponse::RestartToUpdate => app.updates_rt.updater.restart_to_update(),
+            }
+        }
     }
 
+    #[cfg(target_arch = "wasm32")]
     if app.updates_rt.manual_window_open {
         let mut open = true;
         let title = crate::i18n::tr(&app.ui.language, "DesignCraft Updates");
@@ -152,9 +127,7 @@ pub(crate) fn show(app: &mut DesignApp, ctx: &egui::Context) {
             .pivot(egui::Align2::CENTER_CENTER)
             .default_pos(ctx.content_rect().center())
             .show(ctx, |ui| {
-                if let Some(msg) = &app.updates_rt.status_message {
-                    ui.label(msg);
-                }
+                ui.label(crate::i18n::tr(&app.ui.language, "Update check is not supported in the web browser."));
                 ui.add_space(8.0);
                 if ui.button(ok_label).clicked() {
                     app.updates_rt.manual_window_open = false;
@@ -163,12 +136,6 @@ pub(crate) fn show(app: &mut DesignApp, ctx: &egui::Context) {
         if !open {
             app.updates_rt.manual_window_open = false;
         }
-    }
-
-    // Closing the window dismisses the outcome it showed.
-    #[cfg(not(target_arch = "wasm32"))]
-    if !app.updates_rt.manual_window_open {
-        app.updates_rt.updater.dismiss_status();
     }
 }
 
@@ -180,6 +147,7 @@ mod tests {
     #[test]
     fn default_runtime_is_idle() {
         let rt = Runtime::default();
+        #[cfg(target_arch = "wasm32")]
         assert!(!rt.manual_window_open);
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -198,7 +166,7 @@ mod tests {
             tag: "v99.0.0".into(),
             version: craft_update::parse_version("99.0.0"),
             name: "DesignCraft 99.0.0".into(),
-            html_url: "https://github.com/diorz38/designcraft-pubgen/releases/tag/v99.0.0".into(),
+            html_url: "https://github.com/storytold/designcraft/releases/tag/v99.0.0".into(),
             ..Default::default()
         };
         app.updates_rt.updater.offer(release);
@@ -208,5 +176,25 @@ mod tests {
         });
         output.textures_delta.clear();
         assert!(app.updates_rt.updater.prompt_open());
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn result_window_shows_every_status_but_idle() {
+        let shown = [
+            Status::Checking,
+            Status::UpToDate,
+            Status::Failed("no network".into()),
+            Status::Installing,
+            Status::Ready,
+            Status::Managed,
+            Status::Updated("0.2.0".into()),
+            Status::InstallFailed("disk full".into()),
+        ];
+        for status in &shown {
+            assert!(result_window_shows(status, false), "{status:?}");
+            assert!(!result_window_shows(status, true), "{status:?} over the prompt");
+        }
+        assert!(!result_window_shows(&Status::Idle, false));
     }
 }
