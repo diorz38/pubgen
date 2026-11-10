@@ -1176,6 +1176,46 @@ impl Document {
         }
     }
 
+    /// Drop story frame references to items that no longer exist (in spreads, parents or anchored
+    /// objects), and delete the stories the drop leaves with no frames. A document saved after a
+    /// command removed a frame but not its story then opens instead of being refused.
+    pub fn drop_orphan_frames(&mut self) {
+        loop {
+            let mut live = std::collections::HashSet::new();
+            for sp in self.spreads.iter().chain(self.parents.iter()) {
+                for it in &sp.items {
+                    it.walk(&mut |i| {
+                        live.insert(i.id);
+                    });
+                }
+            }
+            for (_, it) in self.anchored_items() {
+                it.walk(&mut |i| {
+                    live.insert(i.id);
+                });
+            }
+            let mut emptied = Vec::new();
+            let mut changed = false;
+            for (&sid, story) in self.stories.iter_mut() {
+                let story = Arc::make_mut(story);
+                let had = story.frames.len();
+                story.frames.retain(|f| live.contains(f));
+                if story.frames.len() != had {
+                    changed = true;
+                    if story.frames.is_empty() {
+                        emptied.push(sid);
+                    }
+                }
+            }
+            for sid in emptied {
+                self.stories.remove(&sid);
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
     /// Validate structural invariants (ids unique, threads consistent, stories well-formed).
     pub fn check(&self) -> Result<()> {
         for f in &self.styles.composite_fonts {
