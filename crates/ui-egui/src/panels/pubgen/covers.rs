@@ -1027,6 +1027,7 @@ pub fn execute_generate_back_cover(app: &mut DesignApp, st: &PubgenState) -> Res
             }
         }
 
+        doc.drop_orphan_frames();
         Ok(Value::Null)
     });
 
@@ -1451,6 +1452,7 @@ pub fn execute_generate_front_cover(app: &mut DesignApp, st: &PubgenState) -> Re
                     }
                     sp.relayout();
                 }
+                doc.drop_orphan_frames();
                 for sid in title_en_stories {
                     if let Some(story) = doc.story_mut(sid) {
                         for r in &mut story.chars {
@@ -2326,6 +2328,7 @@ pub fn apply_ai_cover_result(app: &mut DesignApp, st: &PubgenState, bg_path: &st
             }
             sp.relayout();
         }
+        doc.drop_orphan_frames();
         for sid in title_en_stories {
             if let Some(story) = doc.story_mut(sid) {
                 for c in &mut story.chars {
@@ -3093,6 +3096,18 @@ pub(crate) mod tests {
             });
             assert!(copied, "{pages} pages: the back cover (page {}) has no copy of the front-cover shape", last + 1);
         }
+    }
+
+    /// The back cover removes the cover text frames it copies. Leaving their stories behind made
+    /// the saved document reopen as "not a DesignCraft document: no such item".
+    #[test]
+    fn the_back_cover_leaves_no_story_pointing_at_a_removed_frame() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({ "preset": "A4", "pages": 2, "facingPages": true })).unwrap();
+        add_cover_text_frame(&mut app, 0, [36.0, 36.0, 300.0, 120.0], "Judul", "#FFFFFF", "Arial", "Bold", 18.0, None, None, "left").unwrap();
+        execute_generate_back_cover(&mut app, &PubgenState::default()).unwrap();
+        let active = app.session.active().unwrap();
+        active.doc.check().expect("the back cover leaves a document that opens");
     }
 
     /// The three back-cover text frames pick their colour from what is actually painted behind them:

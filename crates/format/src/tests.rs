@@ -942,3 +942,23 @@ fn duplicate_ids_at_the_top_of_the_range_do_not_overflow() {
     assert_eq!(all_item_ids(&d), vec![u64::MAX, u64::MAX]);
     assert!(d.check().is_err());
 }
+
+/// A story left pointing at a frame a command removed cannot be opened as it is. Saving does not
+/// validate, so the file is written anyway; loading drops the orphan frame and keeps the document.
+#[test]
+fn a_story_frame_that_does_not_exist_is_dropped_on_open() {
+    let mut d = Document::new(&NewDocument::default());
+    let lid = d.default_layer();
+    let (kept, kept_story) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(10.0, 10.0, 200.0, 200.0), lid, "kept", ParaFormat::default()).unwrap();
+    let (removed, removed_story) =
+        d.add_text_frame(SpreadRef::Doc(0), Rect::new(10.0, 210.0, 200.0, 400.0), lid, "", ParaFormat::default()).unwrap();
+    let sp = Arc::make_mut(&mut d.spreads[0]);
+    sp.items.retain(|it| it.id != removed);
+    assert_eq!(d.stories[&removed_story].frames, vec![removed]);
+    let back = load(&save(&d).unwrap()).unwrap();
+    back.check().unwrap();
+    assert_eq!(back.stories[&kept_story].frames, vec![kept]);
+    assert!(!back.stories.contains_key(&removed_story), "the emptied story is gone");
+    assert_eq!(all_item_ids(&back), vec![u64::from(kept.0)]);
+}
+
