@@ -114,15 +114,27 @@ pub(crate) fn story_of_frame(app: &DesignApp, fid: u64) -> Option<designcraft_do
     item.text_frame().map(|tf| tf.story)
 }
 
-/// Create a text frame and tag its paragraph with the TOC paragraph style, so `toc.generate`
-/// lists the frame's text as an entry (one entry per generated page).
-pub(crate) fn frame_with_style(app: &mut DesignApp, spread_idx: usize, rect: [f64; 4], text: &str, style: &str) -> Option<u64> {
+/// Create a text frame, tag its paragraph with the TOC paragraph style, and return (story, frame_id).
+pub(crate) fn frame_with_style_info(
+    app: &mut DesignApp,
+    spread_idx: usize,
+    rect: [f64; 4],
+    text: &str,
+    style: &str,
+) -> Option<(u64, designcraft_doc::ItemId)> {
     let res = app.run("frame.create", json!({"spread": spread_idx, "rect": rect, "content": "text", "text": text, "caret": false})).ok()?;
+    let fid = res.get("id").and_then(Value::as_u64).map(designcraft_doc::ItemId)?;
     let story = res.get("story").and_then(Value::as_u64)?;
     let end = text.len().max(1) as u64;
     let _ = app.run("text.select", json!({"story": story, "anchor": 0, "focus": end}));
     let _ = app.run("style.paragraph.apply", json!({"name": style}));
-    Some(story)
+    Some((story, fid))
+}
+
+/// Create a text frame and tag its paragraph with the TOC paragraph style, so `toc.generate`
+/// lists the frame's text as an entry (one entry per generated page).
+pub(crate) fn frame_with_style(app: &mut DesignApp, spread_idx: usize, rect: [f64; 4], text: &str, style: &str) -> Option<u64> {
+    frame_with_style_info(app, spread_idx, rect, text, style).map(|(story, _)| story)
 }
 
 /// Create a text frame with specific font family, optional font style, font size, and optional paragraph style.

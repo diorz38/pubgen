@@ -248,6 +248,7 @@ fn post_process_template_applied_page(
         // A wrapped table title must grow its frame (heightOnly) instead of spilling
         // over the table slot below it.
         for id in title_slot_ids {
+            let _ = app.run("object.fit", json!({"mode": "fitFrameToContent", "axis": "height", "ids": [id]}));
             let _ = app.run("object.textFrameOptions", json!({"autoSize": "heightOnly", "autoSizeReference": "topLeft", "ids": [id]}));
         }
 
@@ -325,18 +326,27 @@ fn post_process_template_applied_page(
     {
         let item_ids: Vec<designcraft_doc::ItemId> = items.iter().filter_map(Value::as_u64).map(designcraft_doc::ItemId).collect();
 
-        let local_m_x0 = m_x0 - pg_x0;
-        let local_m_x1 = m_x1 - pg_x0;
         let _ = app.session.edit(|doc, _| {
             for &it_id in &item_ids {
                 if let Some(it) = doc.item_mut(it_id)
                     && let Some(pb) = it.path.bounds()
                 {
+                    // Calculate item coordinates relative to its parent page
+                    let rel_x0 = pb.x0 - pg_x0;
+                    let rel_x1 = pb.x1 - pg_x0;
+
                     // Template items originally placed at template's default margin (36pt)
-                    if (pb.x0 - 36.0).abs() < 4.0 {
-                        let is_full_width = (pb.x1 - (pg_w - 36.0)).abs() < 4.0;
-                        let new_x1 = if is_full_width { local_m_x1 } else { (local_m_x0 + pb.width()).min(local_m_x1) };
-                        it.path = designcraft_geom::shapes::rectangle(designcraft_geom::Rect::new(local_m_x0, pb.y0, new_x1, pb.y1));
+                    let at_left_margin = (rel_x0 - 36.0).abs() < 4.0;
+                    let at_right_margin = (rel_x1 - (pg_w - 36.0)).abs() < 4.0;
+
+                    if at_left_margin && at_right_margin {
+                        it.path = designcraft_geom::shapes::rectangle(designcraft_geom::Rect::new(m_x0, pb.y0, m_x1, pb.y1));
+                    } else if at_left_margin {
+                        let new_x1 = (m_x0 + pb.width()).min(m_x1);
+                        it.path = designcraft_geom::shapes::rectangle(designcraft_geom::Rect::new(m_x0, pb.y0, new_x1, pb.y1));
+                    } else if at_right_margin {
+                        let new_x0 = (m_x1 - pb.width()).max(m_x0);
+                        it.path = designcraft_geom::shapes::rectangle(designcraft_geom::Rect::new(new_x0, pb.y0, m_x1, pb.y1));
                     }
                 }
             }
@@ -529,6 +539,8 @@ fn row_template_slots(
     } else {
         let (id_title, en_title_opt) =
             excel::split_and_harmonize_table_title(title_val, if title_en_val.is_empty() { None } else { Some(title_en_val) });
+        let id_title = super::toc::strip_tablepage_title_prefix(&id_title, num_val, type_val).to_string();
+        let en_title_opt = en_title_opt.map(|en| super::toc::strip_tablepage_title_prefix(&en, num_val, "Table").to_string());
         // AI translation (plan §4): an explicit ` / ` pair wins, else the session map.
         let en_title_opt = match en_title_opt {
             Some(en) => Some(en),
@@ -1840,6 +1852,21 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                 let apply_res = app.run("template.page.apply", apply_params);
 
                 if let Ok(applied_info) = apply_res {
+                    apply_row_section_and_styles(
+                        app,
+                        row_chapter_id.as_deref(),
+                        page_before,
+                        &mut cur_sec_chapter,
+                        &mut cur_sec_start_page,
+                        &mut front_matter_sec_created,
+                        &mut body_sec_created,
+                        &chapter_titles,
+                        title_val,
+                        title_en_val,
+                        type_val,
+                        is_preface_row,
+                        is_dda,
+                    );
                     let table_placeholder_id = post_process_template_applied_page(
                         app,
                         st,
@@ -2011,22 +2038,6 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                         }
                     }
 
-                    apply_row_section_and_styles(
-                        app,
-                        row_chapter_id.as_deref(),
-                        page_before,
-                        &mut cur_sec_chapter,
-                        &mut cur_sec_start_page,
-                        &mut front_matter_sec_created,
-                        &mut body_sec_created,
-                        &chapter_titles,
-                        title_val,
-                        title_en_val,
-                        type_val,
-                        is_preface_row,
-                        is_dda,
-                    );
-
                     continue;
                 }
             }
@@ -2034,6 +2045,21 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
             // Procedural Divider Fallback (Option 1: like Cover template, works without assets on disk)
             if is_div {
                 app.run("layout.pages.insert", json!({"count": 1}))?;
+                apply_row_section_and_styles(
+                    app,
+                    row_chapter_id.as_deref(),
+                    page_before,
+                    &mut cur_sec_chapter,
+                    &mut cur_sec_start_page,
+                    &mut front_matter_sec_created,
+                    &mut body_sec_created,
+                    &chapter_titles,
+                    title_val,
+                    title_en_val,
+                    type_val,
+                    is_preface_row,
+                    is_dda,
+                );
                 let cur_page_idx = app.session.active().map(|s| s.doc.page_count().saturating_sub(1)).unwrap_or(0);
                 crate::canvas::go_to_page(app, cur_page_idx);
                 let _ = app.session.edit(|doc, _| {
@@ -2144,21 +2170,6 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                 if img_str.is_some() {
                     inserted_images_count = inserted_images_count.saturating_add(1);
                 }
-                apply_row_section_and_styles(
-                    app,
-                    row_chapter_id.as_deref(),
-                    page_before,
-                    &mut cur_sec_chapter,
-                    &mut cur_sec_start_page,
-                    &mut front_matter_sec_created,
-                    &mut body_sec_created,
-                    &chapter_titles,
-                    title_val,
-                    title_en_val,
-                    type_val,
-                    is_preface_row,
-                    is_dda,
-                );
                 generated_count = generated_count.saturating_add(1);
                 continue;
             }
@@ -2166,6 +2177,23 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
 
         // 1. Insert Page
         app.run("layout.pages.insert", json!({"count": 1}))?;
+
+        // Apply section numbering / styles immediately so repaginate() runs BEFORE placing items and querying margins
+        apply_row_section_and_styles(
+            app,
+            row_chapter_id.as_deref(),
+            page_before,
+            &mut cur_sec_chapter,
+            &mut cur_sec_start_page,
+            &mut front_matter_sec_created,
+            &mut body_sec_created,
+            &chapter_titles,
+            title_val,
+            title_en_val,
+            type_val,
+            is_preface_row,
+            is_dda,
+        );
 
         // Adjust page margins:
         // - DIV/COVER sheet: adjusts to Page Size (margins = 0)
@@ -3623,14 +3651,23 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                                 "text": formatted_type,
                                 "caret": false
                             }),
-                        ) && italic_second
-                            && let Some(story) = res.get("story").and_then(Value::as_u64)
-                        {
-                            let (b_start_1, b_end_1) = locale::char_to_byte_range(&formatted_type, 0, 5);
-                            let _ = app.run("text.select", json!({"story": story, "anchor": b_start_1, "focus": b_end_1}));
-                            let _ = app.run("type.char", json!({"attrs": {"fontStyle": "Regular"}}));
+                        ) {
+                            if let Some(id) = res.get("id").and_then(Value::as_u64) {
+                                let _ = app.session.edit(|doc, _| {
+                                    if let Some(it) = doc.item_mut(designcraft_doc::ItemId(id)) {
+                                        it.label = "#slot:text:table_type".to_string();
+                                    }
+                                    Ok(serde_json::Value::Null)
+                                });
+                                let _ = app.run("object.fit", json!({"mode": "fitFrameToContent", "axis": "height", "ids": [id]}));
+                            }
+                            if italic_second && let Some(story) = res.get("story").and_then(Value::as_u64) {
+                                let (b_start_1, b_end_1) = locale::char_to_byte_range(&formatted_type, 0, 5);
+                                let _ = app.run("text.select", json!({"story": story, "anchor": b_start_1, "focus": b_end_1}));
+                                let _ = app.run("type.char", json!({"attrs": {"fontStyle": "Regular"}}));
 
-                            locale::italicize_ranges_style(app, story, &formatted_type, &[(6, 11)], "Italic");
+                                locale::italicize_ranges_style(app, story, &formatted_type, &[(6, 11)], "Italic");
+                            }
                         }
                     }
 
@@ -3642,7 +3679,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                     };
 
                     if !formatted_num.is_empty() {
-                        let _ = app.run(
+                        if let Ok(res) = app.run(
                             "frame.create",
                             json!({
                                 "spread": spread_idx,
@@ -3651,14 +3688,25 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                                 "text": formatted_num,
                                 "caret": false
                             }),
-                        );
+                        ) {
+                            if let Some(id) = res.get("id").and_then(Value::as_u64) {
+                                let _ = app.session.edit(|doc, _| {
+                                    if let Some(it) = doc.item_mut(designcraft_doc::ItemId(id)) {
+                                        it.label = "#slot:text:table_num".to_string();
+                                    }
+                                    Ok(serde_json::Value::Null)
+                                });
+                                let _ = app.run("object.fit", json!({"mode": "fitFrameToContent", "axis": "height", "ids": [id]}));
+                            }
+                        }
                     }
 
                     if !title_val.is_empty() {
                         let (id_t, en_t_opt) =
                             excel::split_and_harmonize_table_title(title_val, if title_en_val.is_empty() { None } else { Some(title_en_val) });
+                        let id_t = if is_table { super::toc::strip_tablepage_title_prefix(&id_t, num_val, type_val).to_string() } else { id_t };
                         let en_t_opt = match en_t_opt {
-                            Some(en) => Some(en),
+                            Some(en) => Some(if is_table { super::toc::strip_tablepage_title_prefix(&en, num_val, "Table").to_string() } else { en }),
                             None if st.bilingual_output => {
                                 st.translations.get(id_t.trim()).map(String::as_str).filter(|s| !s.is_empty()).map(str::to_string)
                             }
@@ -3667,9 +3715,12 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
 
                         let is_landscape = excel::is_table_sheet_landscape(file_val);
                         let toc_style_name = if is_landscape { designcraft_doc::story::BASIC_PARAGRAPH } else { &st.toc_style };
-                        if let Some(en_t) = en_t_opt {
+                        let init_row_y1 = row_y0 + 140.0;
+                        let created_frame = if let Some(en_t) = en_t_opt {
                             let full_title = format!("{id_t}{}{en_t}", designcraft_doc::story::FORCED_LINE_BREAK);
-                            if let Some(story) = frame_with_style(app, spread_idx, [c3_x0, row_y0, c3_x1, row_y1], &full_title, toc_style_name) {
+                            if let Some((story, fid)) =
+                                frame_with_style_info(app, spread_idx, [c3_x0, row_y0, c3_x1, init_row_y1], &full_title, toc_style_name)
+                            {
                                 let (b_start_1, b_end_1) = locale::char_to_byte_range(&full_title, 0, id_t.chars().count());
                                 let _ = app.run("text.select", json!({"story": story, "anchor": b_start_1, "focus": b_end_1}));
                                 let _ = app.run("type.char", json!({"attrs": {"fontStyle": "Regular"}}));
@@ -3677,9 +3728,35 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                                 let en_start = id_t.chars().count() + 1;
                                 let en_end = en_start + en_t.chars().count();
                                 locale::italicize_ranges_style(app, story, &full_title, &[(en_start, en_end)], "Italic");
+                                Some(fid)
+                            } else {
+                                None
                             }
                         } else {
-                            frame_with_style(app, spread_idx, [c3_x0, row_y0, c3_x1, row_y1], &id_t, toc_style_name);
+                            frame_with_style_info(app, spread_idx, [c3_x0, row_y0, c3_x1, init_row_y1], &id_t, toc_style_name).map(|(_, fid)| fid)
+                        };
+
+                        if let Some(fid) = created_frame {
+                            let _ = app.session.edit(|doc, _| {
+                                if let Some(it) = doc.item_mut(fid) {
+                                    it.label = "#slot:text:table_title".to_string();
+                                }
+                                Ok(serde_json::Value::Null)
+                            });
+                            let _ = app.run("object.fit", json!({"mode": "fitFrameToContent", "axis": "height", "ids": [fid.0]}));
+                            let _ = app.session.edit(|doc, _| {
+                                if let Some(it) = doc.item_mut(fid)
+                                    && let Some(pb) = it.path.bounds()
+                                {
+                                    let min_y1 = row_y0 + 60.0;
+                                    if pb.y1 < min_y1 {
+                                        it.path = designcraft_geom::shapes::rectangle(designcraft_geom::Rect::new(pb.x0, pb.y0, pb.x1, min_y1));
+                                    }
+                                }
+                                Ok(serde_json::Value::Null)
+                            });
+                            let _ =
+                                app.run("object.textFrameOptions", json!({"autoSize": "heightOnly", "autoSizeReference": "topLeft", "ids": [fid.0]}));
                         }
                     }
                 }
@@ -3828,6 +3905,12 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                             }),
                         ) {
                             if let Some(id) = res.get("id").and_then(Value::as_u64) {
+                                let _ = app.session.edit(|doc, _| {
+                                    if let Some(it) = doc.item_mut(designcraft_doc::ItemId(id)) {
+                                        it.label = "#slot:text:table_type".to_string();
+                                    }
+                                    Ok(serde_json::Value::Null)
+                                });
                                 let _ = app.run("selection.set", json!({"ids": [id]}));
                             }
                             let _ = app.run("type.alignRight", json!({}));
@@ -3855,7 +3938,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                         let c2_x1 = (c2_x0 + c2_w).min(margin.x1 - 60.0);
                         cur_x = c2_x1 + gutter;
 
-                        let _ = app.run(
+                        if let Ok(res) = app.run(
                             "frame.create",
                             json!({
                                 "spread": spread_idx,
@@ -3864,7 +3947,16 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                                 "text": formatted_num,
                                 "caret": false
                             }),
-                        );
+                        ) {
+                            if let Some(id) = res.get("id").and_then(Value::as_u64) {
+                                let _ = app.session.edit(|doc, _| {
+                                    if let Some(it) = doc.item_mut(designcraft_doc::ItemId(id)) {
+                                        it.label = "#slot:text:table_num".to_string();
+                                    }
+                                    Ok(serde_json::Value::Null)
+                                });
+                            }
+                        }
                     }
 
                     // Col 3: Title (Takes rest of width with space in the end)
@@ -3875,8 +3967,9 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
 
                         let (id_t, en_t_opt) =
                             excel::split_and_harmonize_table_title(title_val, if title_en_val.is_empty() { None } else { Some(title_en_val) });
+                        let id_t = if is_table { super::toc::strip_tablepage_title_prefix(&id_t, num_val, type_val).to_string() } else { id_t };
                         let en_t_opt = match en_t_opt {
-                            Some(en) => Some(en),
+                            Some(en) => Some(if is_table { super::toc::strip_tablepage_title_prefix(&en, num_val, "Table").to_string() } else { en }),
                             None if st.bilingual_output => {
                                 st.translations.get(id_t.trim()).map(String::as_str).filter(|s| !s.is_empty()).map(str::to_string)
                             }
@@ -3885,9 +3978,12 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
 
                         let is_landscape = excel::is_table_sheet_landscape(file_val);
                         let toc_style_name = if is_landscape { designcraft_doc::story::BASIC_PARAGRAPH } else { &st.toc_style };
-                        if let Some(en_t) = en_t_opt {
+                        let init_row_y1 = row_y0 + 140.0;
+                        let created_frame = if let Some(en_t) = en_t_opt {
                             let full_title = format!("{id_t}{}{en_t}", designcraft_doc::story::FORCED_LINE_BREAK);
-                            if let Some(story) = frame_with_style(app, spread_idx, [c3_x0, row_y0, c3_x1, row_y1], &full_title, toc_style_name) {
+                            if let Some((story, fid)) =
+                                frame_with_style_info(app, spread_idx, [c3_x0, row_y0, c3_x1, init_row_y1], &full_title, toc_style_name)
+                            {
                                 let (b_start_1, b_end_1) = locale::char_to_byte_range(&full_title, 0, id_t.chars().count());
                                 let _ = app.run("text.select", json!({"story": story, "anchor": b_start_1, "focus": b_end_1}));
                                 let _ = app.run("type.char", json!({"attrs": {"fontStyle": "Regular"}}));
@@ -3895,9 +3991,35 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                                 let en_start = id_t.chars().count() + 1;
                                 let en_end = en_start + en_t.chars().count();
                                 locale::italicize_ranges_style(app, story, &full_title, &[(en_start, en_end)], "Italic");
+                                Some(fid)
+                            } else {
+                                None
                             }
                         } else {
-                            frame_with_style(app, spread_idx, [c3_x0, row_y0, c3_x1, row_y1], &id_t, toc_style_name);
+                            frame_with_style_info(app, spread_idx, [c3_x0, row_y0, c3_x1, init_row_y1], &id_t, toc_style_name).map(|(_, fid)| fid)
+                        };
+
+                        if let Some(fid) = created_frame {
+                            let _ = app.session.edit(|doc, _| {
+                                if let Some(it) = doc.item_mut(fid) {
+                                    it.label = "#slot:text:table_title".to_string();
+                                }
+                                Ok(serde_json::Value::Null)
+                            });
+                            let _ = app.run("object.fit", json!({"mode": "fitFrameToContent", "axis": "height", "ids": [fid.0]}));
+                            let _ = app.session.edit(|doc, _| {
+                                if let Some(it) = doc.item_mut(fid)
+                                    && let Some(pb) = it.path.bounds()
+                                {
+                                    let min_y1 = row_y0 + 60.0;
+                                    if pb.y1 < min_y1 {
+                                        it.path = designcraft_geom::shapes::rectangle(designcraft_geom::Rect::new(pb.x0, pb.y0, pb.x1, min_y1));
+                                    }
+                                }
+                                Ok(serde_json::Value::Null)
+                            });
+                            let _ =
+                                app.run("object.textFrameOptions", json!({"autoSize": "heightOnly", "autoSizeReference": "topLeft", "ids": [fid.0]}));
                         }
                     }
                 }
@@ -3945,21 +4067,6 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                 }
             }
         }
-        apply_row_section_and_styles(
-            app,
-            row_chapter_id.as_deref(),
-            page_before,
-            &mut cur_sec_chapter,
-            &mut cur_sec_start_page,
-            &mut front_matter_sec_created,
-            &mut body_sec_created,
-            &chapter_titles,
-            title_val,
-            title_en_val,
-            type_val,
-            is_preface_row,
-            is_dda,
-        );
         generated_count = generated_count.saturating_add(1);
     }
 
@@ -7292,5 +7399,137 @@ Narrative;3;Catatan Akhir;narrative3.rtf\n";
         assert!(texts.iter().any(|t| t.contains("Kata Pengantar publikasi resmi")), "Must contain Indonesian RTF content");
         assert!(texts.iter().any(|t| t.contains("Preface")), "Must contain English title 'Preface'");
         assert!(texts.iter().any(|t| t.contains("Official publication preface note")), "Must contain English RTF content");
+    }
+
+    #[test]
+    fn test_generated_table_page_title_expands_without_overset_and_pushes_table_down() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cat_path = temp_dir.path().join("catalog.csv");
+        let tbl_path = temp_dir.path().join("03_01.csv");
+
+        let long_title_id = "Tabel 03.01 Jumlah Penduduk, Distribusi Penduduk, Kepadatan Penduduk, Rasio Jenis Kelamin Penduduk Menurut Desa/Kelurahan di Kecamatan Karawang Timur, 2025";
+        let long_title_en =
+            "Total Population, Population Distribution, Population Density, Population Sex Ratio by Village in Karawang Timur Sub-district, 2025";
+
+        let tbl_content = "Desa/Kelurahan;Laki-Laki;Perempuan;Jumlah\nWarungbambu;5178;5259;10437\nKondangjaya;11874;11429;23303\n";
+        std::fs::write(&tbl_path, tbl_content).unwrap();
+
+        let cat_content = format!(
+            "type,number,title,file,template,title_en\nTabel,03.01,\"{long_title_id}\",\"{}\",,\"{long_title_en}\"\n",
+            tbl_path.to_string_lossy().replace('"', "\"\"")
+        );
+        std::fs::write(&cat_path, cat_content).unwrap();
+
+        let mut st =
+            PubgenState { card1_preset: 0, card1_range_all: true, bilingual_output: true, card1_auto_insert_tables: true, ..PubgenState::default() };
+        load_card1_csv(&mut st, &cat_path.to_string_lossy());
+
+        let res = execute_generate_pages(&mut app, &st);
+        assert!(res.is_ok(), "execute_generate_pages failed: {res:?}");
+
+        let active = app.session.active().unwrap();
+        let doc = &active.doc;
+
+        // Locate title frame (#slot:text:table_title) and table frame
+        let mut title_frame: Option<(&designcraft_doc::Item, designcraft_doc::StoryId)> = None;
+        let mut table_frame: Option<&designcraft_doc::Item> = None;
+
+        for sp in &doc.spreads {
+            for it in &sp.items {
+                if it.label == "#slot:text:table_title"
+                    && let Some(tf) = it.text_frame()
+                {
+                    title_frame = Some((it, tf.story));
+                }
+                if let Some(tf) = it.text_frame()
+                    && let Some(st) = doc.story(tf.story)
+                    && !st.tables.is_empty()
+                {
+                    table_frame = Some(it);
+                }
+            }
+        }
+
+        assert!(title_frame.is_some(), "Title frame tagged with #slot:text:table_title must exist");
+        assert!(table_frame.is_some(), "Auto-inserted table frame must exist");
+
+        let (t_item, t_story) = title_frame.unwrap();
+        let tbl_item = table_frame.unwrap();
+
+        // Check title text: redundant "Tabel 03.01" prefix must be stripped so only the descriptive title remains
+        let title_text = doc.story(t_story).unwrap().text.clone();
+        assert!(
+            !title_text.starts_with("Tabel 03.01") && !title_text.starts_with("Tabel"),
+            "Table title column must strip redundant 'Tabel 03.01' prefix, got: {title_text:?}"
+        );
+        assert!(title_text.starts_with("Jumlah Penduduk"), "Table title must start directly with descriptive title, got: {title_text:?}");
+
+        // 1. Title must NOT be overset (no overflow badge)
+        assert!(!story_is_overset(&app, t_story), "Table title story must NOT be overset");
+
+        // 2. Title frame must have expanded beyond initial 60pt to accommodate multiple lines
+        let title_bounds = t_item.bounds();
+        assert!(title_bounds.height() >= 55.0, "Title frame height ({}) must accommodate multi-line title", title_bounds.height());
+
+        // 3. Table frame must sit below title frame with proper spacing
+        let tbl_bounds = tbl_item.bounds();
+        assert!(tbl_bounds.y0 >= title_bounds.y1, "Table y0 ({}) must sit below title y1 ({})", tbl_bounds.y0, title_bounds.y1);
+    }
+
+    #[test]
+    fn test_facing_page_table_layout_binds_consistently_to_page_margins() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+        app.run("layout.documentSetup", json!({"facingPages": true})).unwrap();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let cat_path = temp_dir.path().join("facing_catalog.csv");
+        let tbl1_path = temp_dir.path().join("01_01.csv");
+        let tbl2_path = temp_dir.path().join("01_02.csv");
+
+        std::fs::write(&tbl1_path, "A;B\n1;2\n").unwrap();
+        std::fs::write(&tbl2_path, "C;D\n3;4\n").unwrap();
+
+        let cat_content = format!(
+            "type,number,title,file\n\
+DIV,1,Geografi,\n\
+Tabel,01.01,Tabel Pertama,\"{}\"\n\
+Tabel,01.02,Tabel Kedua,\"{}\"\n",
+            tbl1_path.to_string_lossy().replace('"', "\"\""),
+            tbl2_path.to_string_lossy().replace('"', "\"\""),
+        );
+        std::fs::write(&cat_path, cat_content).unwrap();
+
+        let mut st = PubgenState { card1_preset: 0, card1_range_all: true, card1_auto_insert_tables: true, ..PubgenState::default() };
+        load_card1_csv(&mut st, &cat_path.to_string_lossy());
+
+        let res = execute_generate_pages(&mut app, &st);
+        assert!(res.is_ok(), "execute_generate_pages failed: {res:?}");
+
+        let active = app.session.active().unwrap();
+        let doc = &active.doc;
+
+        // Verify all generated table title frames bind exactly to the page's margin.x0
+        for (page_idx, sp) in doc.spreads.iter().enumerate() {
+            for pg in &sp.pages {
+                let margin_r = pg.margin_rect();
+                for it in &sp.items {
+                    if it.label == "#slot:text:table_type" {
+                        let b = it.bounds();
+                        if b.x0 >= pg.bounds().x0 && b.x1 <= pg.bounds().x1 {
+                            assert!(
+                                (b.x0 - margin_r.x0).abs() < 1.0,
+                                "Page {page_idx} table type x0 ({}) must bind to page margin.x0 ({})",
+                                b.x0,
+                                margin_r.x0
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 }

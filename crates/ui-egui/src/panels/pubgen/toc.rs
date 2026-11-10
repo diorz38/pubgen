@@ -86,7 +86,7 @@ pub(crate) fn strip_tablepage_title_prefix<'a>(title: &'a str, num: &str, typ: &
         }
     }
     // Also strip any leading digit sequence or section number (e.g. "01.01", "02.02.01", "2.1.1", "03.01")
-    if let Some((first, rest)) = t.split_once(' ') {
+    if let Some((first, rest)) = t.split_once(|c: char| c.is_whitespace()) {
         let f_clean = first.trim_end_matches('.');
         if f_clean.chars().any(|c| c.is_ascii_digit()) && f_clean.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-') {
             t = rest.trim();
@@ -97,7 +97,7 @@ pub(crate) fn strip_tablepage_title_prefix<'a>(title: &'a str, num: &str, typ: &
     for prefix in &["Tabel", "Table", "Grafik", "Chart"] {
         if let Some(rest) = t.strip_prefix(prefix) {
             t = rest.trim();
-            if let Some((first, rest_after)) = t.split_once(' ') {
+            if let Some((first, rest_after)) = t.split_once(|c: char| c.is_whitespace()) {
                 let f_clean = first.trim_end_matches('.');
                 if f_clean.chars().any(|c| c.is_ascii_digit()) && f_clean.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-') {
                     t = rest_after.trim();
@@ -107,7 +107,7 @@ pub(crate) fn strip_tablepage_title_prefix<'a>(title: &'a str, num: &str, typ: &
         }
     }
 
-    t.trim_start_matches(['.', '-', ':', ';', ' '])
+    t.trim_start_matches(['.', '-', ':', ';', ' ', '\t'])
 }
 
 /// Wrap a TOC entry title using forced line breaks (`\u{2028}`) so:
