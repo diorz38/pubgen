@@ -23,6 +23,7 @@
 /ai_cover_generation/test01/
 *.zip
 *.csv
+test.md
 # The Terminology pane's starter sheet is documentation, not generated output.
 !docs/pubgen-glossary.example.csv
 *.geojson
@@ -31,3 +32,4 @@
 /standalone/
 /0.8.4/
 /.ui-shots/
+test.md

@@ -26,3 +26,5 @@ Tabel 02.02. Banyaknya LKMD menurut Kategori dan Kecamatan, 2002
 | PAKISJAYA | 8 | - | - | 2 | 25,00 | 6 | 75,00 |
 | **JUMLAH / Total** | **307** | **-** | **-** | **4** | **1,30** | **303** | - |
 | TAHUN 2001 | 307 | - | - | 3 | 11,40 | 304 | 88,60 |
+
+pasir_groq=
