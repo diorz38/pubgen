@@ -309,6 +309,23 @@ fn series_keys(n: usize) -> (&'static [&'static str], &'static [&'static str], &
 // Public API
 // ---------------------------------------------------------------------------
 
+/// True when the sheet itself carries a chart definition (`chart_type`, and at
+/// least one of the column/row keys that describe where its data lives).
+///
+/// [`parse_chart_spec`] is more permissive: [`normalize_chart_sheet`] turns a
+/// plain horizontal data table into a chart. This predicate answers the narrower
+/// question "is this CSV a chart sheet rather than a data table?", which page
+/// generation needs when a card links its data CSV.
+pub fn holds_chart_definition(sheet: &ExcelSheetData) -> bool {
+    let kv = collect_kv(sheet);
+    if lookup(&kv, CHART_TYPE_KEYS).is_none() {
+        return false;
+    }
+    lookup(&kv, CATEGORY_COL_KEYS).is_some()
+        || lookup(&kv, DATA_START_KEYS).is_some()
+        || lookup(&kv, &["series_1_col", "series1col", "s1_col", "col_1"]).is_some()
+}
+
 /// Parse a `CXX_XX` sheet into a [`ChartSpec`] when the sheet carries a `chart_type` row.
 ///
 /// Returns `None` (not an error) when:

@@ -29,6 +29,27 @@ pub struct IngestReport {
     pub warnings: Vec<String>,
 }
 
+/// Chart appearance keys a `CXX_XX` sheet can carry, mapped to the card settings
+/// the UI stores for them (`chart_type`, `chart_value_format`, flags, max value).
+/// Values are kept exactly as the sheet wrote them; the UI maps aliases such as
+/// `bar_clustered` or `percent` to its display names.
+fn chart_appearance_settings(kv: &BTreeMap<String, String>) -> Vec<(&'static str, String)> {
+    let aliases: [(&str, &[&str]); 6] = [
+        ("chart_type", &["chart_type", "type", "tipe_grafik"]),
+        ("chart_value_format", &["value_format", "format_nilai"]),
+        ("chart_show_value_labels", &["show_value_labels", "label_nilai"]),
+        ("chart_show_legend", &["show_legend", "legenda"]),
+        ("chart_show_grid", &["show_grid", "garis_bantu"]),
+        ("chart_max_value_override", &["max_value", "nilai_maksimum"]),
+    ];
+    aliases
+        .iter()
+        .filter_map(|(setting, keys)| {
+            keys.iter().find_map(|key| kv.get(*key)).map(|v| v.trim()).filter(|v| !v.is_empty()).map(|value| (*setting, value.to_string()))
+        })
+        .collect()
+}
+
 pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
     let mut workbook =
         open_workbook_auto(path).map_err(|source| IngestError::Open { path: path.display().to_string(), message: source.to_string() })?;
@@ -195,6 +216,12 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
                         card_settings.insert("image".to_string(), serde_json::Value::String(asset_path));
                     }
                 }
+            }
+            // The data columns and rows belong to the linked CSV the card points
+            // at, so the chart's appearance has to travel with the card instead of
+            // being re-read from this sheet's grid by the renderer.
+            for (setting, value) in chart_appearance_settings(&kv) {
+                card_settings.insert(setting.to_string(), serde_json::Value::String(value));
             }
             if card_title == *name {
                 card_title = format!("Grafik {name}");
@@ -1928,6 +1955,24 @@ mod tests {
         kv_chart.insert("chart_type".into(), "bar".into());
         let (k_cht, _) = classify_sheet("C02_01", "bps_dda", &kv_chart);
         assert_eq!(k_cht, CardKind::Chart, "C02_01 with table & chart_type must be Chart");
+    }
+
+    #[test]
+    fn test_chart_appearance_settings_travel_with_the_card() {
+        let mut kv = BTreeMap::new();
+        kv.insert("chart_type".into(), "bar_clustered".into());
+        kv.insert("value_format".into(), " percent ".into());
+        kv.insert("show_grid".into(), "true".into());
+        kv.insert("max_value".into(), "100".into());
+        kv.insert("title".into(), "Grafik 02.01".into());
+
+        let settings: BTreeMap<String, String> = chart_appearance_settings(&kv).into_iter().map(|(key, value)| (key.to_string(), value)).collect();
+        assert_eq!(settings.get("chart_type").map(String::as_str), Some("bar_clustered"));
+        assert_eq!(settings.get("chart_value_format").map(String::as_str), Some("percent"), "values are trimmed");
+        assert_eq!(settings.get("chart_show_grid").map(String::as_str), Some("true"));
+        assert_eq!(settings.get("chart_max_value_override").map(String::as_str), Some("100"));
+        assert!(!settings.contains_key("title"), "only chart appearance is copied");
+        assert!(!settings.contains_key("chart_show_legend"), "absent keys stay absent");
     }
 
     #[test]

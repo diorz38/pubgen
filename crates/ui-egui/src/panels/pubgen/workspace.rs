@@ -1286,9 +1286,10 @@ pub fn apply_ingest_report_to_state(
                     }
                 }
                 if pc.kind == CardKind::Chart {
-                    if let Some(s) = pc.settings.get("chart_type") {
-                        pc.chart_type = s.clone();
-                    }
+                    // The sheet's chart appearance (archetype, value format, flags)
+                    // travels with the card; its data columns and rows come from the
+                    // linked Source CSV.
+                    apply_chart_appearance_settings(&mut pc);
                     if let Some(s) = pc.settings.get("chart_image") {
                         pc.chart_image = s.clone();
                     }
@@ -1414,9 +1415,9 @@ pub fn apply_ingest_report_to_state(
                     }
                 }
                 if pc.kind == CardKind::Chart {
-                    if let Some(ct) = card.settings.get("chart_type").and_then(|v| v.as_str()) {
-                        pc.chart_type = ct.to_string();
-                    }
+                    // Appearance comes from the package; columns and rows always come
+                    // from the Source CSV (see `chart_card_rendered_from_source`).
+                    apply_chart_appearance_settings(&mut pc);
                     if let Some(img) = card.settings.get("image").or_else(|| card.settings.get("chart_image")).and_then(|v| v.as_str()) {
                         pc.chart_image = img.to_string();
                     }
@@ -1462,9 +1463,6 @@ pub fn apply_ingest_report_to_state(
                     if let Some(s) = card.settings.get("chart_series_3_label_en").and_then(|v| v.as_str()) {
                         pc.chart_series_3_label_en = s.to_string();
                     }
-                    if let Some(s) = card.settings.get("chart_value_format").and_then(|v| v.as_str()) {
-                        pc.chart_value_format = s.to_string();
-                    }
                     if let Some(s) = card.settings.get("chart_max_value_override").and_then(|v| v.as_str()) {
                         pc.chart_max_value_override = s.to_string();
                     }
@@ -1480,7 +1478,7 @@ pub fn apply_ingest_report_to_state(
                     if let Some(s) = card.settings.get("chart_raw_data").and_then(|v| v.as_str()) {
                         pc.chart_raw_data = s.to_string();
                     }
-                    if (pc.chart_raw_data == super::charts::dialog::DEFAULT_SAMPLE_CSV || pc.chart_raw_data.trim().is_empty())
+                    if (is_sample_chart_data(&pc.chart_raw_data) || pc.chart_raw_data.trim().is_empty())
                         && !pc.source.is_empty()
                         && pc.source != "Tanpa sumber"
                         && pc.source != "Manual"
@@ -4547,32 +4545,240 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
 // MODAL EDITOR KARTU PUBLIKASI
 // ============================================================================
 
-fn load_chart_data_from_source(card: &mut PublicationCard, source_path: &str, cached_content: &std::collections::BTreeMap<String, Vec<u8>>) {
-    if source_path.is_empty() || source_path == "Tanpa sumber" || source_path == "Manual" {
-        return;
+/// Cached bytes for a workspace content path, trying every key shape the content
+/// tree and the XLSX ingest produce (`csv/x.csv`, bare `x.csv`, Windows separators).
+fn cached_content_bytes<'a>(cached_content: &'a std::collections::BTreeMap<String, Vec<u8>>, path: &str) -> Option<&'a [u8]> {
+    let clean = path.trim().replace('\\', "/");
+    if clean.is_empty() {
+        return None;
     }
-    let clean = source_path.replace('\\', "/");
     let bare = clean.strip_prefix("csv/").unwrap_or(&clean);
     let with_csv_prefix = format!("csv/{bare}");
     let with_ext = if !bare.ends_with(".csv") { format!("{bare}.csv") } else { bare.to_string() };
     let with_both = if !clean.ends_with(".csv") { format!("csv/{with_ext}") } else { with_csv_prefix.clone() };
     let backslash = clean.replace('/', "\\");
 
-    let found_bytes = cached_content
+    cached_content
         .get(&clean)
         .or_else(|| cached_content.get(bare))
         .or_else(|| cached_content.get(&with_csv_prefix))
         .or_else(|| cached_content.get(&with_ext))
         .or_else(|| cached_content.get(&with_both))
-        .or_else(|| cached_content.get(&backslash));
+        .or_else(|| cached_content.get(&backslash))
+        .map(Vec::as_slice)
+}
 
-    if let Some(bytes) = found_bytes {
-        card.chart_raw_data = String::from_utf8_lossy(bytes).into_owned();
-        auto_detect_chart_columns(card);
-    } else if let Ok(bytes) = std::fs::read(source_path) {
-        card.chart_raw_data = String::from_utf8_lossy(&bytes).into_owned();
+fn load_chart_data_from_source(card: &mut PublicationCard, source_path: &str, cached_content: &std::collections::BTreeMap<String, Vec<u8>>) {
+    if source_path.is_empty() || source_path == "Tanpa sumber" || source_path == "Manual" {
+        return;
+    }
+    let loaded = cached_content_bytes(cached_content, source_path)
+        .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+        .or_else(|| std::fs::read(source_path).ok().map(|bytes| String::from_utf8_lossy(&bytes).into_owned()));
+    if let Some(text) = loaded {
+        card.chart_raw_data = text;
         auto_detect_chart_columns(card);
     }
+}
+
+/// True when the card still holds the placeholder sample data from its defaults
+/// (`charts::dialog::DEFAULT_SAMPLE_CSV`) rather than real content.
+fn is_sample_chart_data(raw_data: &str) -> bool {
+    raw_data.trim() == super::charts::dialog::DEFAULT_SAMPLE_CSV.trim()
+}
+
+/// True when a CSV's grid is itself a chart sheet definition (`chart_type` plus
+/// its column/row keys): such a file is a chart, never a data table. A plain data
+/// table is not one, even though the chart renderer could normalize it into a chart.
+fn csv_holds_chart_spec(text: &str) -> bool {
+    let delim = super::csv::detect_delimiter(text);
+    let grid = super::csv::parse_csv_content_with_delim(text, delim);
+    let sheet = super::excel::ExcelSheetData { name: String::new(), grid, merges: Vec::new() };
+    super::charts::spec::holds_chart_definition(&sheet)
+}
+
+/// The CSV named in the card's Source field when it is a linked data file.
+///
+/// Ingest writes `csv/{sheet}.csv` for a chart sheet and leaves the card's source
+/// pointing at that same file unless the sheet links a table (`table=`), in which
+/// case the source is `csv/{table}.csv`. Only the linked table is chart data: the
+/// chart sheet's own grid stays the chart definition and must not be resampled as
+/// a data table.
+fn chart_linked_source(card: &PublicationCard, chart_id: &str, cached_content: &std::collections::BTreeMap<String, Vec<u8>>) -> Option<String> {
+    let source = card.source.trim();
+    if source.is_empty() || source.eq_ignore_ascii_case("Tanpa sumber") || source.eq_ignore_ascii_case("Manual") {
+        return None;
+    }
+    let clean = source.replace('\\', "/");
+    if !clean.to_ascii_lowercase().ends_with(".csv") {
+        return None;
+    }
+    let bare = clean.strip_prefix("csv/").unwrap_or(&clean);
+    let stem = bare.get(..bare.len() - ".csv".len()).unwrap_or(bare);
+    // The sheet's own grid dump is not a linked data file.
+    if stem.eq_ignore_ascii_case(chart_id.trim()) {
+        return None;
+    }
+    let text = cached_content_bytes(cached_content, &clean)
+        .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+        .or_else(|| std::fs::read(&clean).ok().map(|bytes| String::from_utf8_lossy(&bytes).into_owned()))?;
+    if csv_holds_chart_spec(&text) {
+        return None;
+    }
+    Some(clean)
+}
+
+/// The card as the chart renderer should see it when the data comes from the
+/// linked CSV: the data table and the column mapping follow that CSV (the same
+/// view the Opsi Grafik tab shows), while the card's chart appearance is kept.
+fn chart_card_rendered_from_source(
+    card: &PublicationCard,
+    source: &str,
+    cached_content: &std::collections::BTreeMap<String, Vec<u8>>,
+) -> Option<PublicationCard> {
+    let mut effective = card.clone();
+    if effective.chart_raw_data.trim().is_empty() || is_sample_chart_data(&effective.chart_raw_data) {
+        load_chart_data_from_source(&mut effective, source, cached_content);
+    }
+    if effective.chart_raw_data.trim().is_empty() || is_sample_chart_data(&effective.chart_raw_data) {
+        return None;
+    }
+    Some(effective)
+}
+
+/// Display name the card editor uses for a chart archetype, from the sheet's
+/// alias (`bar`, `line`, `donut`, …) or from an already-display name.
+fn chart_type_display_name(value: &str) -> Option<&'static str> {
+    let v = value.trim().to_ascii_lowercase();
+    if v.is_empty() {
+        return None;
+    }
+    let display = if v.contains("pyramid") || v.contains("piramida") {
+        "Population Pyramid (Piramida Penduduk)"
+    } else if v.contains("gauge") || v.contains("speedometer") {
+        "Gauge / Speedometer Chart"
+    } else if v.contains("donut") || v.contains("ring") || v == "pie" {
+        "Donut / Ring Chart"
+    } else if v.contains("stacked") {
+        "Vertical Stacked Bar"
+    } else if v.contains("horizontal") || v.contains("hbar") {
+        "Horizontal Bar (Ranked)"
+    } else if v.contains("area") {
+        "Area Chart (Filled)"
+    } else if v.contains("line") {
+        "Line Chart (Markers)"
+    } else if v.contains("bar") || v == "kolom" {
+        "Vertical Clustered Bar"
+    } else {
+        return None;
+    };
+    Some(display)
+}
+
+/// Display name the card editor uses for a value format, from the sheet's alias
+/// (`percent`, `idr`, `number`) or from an already-display name.
+fn chart_value_format_display(value: &str) -> Option<&'static str> {
+    let v = value.trim().to_ascii_lowercase();
+    let display = if v.contains("percent") || v.contains("persen") {
+        "Percentage (%)"
+    } else if v.contains("idr") || v.contains("rupiah") || v.contains("currency") {
+        "Currency IDR (Rp)"
+    } else if v.contains("number") || v.contains("angka") {
+        "Number (1.234,5)"
+    } else {
+        return None;
+    };
+    Some(display)
+}
+
+fn setting_bool(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "ya" | "on" => Some(true),
+        "false" | "0" | "no" | "tidak" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+/// Applies the chart appearance a package or an XLSX chart sheet left on the card.
+/// Data columns and rows are deliberately not read here: the page generator takes
+/// them from the card's Source CSV.
+fn apply_chart_appearance_settings(card: &mut PublicationCard) {
+    if let Some(value) = card.settings.get("chart_type") {
+        if let Some(display) = chart_type_display_name(value) {
+            card.chart_type = display.to_string();
+        } else if !value.trim().is_empty() {
+            card.chart_type = value.trim().to_string();
+        }
+    }
+    if let Some(value) = card.settings.get("chart_value_format") {
+        if let Some(display) = chart_value_format_display(value) {
+            card.chart_value_format = display.to_string();
+        } else if !value.trim().is_empty() {
+            card.chart_value_format = value.trim().to_string();
+        }
+    }
+    if let Some(value) = card.settings.get("chart_show_value_labels").and_then(|v| setting_bool(v)) {
+        card.chart_show_value_labels = value;
+    }
+    if let Some(value) = card.settings.get("chart_show_legend").and_then(|v| setting_bool(v)) {
+        card.chart_show_legend = value;
+    }
+    if let Some(value) = card.settings.get("chart_show_grid").and_then(|v| setting_bool(v)) {
+        card.chart_show_grid = value;
+    }
+    if let Some(value) = card.settings.get("chart_max_value_override").map(|v| v.trim()).filter(|v| !v.is_empty()) {
+        card.chart_max_value_override = value.to_string();
+    }
+}
+
+/// Catalog-row file for a chart card. The page generator reads the chart spec and
+/// its data from this one CSV, so it is rebuilt from the card whenever the card has
+/// a linked data source; without one the XLSX chart sheet's own grid is used.
+fn resolve_chart_catalog_file(
+    card: &PublicationCard,
+    chart_id: &str,
+    stage: &std::path::Path,
+    cached_content: &std::collections::BTreeMap<String, Vec<u8>>,
+) -> String {
+    let staged = |rel: &str| -> String { stage.join(rel.replace('\\', "/")).to_string_lossy().into_owned() };
+
+    // 1. The linked CSV in the card's Source field is the chart's data source.
+    if let Some(source) = chart_linked_source(card, chart_id, cached_content)
+        && let Some(effective) = chart_card_rendered_from_source(card, &source, cached_content)
+    {
+        let p = stage.join(format!("csv/{chart_id}_from_source.csv"));
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if std::fs::write(&p, build_chart_sheet_csv(&effective)).is_ok() {
+            return p.to_string_lossy().into_owned();
+        }
+    }
+
+    // 2. The XLSX chart sheet's own grid, when ingest produced it.
+    if cached_content_bytes(cached_content, &format!("csv/{chart_id}.csv")).is_some() {
+        return staged(&format!("csv/{chart_id}.csv"));
+    }
+    if cached_content_bytes(cached_content, &format!("{chart_id}.csv")).is_some() {
+        return staged(&format!("{chart_id}.csv"));
+    }
+
+    // 3. The card's own data table (Opsi Grafik), for cards without a file.
+    if !card.chart_raw_data.trim().is_empty() && !is_sample_chart_data(&card.chart_raw_data) {
+        let p = stage.join(format!("csv/{chart_id}.csv"));
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if std::fs::write(&p, build_chart_sheet_csv(card)).is_ok() {
+            return p.to_string_lossy().into_owned();
+        }
+    }
+
+    // 4. Anything else the card names.
+    if cached_content_bytes(cached_content, &card.source).is_some() {
+        return staged(&card.source);
+    }
+    chart_id.to_string()
 }
 
 fn auto_detect_chart_columns(card: &mut PublicationCard) {
@@ -5021,7 +5227,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
             && !card.source.is_empty()
             && card.source != "Tanpa sumber"
             && card.source != "Manual"
-            && (card.chart_raw_data.trim().is_empty() || card.chart_raw_data == super::charts::dialog::DEFAULT_SAMPLE_CSV)
+            && (card.chart_raw_data.trim().is_empty() || is_sample_chart_data(&card.chart_raw_data))
         {
             let src = card.source.clone();
             load_chart_data_from_source(card, &src, &state.cached_content);
@@ -6411,25 +6617,7 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
                     "Image"
                 } else {
                     let chart_id = if card.chapter_id.is_empty() { format!("C{:02}_01", card.page) } else { card.chapter_id.clone() };
-                    let staged_csv =
-                        staged(&format!("csv/{}.csv", chart_id)).or_else(|| staged(&format!("{}.csv", chart_id))).or_else(|| staged(&card.source));
-
-                    if let Some(c) = staged_csv {
-                        file = c;
-                    } else if !card.chart_raw_data.trim().is_empty() {
-                        let csv_content = build_chart_sheet_csv(card);
-                        let p = stage.join(format!("csv/{chart_id}.csv"));
-                        if let Some(dir) = p.parent() {
-                            let _ = std::fs::create_dir_all(dir);
-                        }
-                        if std::fs::write(&p, csv_content).is_ok() {
-                            file = p.to_string_lossy().into_owned();
-                        } else {
-                            file = chart_id;
-                        }
-                    } else {
-                        file = chart_id;
-                    }
+                    file = resolve_chart_catalog_file(card, &chart_id, &stage, &state.cached_content);
                     "Gambar"
                 }
             }
@@ -7504,6 +7692,80 @@ mod tests {
     }
 
     #[test]
+    fn test_chart_card_linked_source_drives_generation_data() {
+        let mut state = OrchestratorWorkspaceState::default();
+        // The XLSX chart sheet as ingest stages it: chart metadata plus its own
+        // inline data, which must NOT be rendered once the card links a data file.
+        let sheet_csv = "chart_type;bar_clustered\ncategory_col;A\nseries_1_col;B\nseries_1_label;SheetOnly\ndata_start_row;6\ndata_end_row;8\n\nTahun;SheetOnly\n2020;1\n2021;2\n";
+        let linked_csv = "Tahun,Padi,Jagung\n2021,120,45\n2022,125,50\n";
+        std::sync::Arc::make_mut(&mut state.cached_content).insert("csv/C02_01.csv".into(), sheet_csv.as_bytes().to_vec());
+        std::sync::Arc::make_mut(&mut state.cached_content).insert("csv/02_01_01.csv".into(), linked_csv.as_bytes().to_vec());
+
+        let mut card = PublicationCard::new_with(CardKind::Chart, "Grafik Panen", "Padi", "csv/02_01_01.csv", 4, true);
+        card.chapter_id = "C02_01".into();
+        card.chart_type = "Vertical Clustered Bar".into();
+
+        assert_eq!(chart_linked_source(&card, "C02_01", &state.cached_content).as_deref(), Some("csv/02_01_01.csv"));
+
+        let stage = std::env::temp_dir().join(format!("dc-pubgen-chart-src-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&stage);
+        let file = resolve_chart_catalog_file(&card, "C02_01", &stage, &state.cached_content);
+        assert!(file.ends_with("C02_01_from_source.csv"), "unexpected chart file {file}");
+        let built = std::fs::read_to_string(&file).expect("built chart csv");
+        assert!(built.contains("Padi"), "linked CSV headers must drive the data table:\n{built}");
+        assert!(!built.contains("SheetOnly"), "the chart sheet's own data must not be used:\n{built}");
+        assert!(built.contains("bar_clustered"), "chart appearance must be kept:\n{built}");
+        assert_eq!(card.chart_type, "Vertical Clustered Bar", "the card itself is not mutated");
+
+        // The built CSV is a valid chart sheet: the renderer reads the linked data.
+        let delim = super::super::csv::detect_delimiter(&built);
+        let grid = super::super::csv::parse_csv_content_with_delim(&built, delim);
+        let sheet_data = super::super::excel::ExcelSheetData { name: "C02_01".into(), grid, merges: Vec::new() };
+        let spec = super::super::charts::spec::parse_chart_spec(&sheet_data).expect("built chart spec parses");
+        let (categories, values) = super::super::charts::spec::extract_chart_data(&sheet_data, &spec).expect("extract chart data");
+        assert_eq!(categories, vec!["2021", "2022"]);
+        assert_eq!(values.first().cloned(), Some(vec![120.0, 125.0]));
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn test_chart_card_sheet_source_and_chart_spec_csv_are_not_linked_data() {
+        let mut state = OrchestratorWorkspaceState::default();
+        let sheet_csv =
+            "chart_type;bar\ncategory_col;A\nseries_1_col;B\nseries_1_label;Nilai\ndata_start_row;3\ndata_end_row;4\n\nTahun;Nilai\n2020;1\n2021;2\n";
+        std::sync::Arc::make_mut(&mut state.cached_content).insert("csv/C02_01.csv".into(), sheet_csv.as_bytes().to_vec());
+        std::sync::Arc::make_mut(&mut state.cached_content).insert("csv/C03_01.csv".into(), sheet_csv.as_bytes().to_vec());
+
+        // The card's source is its own sheet grid: keep the sheet-driven path.
+        let mut own = PublicationCard::new_with(CardKind::Chart, "Grafik", "", "csv/C02_01.csv", 4, true);
+        own.chapter_id = "C02_01".into();
+        assert_eq!(chart_linked_source(&own, "C02_01", &state.cached_content), None);
+
+        // A source that is itself a chart spec sheet is a chart, not a data table.
+        let mut other = PublicationCard::new_with(CardKind::Chart, "Grafik", "", "csv/C03_01.csv", 4, true);
+        other.chapter_id = "C02_01".into();
+        assert_eq!(chart_linked_source(&other, "C02_01", &state.cached_content), None);
+    }
+
+    #[test]
+    fn test_chart_sheet_appearance_settings_map_to_card_fields() {
+        let mut card = PublicationCard::new_with(CardKind::Chart, "Grafik", "", "csv/02_01_01.csv", 4, true);
+        card.settings.insert("chart_type".into(), "bar_clustered".into());
+        card.settings.insert("chart_value_format".into(), "percent".into());
+        card.settings.insert("chart_show_value_labels".into(), "true".into());
+        card.settings.insert("chart_show_legend".into(), "false".into());
+        card.settings.insert("chart_show_grid".into(), "true".into());
+        card.settings.insert("chart_max_value_override".into(), "100".into());
+        apply_chart_appearance_settings(&mut card);
+        assert_eq!(card.chart_type, "Vertical Clustered Bar");
+        assert_eq!(card.chart_value_format, "Percentage (%)");
+        assert!(card.chart_show_value_labels);
+        assert!(!card.chart_show_legend);
+        assert!(card.chart_show_grid);
+        assert_eq!(card.chart_max_value_override, "100");
+    }
+
+    #[test]
     fn test_chart_card_edit_tab_opsi_grafik_isolation_and_rendering() {
         let ctx = egui::Context::default();
         let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
@@ -8461,6 +8723,47 @@ mod tests {
             texts.iter().any(|t| t.trim() == "Figure 1 BPS Office"),
             "the compile pipeline must render the English image caption, found: {texts:?}"
         );
+    }
+
+    /// A chart card whose sheet links a data file (`table=`) used to render the
+    /// chart sheet's own inline grid: the catalog row pointed at
+    /// `csv/{chapter_id}.csv` first, so the linked CSV in the card's Source field
+    /// was never read. The page must follow the linked CSV instead.
+    #[test]
+    fn test_generate_from_workspace_renders_chart_data_from_linked_source() {
+        // The chart sheet definition, with its own inline data that must not be rendered.
+        let sheet_csv = "chart_type;bar_clustered\ncategory_col;A\nseries_1_col;B\nseries_1_label;Dari Sheet\ndata_start_row;6\ndata_end_row;8\n\nWilayah;Dari Sheet\nSheet Alpha;1\nSheet Beta;2\n";
+        let linked_csv = "Wilayah,Padi\nDesa Alpha,120\nDesa Beta,125\n";
+
+        let mut state = OrchestratorWorkspaceState { selected_profile: "bps_dda".into(), doc_language: "Indonesian".into(), ..Default::default() };
+        state.cards.clear();
+        let mut card = PublicationCard::new_with(CardKind::Chart, "Grafik Panen", "", "csv/02_01_01.csv", 2, true);
+        card.chapter_id = "C02_01".into();
+        card.chart_type = "Vertical Clustered Bar".into();
+        // A table theme name ("BPS Blue") is not a chart colour; the emitter would try to create a
+        // swatch from that non-colour string and fail. Charts render from the document palette.
+        card.table_theme = String::new();
+        card.settings.insert("table_theme".into(), String::new());
+        state.cards.push(card);
+        std::sync::Arc::make_mut(&mut state.cached_content).insert("csv/C02_01.csv".into(), sheet_csv.as_bytes().to_vec());
+        std::sync::Arc::make_mut(&mut state.cached_content).insert("csv/02_01_01.csv".into(), linked_csv.as_bytes().to_vec());
+
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let res = generate_from_workspace(&mut app, &state);
+        assert!(res.is_ok(), "worksheet compilation failed: {res:?}");
+
+        // The chart page must carry an emitted vector chart (grouped on the page), which only
+        // happens when the catalog row points at a CSV holding a chart definition plus data.
+        let active = app.session.active().unwrap();
+        let has_chart_group =
+            active.doc.spreads.iter().flat_map(|sp| sp.items.iter()).any(|it| matches!(it.content, designcraft_doc::Content::Group { .. }));
+        assert!(has_chart_group, "the chart must be rendered from the linked CSV; document has {} stories", active.doc.stories.len());
+
+        // Its category labels come from the linked CSV's data, not from the chart sheet's own grid.
+        let texts: Vec<String> = active.doc.stories.values().map(|s| s.text.clone()).collect();
+        let joined = texts.join("\n");
+        assert!(joined.contains("Desa Alpha"), "category labels must come from the linked CSV: {texts:?}");
+        assert!(!joined.contains("Sheet Alpha"), "the chart sheet's own grid must not supply the data: {texts:?}");
     }
 
     #[test]
