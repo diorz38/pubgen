@@ -323,23 +323,22 @@ pub fn dialog_table_range_ui(app: &mut DesignApp, ctx: &egui::Context, st: &mut 
             ui.add_space(12.0);
             let backend_ready = ai::backend_config_from_prefs(app).is_some();
             let is_running = st.translate_job.as_ref().is_some_and(|j| !j.finished);
+            let can_translate = backend_ready && st.bilingual_output && found_count > 0 && !is_running;
+
+            let trans_btn = ui.add_enabled(can_translate, egui::Button::new(RichText::new("Translate Range").size(12.0)));
+            if trans_btn.clicked() && can_translate {
+                ai::execute_translate_table_range(app, st, from, to_inclusive, ui.ctx().clone());
+            }
 
             if is_running {
                 ui.horizontal(|ui| {
                     ui.spinner();
                     ui.label(RichText::new("Translating table pages with AI…").size(11.5).color(t.accent));
                 });
-            } else {
-                let can_translate = backend_ready && st.bilingual_output && found_count > 0;
-                let trans_btn = ui.add_enabled(can_translate, egui::Button::new(RichText::new("Translate Range").size(12.0)));
-                if trans_btn.clicked() {
-                    ai::execute_translate_table_range(app, st, from, to_inclusive, ui.ctx().clone());
-                }
-                if !backend_ready {
-                    ui.label(RichText::new("Configure AI backend first (AI Translate ▸ Setup…)").size(10.5).color(t.text_dim));
-                } else if !st.bilingual_output {
-                    ui.label(RichText::new("Enable Dual Language Mode first (Pubgen ▸ Dual Language Mode)").size(10.5).color(t.text_dim));
-                }
+            } else if !backend_ready {
+                ui.label(RichText::new("Configure AI backend first (AI Translate ▸ Setup…)").size(10.5).color(t.text_dim));
+            } else if !st.bilingual_output {
+                ui.label(RichText::new("Enable Dual Language Mode first (Pubgen ▸ Dual Language Mode)").size(10.5).color(t.text_dim));
             }
 
             if let Some((msg, ok)) = &st.header_status {

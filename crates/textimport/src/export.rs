@@ -89,9 +89,16 @@ pub fn rtf(doc: &Document, story: &Story) -> String {
     let ranges = story.para_ranges();
     let mut paras = Vec::with_capacity(ranges.len());
     let mut fonts: Vec<String> = Vec::new();
+    let mut style_names: Vec<String> = Vec::new();
     for (i, r) in ranges.iter().enumerate() {
         let pf = story.paras.get(i).cloned().unwrap_or_default();
         let (pp, base) = styles.resolve_para(&pf);
+        if !pf.style.is_empty()
+            && pf.style != designcraft_doc::story::BASIC_PARAGRAPH
+            && !style_names.contains(&pf.style)
+        {
+            style_names.push(pf.style.clone());
+        }
         let mut runs = Vec::new();
         for (rr, f) in story.runs() {
             let (a, b) = (rr.start.max(r.start), rr.end.min(r.end));
@@ -111,7 +118,7 @@ pub fn rtf(doc: &Document, story: &Story) -> String {
         if runs.is_empty() && !fonts.contains(&base.font_family) {
             fonts.push(base.font_family.clone());
         }
-        paras.push((pp, base, pf.table, runs));
+        paras.push((pp, base, pf.style, pf.table, runs));
     }
     let mut out = String::from("{\\rtf1\\ansi\\ansicpg1252\\uc1\\deff0\n{\\fonttbl");
     for (i, f) in fonts.iter().enumerate() {
@@ -122,7 +129,24 @@ pub fn rtf(doc: &Document, story: &Story) -> String {
         out.push_str(";}");
     }
     out.push_str("}\n");
-    for (pp, base, table, runs) in &paras {
+    if !style_names.is_empty() {
+        out.push_str("{\\stylesheet{\\s0\\snext0 Normal;}");
+        for (idx, name) in style_names.iter().enumerate() {
+            let s_idx = idx + 1;
+            let mut style_esc = String::new();
+            for c in name.chars() {
+                rtf_escape(&mut style_esc, c);
+            }
+            let _ = write!(out, "{{\\s{s_idx}\\sbasedon0\\snext0 {style_esc};}}");
+        }
+        out.push_str("}\n");
+    }
+    for (pp, base, style_name, table, runs) in &paras {
+        let s_tag = if !style_name.is_empty() && style_name != designcraft_doc::story::BASIC_PARAGRAPH {
+            style_names.iter().position(|s| s == style_name).map(|idx| format!("\\s{} ", idx + 1)).unwrap_or_default()
+        } else {
+            String::new()
+        };
         let q = match pp.align {
             Align::Center => "\\qc",
             Align::Right => "\\qr",
@@ -131,7 +155,7 @@ pub fn rtf(doc: &Document, story: &Story) -> String {
         };
         let _ = write!(
             out,
-            "\\pard{q}\\li{}\\ri{}\\fi{}\\sb{}\\sa{}",
+            "\\pard{s_tag}{q}\\li{}\\ri{}\\fi{}\\sb{}\\sa{}",
             twips(pp.left_indent),
             twips(pp.right_indent),
             twips(pp.first_line_indent),
@@ -223,5 +247,21 @@ mod tests {
         assert_eq!(back.text.trim_end_matches('\n'), "Plain bold {x}\nCafé\u{2028}two");
         assert_eq!(back.format_after(back.text.find("bold").unwrap()).over.font_style.as_deref(), Some("Bold"));
         assert_ne!(back.format_after(1).over.font_style.as_deref(), Some("Bold"));
+    }
+
+    #[test]
+    fn rtf_round_trips_paragraph_styles() {
+        let mut st = Story::with_text(StoryId(1), "Chapter Title\nSection Heading\nBody text", Default::default());
+        st.format_paras(0..1, |p| p.style = "Heading 1".into());
+        let h2_start = st.text.find("Section").unwrap();
+        st.format_paras(h2_start..h2_start + 1, |p| p.style = "Heading 2".into());
+        let doc = Document::new(&NewDocument::default());
+        let r = rtf(&doc, &st);
+        assert!(r.contains("{\\stylesheet"), "must contain stylesheet table: {r}");
+        assert!(r.contains("heading 1") || r.contains("Heading 1"), "must contain Heading 1: {r}");
+        let back = crate::rtf::import(r.as_bytes()).unwrap().story;
+        assert_eq!(back.paras[0].style, "Heading 1");
+        assert_eq!(back.paras[1].style, "Heading 2");
+        assert_eq!(back.paras[2].style, designcraft_doc::story::BASIC_PARAGRAPH);
     }
 }

@@ -168,7 +168,8 @@ if (Test-Path $AssetsSrc) {
   Copy-Item -Recurse -Force $AssetsSrc $Portable
 }
 
-# Pubgen samples: include all files from plan/pubgen/samples, excluding book_cover folder, and excluding *.csv and *.zip.
+# Pubgen samples: include all files from plan/pubgen/samples, including everything in brs, DUAL_LANG,
+# and SINGLE_LANG (with all CSVs, ZIPs, pubgen packages, and documents), excluding book_cover folder.
 # Every profile lands flat at samples\<profile> with its own example files inside. A stale copy of the sample tree
 # inside a profile ("…\plan\pubgen\samples\…", which a manual re-copy leaves behind) is skipped: shipping it nests the
 # samples inside their own repository path, e.g. samples\brs\chart\plan\pubgen\samples\brs.
@@ -188,7 +189,9 @@ if (Test-Path $SamplesSrc) {
       $script:skippedNestedCopies++
       return $false
     }
-    if ($_.Extension -eq '.csv' -or $_.Extension -eq '.zip') {
+    # For brs, DUAL_LANG, and SINGLE_LANG: include EVERYTHING (all files and extensions)
+    $isTargetSample = ($relative -match '^(brs|DUAL_LANG|SINGLE_LANG)[\\/]')
+    if (-not $isTargetSample -and ($_.Extension -eq '.csv' -or $_.Extension -eq '.zip')) {
       return $false
     }
     return $true
@@ -207,10 +210,14 @@ if (Test-Path $SamplesSrc) {
 
   # The portable app opens its example data from samples\<profile>, so the flat layout is part of the release
   # contract: check it here and fail the build, instead of zipping samples the app cannot find.
-  foreach ($expected in @('brs\ntp202610.xlsx', 'brs\U1.rtf', 'SINGLE_LANG\BAB_02_2025.xlsx', 'DUAL_LANG\BAB_01_2025_ai_translate.xlsx', 'images\bps_logo.png')) {
+  foreach ($expected in @('brs\ntp202610.xlsx', 'brs\U1.rtf', 'SINGLE_LANG\BAB_02_2025.xlsx', 'images\bps_logo.png')) {
     if (-not (Test-Path (Join-Path $SamplesDest $expected))) {
       throw "samples: samples\$expected is missing; plan\pubgen\samples must ship every profile's example files flat at samples\<profile>"
     }
+  }
+  $dualLangFiles = Get-ChildItem -Path (Join-Path $SamplesDest 'DUAL_LANG') -Recurse -File -ErrorAction SilentlyContinue
+  if (-not $dualLangFiles -or $dualLangFiles.Count -eq 0) {
+    throw "samples: DUAL_LANG sample folder is empty in $SamplesDest"
   }
   $NestedSampleDirs = @(Get-ChildItem -Path $SamplesDest -Recurse -Directory | Where-Object { $_.Name -eq 'plan' -or $_.Name -eq 'pubgen' })
   if ($NestedSampleDirs.Count -gt 0) {

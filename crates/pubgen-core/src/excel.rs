@@ -50,6 +50,42 @@ fn chart_appearance_settings(kv: &BTreeMap<String, String>) -> Vec<(&'static str
         .collect()
 }
 
+/// Finds the data sheet linked by a `CXX_XX` chart sheet (via `data`, `table`, `tabel`,
+/// `data_source`, `data_sheet`, `sheet`, `sheet_data`, `sumber_data`).
+/// Matches against workbook sheet names, tolerating spacing differences like `03  01L` vs `03_01L`.
+fn find_chart_linked_sheet(kv: &BTreeMap<String, String>, sheet_names: &[String]) -> Option<String> {
+    let keys = ["data", "table", "tabel", "data_source", "data_sheet", "sheet", "sheet_data", "sumber_data", "source_data"];
+    let raw_val = keys.iter().find_map(|k| kv.get(*k)).map(|s| s.trim()).filter(|s| !s.is_empty())?;
+
+    // 1. Direct match with an existing sheet name
+    if let Some(matched) = sheet_names.iter().find(|name| name.eq_ignore_ascii_case(raw_val)) {
+        return Some(matched.clone());
+    }
+
+    // 2. Normalized match (collapse multiple spaces, replace spaces with underscores)
+    let norm_raw = raw_val.split_whitespace().collect::<Vec<_>>().join("_");
+    if let Some(matched) = sheet_names.iter().find(|name| {
+        let norm_name = name.split_whitespace().collect::<Vec<_>>().join("_");
+        norm_name.eq_ignore_ascii_case(&norm_raw)
+    }) {
+        return Some(matched.clone());
+    }
+
+    // 3. Normalized alphanumeric only
+    let clean_raw: String = raw_val.chars().filter(|c| c.is_alphanumeric()).collect();
+    if !clean_raw.is_empty() {
+        if let Some(matched) = sheet_names.iter().find(|name| {
+            let clean_name: String = name.chars().filter(|c| c.is_alphanumeric()).collect();
+            clean_name.eq_ignore_ascii_case(&clean_raw)
+        }) {
+            return Some(matched.clone());
+        }
+    }
+
+    // Fallback: sanitized raw value with spaces replaced by underscores
+    Some(norm_raw)
+}
+
 pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
     let mut workbook =
         open_workbook_auto(path).map_err(|source| IngestError::Open { path: path.display().to_string(), message: source.to_string() })?;
@@ -198,7 +234,7 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
             card_title = t;
             card_source = s;
         } else if kind == CardKind::Chart {
-            if let Some(tbl) = kv.get("table").or_else(|| kv.get("tabel")) {
+            if let Some(tbl) = find_chart_linked_sheet(&kv, &names) {
                 card_source = Some(format!("csv/{tbl}.csv"));
             }
             // Raster chart: bind the image asset so page generation can place
@@ -931,7 +967,8 @@ fn extract_sheet_kv(rows: &[Vec<String>]) -> BTreeMap<String, String> {
 }
 
 fn classify_cxx_sheet(kv: &BTreeMap<String, String>) -> (CardKind, CardScope) {
-    let has_table = kv.get("table").or_else(|| kv.get("tabel")).is_some_and(|v| !v.trim().is_empty());
+    let table_keys = ["data", "table", "tabel", "data_source", "data_sheet", "sheet", "sheet_data", "sumber_data", "source_data"];
+    let has_table = table_keys.iter().find_map(|k| kv.get(*k)).is_some_and(|v| !v.trim().is_empty());
     let has_chart_type = kv.get("chart_type").or_else(|| kv.get("type")).or_else(|| kv.get("tipe_grafik")).is_some_and(|v| !v.trim().is_empty());
 
     let file_candidate = kv.get("file").or_else(|| kv.get("berkas")).or_else(|| kv.get("image")).or_else(|| kv.get("gambar"));
@@ -1955,6 +1992,31 @@ mod tests {
         kv_chart.insert("chart_type".into(), "bar".into());
         let (k_cht, _) = classify_sheet("C02_01", "bps_dda", &kv_chart);
         assert_eq!(k_cht, CardKind::Chart, "C02_01 with table & chart_type must be Chart");
+
+        // Case C: data key with type horizontal_bar -> Chart
+        let mut kv_data = BTreeMap::new();
+        kv_data.insert("title".into(), "Grafik 03.01 Rasio Jenis Kelamin".into());
+        kv_data.insert("data".into(), "03_01L".into());
+        kv_data.insert("type".into(), "horizontal_bar".into());
+        let (k_data, _) = classify_sheet("C03_01", "bps_dda", &kv_data);
+        assert_eq!(k_data, CardKind::Chart, "C03_01 with data & type must be Chart");
+    }
+
+    #[test]
+    fn test_find_chart_linked_sheet_normalizes_spaces_and_matches_names() {
+        let sheet_names = vec!["03_01L".to_string(), "03_02L".to_string(), "C03_01".to_string()];
+        
+        let mut kv1 = BTreeMap::new();
+        kv1.insert("data".into(), "03  01L".into()); // extra space from Excel
+        assert_eq!(find_chart_linked_sheet(&kv1, &sheet_names), Some("03_01L".to_string()));
+
+        let mut kv2 = BTreeMap::new();
+        kv2.insert("table".into(), "03_02L".into());
+        assert_eq!(find_chart_linked_sheet(&kv2, &sheet_names), Some("03_02L".to_string()));
+
+        let mut kv3 = BTreeMap::new();
+        kv3.insert("data_source".into(), "custom_sheet".into());
+        assert_eq!(find_chart_linked_sheet(&kv3, &sheet_names), Some("custom_sheet".to_string()));
     }
 
     #[test]

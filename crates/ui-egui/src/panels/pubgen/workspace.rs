@@ -790,6 +790,9 @@ impl OrchestratorWorkspaceState {
                     if !card.chart_raw_data.is_empty() {
                         settings.insert("chart_raw_data".into(), serde_json::Value::String(card.chart_raw_data.clone()));
                     }
+                    if !card.title_en.is_empty() {
+                        settings.insert("title_en".into(), serde_json::Value::String(card.title_en.clone()));
+                    }
                 }
                 if card.kind == CardKind::Cover {
                     if !card.title.is_empty() {
@@ -4750,8 +4753,19 @@ fn apply_chart_appearance_settings(card: &mut PublicationCard) {
 }
 
 /// Catalog-row file for a chart card. The page generator reads the chart spec and
-/// its data from this one CSV, so it is rebuilt from the card whenever the card has
-/// a linked data source; without one the XLSX chart sheet's own grid is used.
+/// its data from this one CSV.
+///
+/// Priority:
+/// 1. The user's modified / independent chart data on the card (Opsi Grafik):
+///    When `card.chart_raw_data` holds custom data (not empty, not sample, and not a spec dump),
+///    compile it to a staged CSV using `build_chart_sheet_csv(card)`. The original source
+///    CSV file is NEVER modified or overwritten.
+/// 2. The linked CSV in the card's Source field:
+///    When the card points to a linked data table (e.g. from `data: 03_01L`), load it
+///    and stage it without modifying the original source CSV.
+/// 3. The XLSX chart sheet's own grid, when ingest produced it AND it holds a chart definition.
+/// 4. The card's own data table (Opsi Grafik), for cards without a file (even sample data).
+/// 5. Anything else the card names.
 fn resolve_chart_catalog_file(
     card: &PublicationCard,
     chart_id: &str,
@@ -4760,7 +4774,21 @@ fn resolve_chart_catalog_file(
 ) -> String {
     let staged = |rel: &str| -> String { stage.join(rel.replace('\\', "/")).to_string_lossy().into_owned() };
 
-    // 1. The linked CSV in the card's Source field is the chart's data source.
+    // 1. The user's modified / independent data on the card (Opsi Grafik).
+    if !card.chart_raw_data.trim().is_empty()
+        && !is_sample_chart_data(&card.chart_raw_data)
+        && !csv_holds_chart_spec(&card.chart_raw_data)
+    {
+        let p = stage.join(format!("csv/{chart_id}_from_data.csv"));
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if std::fs::write(&p, build_chart_sheet_csv(card)).is_ok() {
+            return p.to_string_lossy().into_owned();
+        }
+    }
+
+    // 2. The linked CSV in the card's Source field is the chart's data source.
     if let Some(source) = chart_linked_source(card, chart_id, cached_content)
         && let Some(effective) = chart_card_rendered_from_source(card, &source, cached_content)
     {
@@ -4773,16 +4801,24 @@ fn resolve_chart_catalog_file(
         }
     }
 
-    // 2. The XLSX chart sheet's own grid, when ingest produced it.
-    if cached_content_bytes(cached_content, &format!("csv/{chart_id}.csv")).is_some() {
-        return staged(&format!("csv/{chart_id}.csv"));
+    // 3. The XLSX chart sheet's own grid, when ingest produced it AND it holds a chart definition.
+    let own_csv_path = format!("csv/{chart_id}.csv");
+    if let Some(bytes) = cached_content_bytes(cached_content, &own_csv_path) {
+        let text = String::from_utf8_lossy(bytes);
+        if csv_holds_chart_spec(&text) {
+            return staged(&own_csv_path);
+        }
     }
-    if cached_content_bytes(cached_content, &format!("{chart_id}.csv")).is_some() {
-        return staged(&format!("{chart_id}.csv"));
+    let bare_csv_path = format!("{chart_id}.csv");
+    if let Some(bytes) = cached_content_bytes(cached_content, &bare_csv_path) {
+        let text = String::from_utf8_lossy(bytes);
+        if csv_holds_chart_spec(&text) {
+            return staged(&bare_csv_path);
+        }
     }
 
-    // 3. The card's own data table (Opsi Grafik), for cards without a file.
-    if !card.chart_raw_data.trim().is_empty() && !is_sample_chart_data(&card.chart_raw_data) {
+    // 4. The card's own data table (Opsi Grafik), for cards without a file (even sample data).
+    if !card.chart_raw_data.trim().is_empty() {
         let p = stage.join(format!("csv/{chart_id}.csv"));
         if let Some(dir) = p.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -4792,7 +4828,7 @@ fn resolve_chart_catalog_file(
         }
     }
 
-    // 4. Anything else the card names.
+    // 5. Anything else the card names.
     if cached_content_bytes(cached_content, &card.source).is_some() {
         return staged(&card.source);
     }
@@ -4904,37 +4940,42 @@ fn build_chart_sheet_csv(card: &PublicationCard) -> String {
     };
     lines.push(format!("chart_type{delim}{ct}"));
     if !card.title.is_empty() {
-        lines.push(format!("title{delim}{}", card.title));
+        lines.push(format!("title{delim}{}", super::excel::escape_csv_field(&card.title)));
     }
-    if !card.title_en.is_empty() {
-        lines.push(format!("title_en{delim}{}", card.title_en));
+    let eff_title_en = if !card.title_en.is_empty() {
+        card.title_en.as_str()
+    } else {
+        card.settings.get("title_en").map(String::as_str).unwrap_or("")
+    };
+    if !eff_title_en.is_empty() {
+        lines.push(format!("title_en{delim}{}", super::excel::escape_csv_field(eff_title_en)));
     }
     let cat_col = if card.chart_category_col.is_empty() { "A" } else { &card.chart_category_col };
     lines.push(format!("category_col{delim}{cat_col}"));
     let s1_col = if card.chart_series_1_col.is_empty() { "B" } else { &card.chart_series_1_col };
     lines.push(format!("series_1_col{delim}{s1_col}"));
     if !card.chart_series_1_label_id.is_empty() {
-        lines.push(format!("series_1_label{delim}{}", card.chart_series_1_label_id));
+        lines.push(format!("series_1_label{delim}{}", super::excel::escape_csv_field(&card.chart_series_1_label_id)));
     }
     if !card.chart_series_1_label_en.is_empty() {
-        lines.push(format!("series_1_label_en{delim}{}", card.chart_series_1_label_en));
+        lines.push(format!("series_1_label_en{delim}{}", super::excel::escape_csv_field(&card.chart_series_1_label_en)));
     }
     if card.chart_series_2_enabled && !card.chart_series_2_col.is_empty() {
         lines.push(format!("series_2_col{delim}{}", card.chart_series_2_col));
         if !card.chart_series_2_label_id.is_empty() {
-            lines.push(format!("series_2_label{delim}{}", card.chart_series_2_label_id));
+            lines.push(format!("series_2_label{delim}{}", super::excel::escape_csv_field(&card.chart_series_2_label_id)));
         }
         if !card.chart_series_2_label_en.is_empty() {
-            lines.push(format!("series_2_label_en{delim}{}", card.chart_series_2_label_en));
+            lines.push(format!("series_2_label_en{delim}{}", super::excel::escape_csv_field(&card.chart_series_2_label_en)));
         }
     }
     if card.chart_series_3_enabled && !card.chart_series_3_col.is_empty() {
         lines.push(format!("series_3_col{delim}{}", card.chart_series_3_col));
         if !card.chart_series_3_label_id.is_empty() {
-            lines.push(format!("series_3_label{delim}{}", card.chart_series_3_label_id));
+            lines.push(format!("series_3_label{delim}{}", super::excel::escape_csv_field(&card.chart_series_3_label_id)));
         }
         if !card.chart_series_3_label_en.is_empty() {
-            lines.push(format!("series_3_label_en{delim}{}", card.chart_series_3_label_en));
+            lines.push(format!("series_3_label_en{delim}{}", super::excel::escape_csv_field(&card.chart_series_3_label_en)));
         }
     }
     let fmt = match card.chart_value_format.as_str() {
@@ -4950,8 +4991,8 @@ fn build_chart_sheet_csv(card: &PublicationCard) -> String {
         lines.push(format!("max_value{delim}{}", card.chart_max_value_override));
     }
     let base_header_count = lines.len() + 3;
-    let data_start = base_header_count + card.chart_data_start_row.saturating_sub(1);
-    let data_end = base_header_count + card.chart_data_end_row.saturating_sub(1);
+    let data_start = base_header_count + card.chart_data_start_row;
+    let data_end = base_header_count + card.chart_data_end_row;
     lines.push(format!("data_start_row{delim}{data_start}"));
     lines.push(format!("data_end_row{delim}{data_end}"));
     lines.push(String::new());
@@ -6433,6 +6474,7 @@ fn poll_translate_job(state: &mut OrchestratorWorkspaceState, app: &DesignApp, c
         res.failed.is_empty(),
     ));
     state.is_dirty = true;
+    state.show_translate_guard_dialog = false;
     state.translate_units.clear();
     state.translate_glossary_pairs.clear();
 
@@ -6691,10 +6733,19 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         let file_en = if super::file_en_same_as_file(&file, &raw_file_en) { String::new() } else { raw_file_en };
         let image1 = card.settings.get("image1").and_then(|im| staged(im)).unwrap_or_default();
         let image2 = card.settings.get("image2").and_then(|im| staged(im)).unwrap_or_default();
-        let theme = if !card.table_theme.trim().is_empty() {
-            card.table_theme.clone()
+        let theme = if card.kind == CardKind::Table {
+            if !card.table_theme.trim().is_empty() {
+                card.table_theme.clone()
+            } else {
+                card.settings.get("theme").or_else(|| card.settings.get("table_theme")).cloned().unwrap_or_default()
+            }
         } else {
-            card.settings.get("theme").or_else(|| card.settings.get("table_theme")).cloned().unwrap_or_default()
+            let t = card.settings.get("theme").cloned().unwrap_or_default();
+            if t.starts_with('#') || t.starts_with("rgb") || t.starts_with("cmyk") {
+                t
+            } else {
+                String::new()
+            }
         };
         let chapter = card.settings.get("chapter").or_else(|| card.settings.get("chapter_title")).cloned().unwrap_or_else(|| {
             let ch_num = card.title.split_whitespace().find(|w| w.chars().any(|c| c.is_ascii_digit())).unwrap_or("");
@@ -7150,6 +7201,54 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
     }
 }
 
+fn lighten_color(c: Color32, amount: u8) -> Color32 {
+    Color32::from_rgba_premultiplied(
+        c.r().saturating_add(amount),
+        c.g().saturating_add(amount),
+        c.b().saturating_add(amount),
+        c.a(),
+    )
+}
+
+fn darken_color(c: Color32, amount: u8) -> Color32 {
+    Color32::from_rgba_premultiplied(
+        c.r().saturating_sub(amount),
+        c.g().saturating_sub(amount),
+        c.b().saturating_sub(amount),
+        c.a(),
+    )
+}
+
+fn custom_styled_button(
+    ui: &mut Ui,
+    size: [f32; 2],
+    label: &str,
+    base_color: Color32,
+    text_color: Color32,
+    enabled: bool,
+    t: &Tokens,
+) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(
+        vec2(size[0], size[1]),
+        if enabled { Sense::click() } else { Sense::hover() },
+    );
+    if ui.is_rect_visible(rect) {
+        let (bg, fg, stroke) = if !enabled {
+            (t.panel_darker, t.text_dim, Stroke::NONE)
+        } else if resp.is_pointer_button_down_on() {
+            (darken_color(base_color, 35), text_color, Stroke::new(1.5, t.accent_strong))
+        } else if resp.hovered() {
+            (lighten_color(base_color, 30), text_color, Stroke::new(1.2, Color32::WHITE))
+        } else {
+            (base_color, text_color, Stroke::NONE)
+        };
+        ui.painter().rect(rect, CornerRadius::same(t.radius), bg, stroke, StrokeKind::Inside);
+        crate::rtl::paint(ui.painter(), rect.center(), Align2::CENTER_CENTER, label, semibold(11.0), fg);
+    }
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
+    resp
+}
+
 /// Renders the AI Translation Guard Dialog when the project already has translated data:
 /// Allows the user to either translate only untranslated items (efficient, saves quota)
 /// or replace/overwrite all existing translation data with fresh AI translations.
@@ -7158,6 +7257,7 @@ fn render_translate_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state
         return;
     }
 
+    let is_translating = state.translate_job.is_some();
     let mut close = false;
     let mut chosen_replace = None;
     let existing_count = super::with_state(ctx, |pubgen_st| count_existing_translations(state, Some(pubgen_st)));
@@ -7166,7 +7266,7 @@ fn render_translate_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state
     egui::Window::new(guard_title)
         .collapsible(false)
         .resizable(false)
-        .fixed_size([500.0, 230.0])
+        .fixed_size([500.0, if is_translating { 255.0 } else { 230.0 }])
         .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
@@ -7189,47 +7289,70 @@ fn render_translate_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state
                 .color(t.text_dim),
             );
 
+            if is_translating {
+                ui.add_space(4.0);
+                let (done, total) = state.translate_job.as_ref().map(|j| (j.done, j.total)).unwrap_or((0, 0));
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(
+                        RichText::new(format!("{}… {}/{}", crate::i18n::tr(lang, "Menerjemahkan dengan AI"), done, total))
+                            .font(semibold(11.5))
+                            .color(t.accent),
+                    );
+                });
+            }
+
             ui.add_space(8.0);
             ui.separator();
             ui.add_space(6.0);
 
             ui.horizontal(|ui| {
-                if ui
-                    .add_sized(
-                        [185.0, 26.0],
-                        egui::Button::new(
-                            RichText::new(crate::i18n::tr(lang, "Translate Untranslated Only"))
-                                .font(semibold(11.0))
-                                .color(Color32::WHITE),
-                        )
-                        .fill(t.accent_strong),
-                    )
-                    .on_hover_text(crate::i18n::tr(lang, "Keep existing translations and translate only untranslated items to conserve AI quota"))
-                    .clicked()
-                {
+                let btn1_label = crate::i18n::tr(lang, "Translate Untranslated Only");
+                let resp1 = custom_styled_button(
+                    ui,
+                    [185.0, 26.0],
+                    &btn1_label,
+                    t.accent_strong,
+                    Color32::WHITE,
+                    !is_translating,
+                    t,
+                )
+                .on_hover_text(crate::i18n::tr(lang, "Keep existing translations and translate only untranslated items to conserve AI quota"));
+
+                if resp1.clicked() && !is_translating {
                     chosen_replace = Some(false);
-                    close = true;
                 }
 
-                if ui
-                    .add_sized(
-                        [165.0, 26.0],
-                        egui::Button::new(
-                            RichText::new(crate::i18n::tr(lang, "Replace Existing Data"))
-                                .font(semibold(11.0))
-                                .color(t.caption_close_text),
-                        )
-                        .fill(t.caption_close),
-                    )
-                    .on_hover_text(crate::i18n::tr(lang, "Clear existing translations and re-translate all units from scratch with AI"))
-                    .clicked()
-                {
+                let btn2_label = crate::i18n::tr(lang, "Replace Existing Data");
+                let resp2 = custom_styled_button(
+                    ui,
+                    [165.0, 26.0],
+                    &btn2_label,
+                    t.caption_close,
+                    t.caption_close_text,
+                    !is_translating,
+                    t,
+                )
+                .on_hover_text(crate::i18n::tr(lang, "Clear existing translations and re-translate all units from scratch with AI"));
+
+                if resp2.clicked() && !is_translating {
                     chosen_replace = Some(true);
-                    close = true;
                 }
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button(crate::i18n::tr(lang, "Cancel")).clicked() {
+                    let cancel_label = if is_translating {
+                        crate::i18n::tr(lang, "Batal")
+                    } else {
+                        crate::i18n::tr(lang, "Cancel")
+                    };
+                    if ui.button(cancel_label).clicked() {
+                        if is_translating {
+                            if let Some(job) = &state.translate_job {
+                                job.cancel();
+                            }
+                            state.translate_job = None;
+                            state.status_message = Some((crate::i18n::tr(lang, "AI translation cancelled").to_string(), false));
+                        }
                         close = true;
                     }
                 });
@@ -8811,6 +8934,131 @@ mod tests {
         assert!(!joined.contains("Sheet Alpha"), "the chart sheet's own grid must not supply the data: {texts:?}");
     }
 
+    /// When a user modifies chart data in the form, that modified data is the authoritative
+    /// source for the chart, while the original source CSV file remains untouched.
+    #[test]
+    fn test_generate_from_workspace_uses_user_modified_data_without_touching_source_csv() {
+        let original_source_csv = "Desa/Kelurahan,Distribusi Penduduk (%),Kepadatan Penduduk (per km2),Rasio Jenis Kelamin Penduduk\n\
+Desa,,,\n\
+Warungbambu,8.55,1.65,133.2\n\
+Kondangjaya,17.89,2.44,105.68\n\
+Kelurahan,,,\n\
+Adiarsa Timur,9.23,4.32,95.26\n";
+
+        let user_modified_csv = "Desa/Kelurahan,Distribusi Penduduk (%),Kepadatan Penduduk (per km2),Rasio Jenis Kelamin Penduduk\n\
+Warungbambu,8.55,1.65,133.2\n\
+Kondangjaya,17.89,2.44,105.68\n\
+Adiarsa Timur,9.23,4.32,95.26\n\
+Karawang Wetan,26.95,3.2,96.84\n\
+Palumbonsari,14.22,4.02,99.35\n";
+
+        let mut state = OrchestratorWorkspaceState { selected_profile: "bps_dda".into(), doc_language: "Indonesian".into(), ..Default::default() };
+        state.cards.clear();
+
+        let mut card = PublicationCard::new_with(CardKind::Chart, "Grafik Rasio Penduduk", "", "csv/03_01L.csv", 5, true);
+        card.chapter_id = "C03_01".into();
+        card.chart_type = "Horizontal Bar (Ranked)".into();
+        card.chart_category_col = "A".into();
+        card.chart_series_1_col = "B".into();
+        card.chart_series_1_label_id = "Distribusi Penduduk".into();
+        card.chart_data_start_row = 2;
+        card.chart_data_end_row = 6;
+        card.chart_raw_data = user_modified_csv.to_string();
+        card.table_theme = String::new();
+        card.settings.insert("table_theme".into(), String::new());
+        state.cards.push(card);
+
+        // Put the original uncleaned CSV into cached_content
+        std::sync::Arc::make_mut(&mut state.cached_content).insert("csv/03_01L.csv".into(), original_source_csv.as_bytes().to_vec());
+
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let res = generate_from_workspace(&mut app, &state);
+        assert!(res.is_ok(), "worksheet compilation failed: {res:?}");
+
+        // 1. The emitted document must contain the user's modified labels (e.g. Karawang Wetan)
+        let texts: Vec<String> = app.session.active().unwrap().doc.stories.values().map(|s| s.text.clone()).collect();
+        let joined = texts.join("\n");
+        assert!(joined.contains("Karawang Wetan"), "must render user modified village data: {texts:?}");
+        assert!(joined.contains("Palumbonsari"), "must render user modified village data: {texts:?}");
+
+        // 2. The original source CSV in cached_content must remain completely untouched
+        let cached_source_bytes = state.cached_content.get("csv/03_01L.csv").expect("source CSV must remain in cache");
+        let cached_source_str = String::from_utf8_lossy(cached_source_bytes);
+        assert_eq!(cached_source_str, original_source_csv, "original source CSV must never be modified");
+        assert!(cached_source_str.contains("Desa,,,"), "original CSV still has raw subheader rows");
+        assert!(!cached_source_str.contains("Karawang Wetan"), "original CSV was not mutated");
+    }
+
+    #[test]
+    fn test_generate_from_workspace_donut_chart_with_bilingual_title_and_modified_rows() {
+        let user_modified_csv = "Desa/Kelurahan,Distribusi Penduduk (%),Kepadatan Penduduk (per km2),Rasio Jenis Kelamin Penduduk\n\
+Warungbambu,8.55,1.65,133.2\n\
+Kondangjaya,17.89,2.44,105.68\n\
+Margasari,7.49,2.76,120.28\n\
+Tegalsawah,6.86,4.38,101.06\n\
+Adiarsa Timur,9.23,4.32,95.26\n\
+Karawang Wetan,26.95,3.2,96.84\n\
+Palumbonsari,14.22,4.02,99.35\n\
+Plawad,8.83,7,103.18\n";
+
+        let mut state = OrchestratorWorkspaceState { selected_profile: "bps_dda".into(), doc_language: "Bilingual".into(), ..Default::default() };
+        state.cards.clear();
+
+        let mut card = PublicationCard::new_with(
+            CardKind::Chart,
+            "Grafik 03.01 Rasio Jenis Kelamin Penduduk Karawang Timur, 2025",
+            "",
+            "csv/03_01L.csv",
+            34,
+            true,
+        );
+        card.chapter_id = "C03_01".into();
+        card.chart_type = "Donut / Ring Chart".into();
+        card.chart_category_col = "A".into();
+        card.chart_series_1_col = "B".into();
+        card.chart_series_1_label_id = "Distribusi Penduduk (%)".into();
+        card.chart_series_1_label_en = "Population Distribution (%)".into();
+        card.chart_data_start_row = 2;
+        card.chart_data_end_row = 9;
+        card.chart_raw_data = user_modified_csv.to_string();
+        card.title_en = "Chart 03.01 Ratio Sex Population of East Karawang District, 2025".into();
+        card.settings.insert("title_en".into(), card.title_en.clone());
+        // Table theme from project default should not disrupt chart emission
+        card.table_theme = "BPS Blue".into();
+        card.settings.insert("table_theme".into(), "BPS Blue".into());
+        state.cards.push(card);
+
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let res = generate_from_workspace(&mut app, &state);
+        assert!(res.is_ok(), "worksheet compilation failed: {res:?}");
+
+        let active = app.session.active().unwrap();
+        let texts: Vec<String> = active.doc.stories.values().map(|s| s.text.clone()).collect();
+        let joined = texts.join("\n");
+
+        // 1. Verify Title lines: Indonesian title AND English title must be present, NOT overridden by "2025"
+        assert!(joined.contains("Grafik 03.01"), "must contain Indonesian kicker: {joined}");
+        assert!(joined.contains("Rasio Jenis Kelamin Penduduk Karawang Timur"), "must contain Indonesian title: {joined}");
+        assert!(joined.contains("Chart 03.01 Ratio Sex Population of East Karawang District, 2025"), "must contain English title: {joined}");
+
+        // 2. Verify all 8 donut polygon slices were emitted (not just 1!)
+        fn count_polygons(items: &[std::sync::Arc<designcraft_doc::Item>]) -> usize {
+            let mut count = 0;
+            for it in items {
+                if matches!(it.shape, designcraft_doc::Shape::Polygon) {
+                    count += 1;
+                }
+                if let designcraft_doc::Content::Group { ref items } = it.content {
+                    count += count_polygons(items);
+                }
+            }
+            count
+        }
+
+        let polygon_items_count: usize = active.doc.spreads.iter().map(|sp| count_polygons(&sp.items)).sum();
+        assert!(polygon_items_count >= 7, "must emit at least 7 donut slice polygons, got {polygon_items_count}");
+    }
+
     #[test]
     fn test_toc_table_and_paragraph_exclusion_and_headers() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()).unwrap_or_default();
@@ -8869,6 +9117,53 @@ mod tests {
         assert!(table_toc.contains("2.2.1\tJumlah Pegawai Negeri Sipil"), "TOC Table must contain Table 2.2.1: {table_toc}");
         assert!(!table_toc.contains("2.1.1\t2 PEMERINTAHAN"), "TOC Table must NOT contain '2.1.1 2 PEMERINTAHAN': {table_toc}");
         assert!(!table_toc.contains("2.2.1\tsubtitle"), "TOC Table must NOT contain '2.2.1 subtitle': {table_toc}");
+    }
+
+    #[test]
+    fn test_kcda_kartim_translated_pubgen_paragraph_toc_pairs_english() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()).unwrap_or_default();
+        let pubgen_file = root.join("plan").join("pubgen").join("samples").join("DUAL_LANG").join("KCDA_KARTIM_2026_translated.pubgen");
+        if !pubgen_file.is_file() {
+            return;
+        }
+
+        let opened = pubgen_core::container::open_pubgen(&pubgen_file).expect("open pubgen");
+        let report = pubgen_core::excel::IngestReport {
+            profile_id: opened.metadata.profile_id.clone(),
+            metadata: opened.metadata.clone(),
+            csv: opened.content.csv.clone(),
+            text: opened.content.text.clone(),
+            assets: opened.content.assets.clone(),
+            warnings: Vec::new(),
+        };
+        let mut state = OrchestratorWorkspaceState::default();
+        apply_ingest_report_to_state(&mut state, "KCDA_KARTIM_2026_translated.pubgen", &report, &[]);
+        state.tm = opened.tm.clone();
+
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", serde_json::json!({"facingPages": true})).expect("new doc");
+        generate_from_workspace(&mut app, &state).expect("generate pages");
+
+        let active = app.session.active().expect("active document");
+        let all_text: Vec<&str> = active.doc.stories.values().map(|s| s.text.as_str()).collect();
+
+        let para_toc = all_text
+            .iter()
+            .find(|t| t.contains("Daftar Isi") || t.contains("Table of Contents"))
+            .copied()
+            .expect("TOC Paragraph story must exist");
+
+        // Bab 03 and Bab 04 paragraph headings must pair with their English translations
+        assert!(
+            para_toc.contains("Profil Sosio-Ekonomi dan Tantangan Ketenagakerjaan")
+                && para_toc.contains("Socio-Economic Profile and Labor Market Challenges"),
+            "Bab 03 heading 1 must pair with English: {para_toc}"
+        );
+        assert!(
+            para_toc.contains("Dinamika Sosio-Ekonomi dan Ketenagakerjaan Karawang Timur")
+                && para_toc.contains("Socio-Economic and Employment Dynamics of East Karawang"),
+            "Bab 04 heading 1 must pair with English: {para_toc}"
+        );
     }
 
     #[test]

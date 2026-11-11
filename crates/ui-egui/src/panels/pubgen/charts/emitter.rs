@@ -29,6 +29,9 @@ pub fn ensure_swatch(app: &mut DesignApp, hex_or_name: &str) -> Result<String, S
     {
         return Ok(name.to_string());
     }
+    if !name.starts_with('#') && !name.starts_with("rgb") && !name.starts_with("cmyk") {
+        return Ok("[Black]".to_string());
+    }
     let res = app.run("swatch.create", json!({"name": name, "color": name})).map_err(|e| format!("swatch.create `{name}` failed: {e}"))?;
     Ok(res.get("name").and_then(Value::as_str).unwrap_or(name).to_string())
 }
@@ -83,19 +86,27 @@ pub fn emit_polygon(
         Ok(Value::Null)
     });
 
-    if fill != "[None]" {
-        let fill_swatch = ensure_swatch(app, fill)?;
-        let _ = app.run("object.fill", json!({"ids": [fid], "swatch": fill_swatch}));
-    } else {
-        let _ = app.run("object.fill", json!({"ids": [fid], "swatch": "[None]"}));
-    }
+    let apply_styling = |app: &mut DesignApp| -> Result<(), String> {
+        if fill != "[None]" {
+            let fill_swatch = ensure_swatch(app, fill)?;
+            let _ = app.run("object.fill", json!({"ids": [fid], "swatch": fill_swatch}));
+        } else {
+            let _ = app.run("object.fill", json!({"ids": [fid], "swatch": "[None]"}));
+        }
 
-    if stroke != "[None]" {
-        let stroke_swatch = ensure_swatch(app, stroke)?;
-        let _ = app.run("object.stroke", json!({"ids": [fid], "swatch": stroke_swatch}));
-        let _ = app.run("object.strokeWeight", json!({"ids": [fid], "weight": stroke_weight}));
-    } else {
-        let _ = app.run("object.stroke", json!({"ids": [fid], "swatch": "[None]"}));
+        if stroke != "[None]" {
+            let stroke_swatch = ensure_swatch(app, stroke)?;
+            let _ = app.run("object.stroke", json!({"ids": [fid], "swatch": stroke_swatch}));
+            let _ = app.run("object.strokeWeight", json!({"ids": [fid], "weight": stroke_weight}));
+        } else {
+            let _ = app.run("object.stroke", json!({"ids": [fid], "swatch": "[None]"}));
+        }
+        Ok(())
+    };
+
+    if let Err(e) = apply_styling(app) {
+        let _ = app.run("item.delete", json!({"ids": [fid]}));
+        return Err(e);
     }
 
     Ok(fid)
@@ -118,19 +129,27 @@ pub fn emit_ellipse(app: &mut DesignApp, spread_idx: usize, rect: [f64; 4], fill
 
     let fid = res.get("id").and_then(Value::as_u64).ok_or_else(|| "frame.create returned no id".to_string())?;
 
-    if fill != "[None]" {
-        let fill_swatch = ensure_swatch(app, fill)?;
-        let _ = app.run("object.fill", json!({"ids": [fid], "swatch": fill_swatch}));
-    } else {
-        let _ = app.run("object.fill", json!({"ids": [fid], "swatch": "[None]"}));
-    }
+    let apply_styling = |app: &mut DesignApp| -> Result<(), String> {
+        if fill != "[None]" {
+            let fill_swatch = ensure_swatch(app, fill)?;
+            let _ = app.run("object.fill", json!({"ids": [fid], "swatch": fill_swatch}));
+        } else {
+            let _ = app.run("object.fill", json!({"ids": [fid], "swatch": "[None]"}));
+        }
 
-    if stroke != "[None]" {
-        let stroke_swatch = ensure_swatch(app, stroke)?;
-        let _ = app.run("object.stroke", json!({"ids": [fid], "swatch": stroke_swatch}));
-        let _ = app.run("object.strokeWeight", json!({"ids": [fid], "weight": stroke_weight}));
-    } else {
-        let _ = app.run("object.stroke", json!({"ids": [fid], "swatch": "[None]"}));
+        if stroke != "[None]" {
+            let stroke_swatch = ensure_swatch(app, stroke)?;
+            let _ = app.run("object.stroke", json!({"ids": [fid], "swatch": stroke_swatch}));
+            let _ = app.run("object.strokeWeight", json!({"ids": [fid], "weight": stroke_weight}));
+        } else {
+            let _ = app.run("object.stroke", json!({"ids": [fid], "swatch": "[None]"}));
+        }
+        Ok(())
+    };
+
+    if let Err(e) = apply_styling(app) {
+        let _ = app.run("item.delete", json!({"ids": [fid]}));
+        return Err(e);
     }
 
     Ok(fid)
@@ -279,19 +298,27 @@ pub fn emit_rect(app: &mut DesignApp, spread_idx: usize, rect: [f64; 4], fill: &
 
     let fid = res.get("id").and_then(Value::as_u64).ok_or_else(|| "frame.create returned no id".to_string())?;
 
-    if fill != "[None]" {
-        let fill_swatch = ensure_swatch(app, fill)?;
-        let _ = app.run("object.fill", json!({"ids": [fid], "swatch": fill_swatch}));
-    } else {
-        let _ = app.run("object.fill", json!({"ids": [fid], "swatch": "[None]"}));
-    }
+    let apply_styling = |app: &mut DesignApp| -> Result<(), String> {
+        if fill != "[None]" {
+            let fill_swatch = ensure_swatch(app, fill)?;
+            let _ = app.run("object.fill", json!({"ids": [fid], "swatch": fill_swatch}));
+        } else {
+            let _ = app.run("object.fill", json!({"ids": [fid], "swatch": "[None]"}));
+        }
 
-    if stroke != "[None]" {
-        let stroke_swatch = ensure_swatch(app, stroke)?;
-        let _ = app.run("object.stroke", json!({"ids": [fid], "swatch": stroke_swatch}));
-        let _ = app.run("object.strokeWeight", json!({"ids": [fid], "weight": stroke_weight}));
-    } else {
-        let _ = app.run("object.stroke", json!({"ids": [fid], "swatch": "[None]"}));
+        if stroke != "[None]" {
+            let stroke_swatch = ensure_swatch(app, stroke)?;
+            let _ = app.run("object.stroke", json!({"ids": [fid], "swatch": stroke_swatch}));
+            let _ = app.run("object.strokeWeight", json!({"ids": [fid], "weight": stroke_weight}));
+        } else {
+            let _ = app.run("object.stroke", json!({"ids": [fid], "swatch": "[None]"}));
+        }
+        Ok(())
+    };
+
+    if let Err(e) = apply_styling(app) {
+        let _ = app.run("item.delete", json!({"ids": [fid]}));
+        return Err(e);
     }
 
     Ok(fid)
@@ -525,6 +552,9 @@ pub fn emit_chart(
     }
 
     for slice in &layout.donut_slices {
+        if slice.sweep_degrees <= 0.001 {
+            continue;
+        }
         let color = series_color(palette, slice.series_idx);
         let fid = emit_polygon(app, spread_idx, &slice.points, color, "#FFFFFF", 1.5)?;
         frame_ids.push(fid);

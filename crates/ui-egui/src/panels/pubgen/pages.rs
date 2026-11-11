@@ -544,7 +544,13 @@ fn row_template_slots(
         // AI translation (plan §4): an explicit ` / ` pair wins, else the session map.
         let en_title_opt = match en_title_opt {
             Some(en) => Some(en),
-            None if st.bilingual_output => st.translations.get(id_title.trim()).map(String::as_str).filter(|s| !s.is_empty()).map(str::to_string),
+            None if st.bilingual_output => st
+                .translations
+                .get(id_title.trim())
+                .or_else(|| st.translations.get(title_val.trim()))
+                .map(String::as_str)
+                .filter(|s| !s.is_empty())
+                .map(|en| super::toc::strip_tablepage_title_prefix(en, num_val, "Table").to_string()),
             None => None,
         };
         let formatted_num = excel::format_table_number(num_val, file_val);
@@ -2998,68 +3004,76 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                 dir.join(format!("csv/m{clean_num}.csv")),
             ];
 
+            let is_map = type_val.eq_ignore_ascii_case("peta") || type_val.eq_ignore_ascii_case("map");
+
             // Peek at candidates to discover title and title_en from map CSV if needed
-            for candidate in &c_candidates {
-                if candidate.as_os_str().is_empty() || !candidate.is_file() {
-                    continue;
-                }
-                if let Ok(content) = std::fs::read_to_string(candidate) {
-                    let delim = detect_delimiter(&content);
-                    let grid = parse_csv_content_with_delim(&content, delim);
-                    let sheet_data = excel::ExcelSheetData { name: num_val.to_string(), grid, merges: Vec::new() };
-                    if let Some(map_info) = excel::parse_map_sheet(&sheet_data) {
-                        if let Some(ref t) = map_info.title {
-                            if !t.is_empty() {
-                                detected_map_title = Some(t.clone());
+            if is_map {
+                for candidate in &c_candidates {
+                    if candidate.as_os_str().is_empty() || !candidate.is_file() {
+                        continue;
+                    }
+                    if let Ok(content) = std::fs::read_to_string(candidate) {
+                        let delim = detect_delimiter(&content);
+                        let grid = parse_csv_content_with_delim(&content, delim);
+                        let sheet_data = excel::ExcelSheetData { name: num_val.to_string(), grid, merges: Vec::new() };
+                        if let Some(map_info) = excel::parse_map_sheet(&sheet_data) {
+                            if let Some(ref t) = map_info.title {
+                                if !t.is_empty() {
+                                    detected_map_title = Some(t.clone());
+                                }
                             }
-                        }
-                        if let Some(ref te) = map_info.title_en {
-                            if !te.is_empty() {
-                                detected_map_title_en = Some(te.clone());
+                            if let Some(ref te) = map_info.title_en {
+                                if !te.is_empty() {
+                                    detected_map_title_en = Some(te.clone());
+                                }
                             }
-                        }
-                        let data_rel = map_info.data_csv_path.replace('\\', "/");
-                        let data_candidate = resolve_catalog_related_file(&st.card1_path, &data_rel, "csv")
-                            .or_else(|| {
-                                let p = dir.join(&data_rel);
-                                if p.is_file() { Some(p) } else { None }
-                            })
-                            .or_else(|| {
-                                let p = std::path::PathBuf::from(&data_rel);
-                                if p.is_file() { Some(p) } else { None }
-                            });
-                        if let Some(csv_p) = data_candidate {
-                            if let Ok(csv_text) = std::fs::read_to_string(&csv_p) {
-                                if let Ok(parsed_data) = super::charts::spec::parse_map_data_csv(&csv_text) {
-                                    if !parsed_data.title.is_empty() {
-                                        detected_map_title = Some(parsed_data.title);
-                                    }
-                                    if !parsed_data.title_en.is_empty() {
-                                        detected_map_title_en = Some(parsed_data.title_en);
+                            let data_rel = map_info.data_csv_path.replace('\\', "/");
+                            let data_candidate = resolve_catalog_related_file(&st.card1_path, &data_rel, "csv")
+                                .or_else(|| {
+                                    let p = dir.join(&data_rel);
+                                    if p.is_file() { Some(p) } else { None }
+                                })
+                                .or_else(|| {
+                                    let p = std::path::PathBuf::from(&data_rel);
+                                    if p.is_file() { Some(p) } else { None }
+                                });
+                            if let Some(csv_p) = data_candidate {
+                                if let Ok(csv_text) = std::fs::read_to_string(&csv_p) {
+                                    if let Ok(parsed_data) = super::charts::spec::parse_map_data_csv(&csv_text) {
+                                        if !parsed_data.title.is_empty() {
+                                            detected_map_title = Some(parsed_data.title);
+                                        }
+                                        if !parsed_data.title_en.is_empty() {
+                                            detected_map_title_en = Some(parsed_data.title_en);
+                                        }
                                     }
                                 }
                             }
-                        }
-                        if detected_map_title.is_some() || detected_map_title_en.is_some() {
+                            if detected_map_title.is_some() || detected_map_title_en.is_some() {
+                                break;
+                            }
+                        } else if let Ok(parsed_data) = super::charts::spec::parse_map_data_csv(&content) {
+                            if !parsed_data.title.is_empty() {
+                                detected_map_title = Some(parsed_data.title);
+                            }
+                            if !parsed_data.title_en.is_empty() {
+                                detected_map_title_en = Some(parsed_data.title_en);
+                            }
                             break;
                         }
-                    } else if let Ok(parsed_data) = super::charts::spec::parse_map_data_csv(&content) {
-                        if !parsed_data.title.is_empty() {
-                            detected_map_title = Some(parsed_data.title);
-                        }
-                        if !parsed_data.title_en.is_empty() {
-                            detected_map_title_en = Some(parsed_data.title_en);
-                        }
-                        break;
                     }
                 }
             }
 
-            let eff_id_title = detected_map_title.as_deref().unwrap_or(clean_id_title);
-            let eff_title_en_val = if let Some(ref dte) = detected_map_title_en {
-                dte.as_str()
-            } else if !title_en_val.is_empty() {
+            let eff_id_title = if !clean_id_title.is_empty() {
+                clean_id_title
+            } else {
+                detected_map_title.as_deref().unwrap_or(clean_id_title)
+            };
+            let eff_title_en_val = if !title_en_val.is_empty() {
                 title_en_val
+            } else if let Some(ref dte) = detected_map_title_en {
+                dte.as_str()
             } else if clean_en_title != clean_id_title {
                 clean_en_title
             } else {
@@ -3284,7 +3298,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                                         continue;
                                     }
                                 };
-                                let palette = if !theme_val.is_empty() {
+                                let palette = if !theme_val.is_empty() && (theme_val.starts_with('#') || theme_val.starts_with("rgb") || theme_val.starts_with("cmyk")) {
                                     vec![theme_val.to_string()]
                                 } else if let Some(ref th) = st.card2_theme_override {
                                     vec![th.clone()]
@@ -3707,9 +3721,13 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                         let id_t = if is_table { super::toc::strip_tablepage_title_prefix(&id_t, num_val, type_val).to_string() } else { id_t };
                         let en_t_opt = match en_t_opt {
                             Some(en) => Some(if is_table { super::toc::strip_tablepage_title_prefix(&en, num_val, "Table").to_string() } else { en }),
-                            None if st.bilingual_output => {
-                                st.translations.get(id_t.trim()).map(String::as_str).filter(|s| !s.is_empty()).map(str::to_string)
-                            }
+                            None if st.bilingual_output => st
+                                .translations
+                                .get(id_t.trim())
+                                .or_else(|| st.translations.get(title_val.trim()))
+                                .map(String::as_str)
+                                .filter(|s| !s.is_empty())
+                                .map(|en| if is_table { super::toc::strip_tablepage_title_prefix(en, num_val, "Table").to_string() } else { en.to_string() }),
                             None => None,
                         };
 
@@ -3970,9 +3988,13 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                         let id_t = if is_table { super::toc::strip_tablepage_title_prefix(&id_t, num_val, type_val).to_string() } else { id_t };
                         let en_t_opt = match en_t_opt {
                             Some(en) => Some(if is_table { super::toc::strip_tablepage_title_prefix(&en, num_val, "Table").to_string() } else { en }),
-                            None if st.bilingual_output => {
-                                st.translations.get(id_t.trim()).map(String::as_str).filter(|s| !s.is_empty()).map(str::to_string)
-                            }
+                            None if st.bilingual_output => st
+                                .translations
+                                .get(id_t.trim())
+                                .or_else(|| st.translations.get(title_val.trim()))
+                                .map(String::as_str)
+                                .filter(|s| !s.is_empty())
+                                .map(|en| if is_table { super::toc::strip_tablepage_title_prefix(en, num_val, "Table").to_string() } else { en.to_string() }),
                             None => None,
                         };
 
@@ -5427,6 +5449,52 @@ pub(crate) mod tests {
         let (t3_line1, t3_line2) = box3.text.split_once(designcraft_doc::story::FORCED_LINE_BREAK).expect("2 lines in textbox 3");
         assert_eq!(t3_line1, "Luas Daerah Menurut Desa/Kelurahan di Kecamatan  Karawang Timur, 2025");
         assert_eq!(t3_line2, "Land Area by Village/Sub-district in East Karawang District, 2025");
+    }
+
+    #[test]
+    fn test_table_title_translation_resolves_from_unstripped_tm_key() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+
+        let mut translations = std::collections::HashMap::new();
+        // TM harvested with full prefix
+        translations.insert(
+            "Tabel 04.04.01 Banyaknya Desa Bencana, 2025".to_string(),
+            "Table 04.04.01 Number of Disaster Villages, 2025".to_string(),
+        );
+
+        let st = PubgenState {
+            card1_preset: 0,
+            card1_records: vec![vec![
+                "Tabel".into(),
+                "04.04.01".into(),
+                "Tabel 04.04.01 Banyaknya Desa Bencana, 2025".into(),
+                "04_04_01".into(),
+            ]],
+            card1_headers: vec!["type".into(), "number".into(), "title".into(), "file".into()],
+            card1_type_col: 0,
+            card1_num_col: 1,
+            card1_title_col: 2,
+            card1_range_all: true,
+            bilingual_output: true,
+            translations,
+            toc_style: "TOC Entry".into(),
+            ..Default::default()
+        };
+
+        let res = execute_generate_pages(&mut app, &st);
+        assert!(res.is_ok(), "Page generation should succeed: {res:?}");
+
+        let active = app.session.active().unwrap();
+        let stories: Vec<_> = active.doc.stories.values().collect();
+
+        let box3 = stories
+            .iter()
+            .find(|s| s.text.contains("Banyaknya Desa Bencana, 2025"))
+            .expect("Textbox 3 found");
+        let (t3_line1, t3_line2) = box3.text.split_once(designcraft_doc::story::FORCED_LINE_BREAK).expect("2 lines in textbox 3");
+        assert_eq!(t3_line1, "Banyaknya Desa Bencana, 2025");
+        assert_eq!(t3_line2, "Number of Disaster Villages, 2025");
     }
 
     #[test]

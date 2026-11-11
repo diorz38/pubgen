@@ -36,6 +36,7 @@ pub fn brs_line_series_color(series_idx: usize) -> &'static str {
 pub fn series_color(theme_colors: &[String], series_idx: usize) -> &str {
     if let Some(color) = theme_colors.get(series_idx)
         && !color.trim().is_empty()
+        && (color.starts_with('#') || color.starts_with("rgb") || color.starts_with("cmyk"))
     {
         return color.as_str();
     }

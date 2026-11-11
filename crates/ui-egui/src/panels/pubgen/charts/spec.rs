@@ -628,8 +628,8 @@ pub fn parse_map_data_csv(content: &str) -> Result<MapCsvData, String> {
     };
 
     let col_desa = find_col(&["nmdesa", "desa", "village", "nama_desa", "kecamatan", "region", "wilayah", "name", "nama", "kategori", "category"], 0);
-    let col_title = find_col(&["title", "judul", "title_id", "titleid"], 1);
-    let col_title_en = find_col(&["title_en", "titleen", "judul_en", "judulen", "english_title"], 2);
+    let col_title = find_col(&["title", "judul", "title_id", "titleid"], usize::MAX);
+    let col_title_en = find_col(&["title_en", "titleen", "judul_en", "judulen", "english_title"], usize::MAX);
     let col_val = find_col(&["value", "nilai", "val", "jumlah", "total", "data"], 3);
 
     let mut title = String::new();
