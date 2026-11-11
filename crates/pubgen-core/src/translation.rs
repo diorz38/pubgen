@@ -217,7 +217,7 @@ mod tests {
         let map = tm.to_map();
         assert_eq!(map.len(), 1);
         assert_eq!(map.get("Kecamatan").map(String::as_str), Some("Subdistrict"));
-        assert!(map.get("Desa").is_none(), "whitespace-only target leaked into the cache");
+        assert!(!map.contains_key("Desa"), "whitespace-only target leaked into the cache");
     }
 
     #[test]
