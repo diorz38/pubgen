@@ -562,6 +562,13 @@ pub(crate) fn frame_with_centered_arial(app: &mut DesignApp, spread_idx: usize, 
     Some(fid)
 }
 
+/// The bare file name of a catalog `file` value. Both `/` and `\` separate directories here, so a
+/// workbook authored on Windows still finds its sidecars when the publication is built on Linux or
+/// macOS (a `C:\...\G02.rtf` cell is one opaque component to `Path::file_name` there).
+fn catalog_file_name(file_str: &str) -> Option<&str> {
+    file_str.rsplit(['/', '\\']).find(|name| !name.is_empty())
+}
+
 /// Resolve a catalog `file` value beside the catalog CSV: as written, relative to the CSV's
 /// folder, the same name with `extension` appended, or just the file name beside the catalog
 /// (so paths copied from another machine still resolve).
@@ -576,7 +583,7 @@ pub(crate) fn resolve_catalog_related_file(catalog_path: &str, file_str: &str, e
         dir.join("images").join(file_str),
         dir.join("images").join(format!("{file_str}.{extension}")),
     ];
-    if let Some(name) = std::path::Path::new(file_str).file_name() {
+    if let Some(name) = catalog_file_name(file_str) {
         candidates.push(dir.join(name));
         candidates.push(dir.join("rtf").join(name));
         candidates.push(dir.join("images").join(name));
@@ -597,7 +604,7 @@ pub(crate) fn file_en_same_as_file(file: &str, file_en: &str) -> bool {
     if norm(file) == norm(fen) {
         return true;
     }
-    let name_of = |s: &str| std::path::Path::new(s).file_name().map(|n| n.to_string_lossy().to_ascii_lowercase());
+    let name_of = |s: &str| catalog_file_name(s).map(str::to_ascii_lowercase);
     let has_dir = |s: &str| std::path::Path::new(s).parent().is_some_and(|p| !p.as_os_str().is_empty());
     matches!((name_of(file), name_of(fen)), (Some(a), Some(b)) if a == b) && !(has_dir(file) && has_dir(fen))
 }
@@ -706,4 +713,39 @@ pub(crate) fn is_divider_type(type_val: &str) -> bool {
 
 pub(crate) fn is_chart_type(type_val: &str) -> bool {
     ["grafik", "graph", "chart", "bagan", "diagram", "peta", "map", "gambar"].iter().any(|k| type_val.eq_ignore_ascii_case(k))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_file_name_accepts_windows_and_posix_paths() {
+        assert_eq!(catalog_file_name(r"C:\Users\bp\G02.rtf"), Some("G02.rtf"));
+        assert_eq!(catalog_file_name("C:/Users/bp/G02.rtf"), Some("G02.rtf"));
+        assert_eq!(catalog_file_name("U1.rtf"), Some("U1.rtf"));
+        assert_eq!(catalog_file_name("rtf/"), Some("rtf"));
+        assert_eq!(catalog_file_name(""), None);
+    }
+
+    /// A workbook authored on Windows stores `C:\...\G02.rtf` in its catalog, but the test (and CI)
+    /// place the sidecars beside the copied workbook: the bare-name fallback must find them on every
+    /// platform.
+    #[test]
+    fn windows_workbook_paths_resolve_beside_the_catalog() {
+        let dir = std::env::temp_dir().join(format!("dc-pubgen-sidecar-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("G02.rtf"), b"stub").unwrap();
+        let catalog = dir.join("catalog.csv").to_string_lossy().to_string();
+        let resolved = resolve_catalog_related_file(&catalog, r"C:\Users\bp\G02.rtf", "rtf");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(resolved, Some(dir.join("G02.rtf")));
+    }
+
+    #[test]
+    fn file_en_comparison_handles_windows_paths() {
+        assert!(file_en_same_as_file(r"C:\bp\U1.rtf", "U1.rtf"));
+        assert!(!file_en_same_as_file("id/U1.rtf", "en/U1.rtf"));
+    }
 }
