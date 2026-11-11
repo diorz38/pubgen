@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Build, sign and package DesignCraft for Windows.
 
@@ -238,7 +238,7 @@ if (Test-Path $PortableMapsZip) {
 
 $Zip = Join-Path $Dist "designcraft-$Version-windows-$Arch-portable.zip"
 Remove-Item -Force $Zip -ErrorAction SilentlyContinue
-Compress-Archive -Path $Portable -DestinationPath $Zip
+Compress-Archive -Path "$Portable\*" -DestinationPath $Zip
 
 # Smoke-test the CLI when this machine can run it. An ARM64 build made on an x64 runner can't run
 # here; .github/workflows/windows-arm64.yml installs and runs it on ARM64 instead.
