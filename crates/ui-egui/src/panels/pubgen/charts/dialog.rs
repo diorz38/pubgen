@@ -24,7 +24,7 @@ JATILAKSANA,Grafik 01.01 Indeks Pembangunan,Chart 01.01 Development Index,69.8\n
 KERTASARI,Grafik 01.01 Indeks Pembangunan,Chart 01.01 Development Index,85.2\n\
 MEDALSARI,Grafik 01.01 Indeks Pembangunan,Chart 01.01 Development Index,60.5";
 
-const DEFAULT_SAMPLE_CSV: &str = "\
+pub const DEFAULT_SAMPLE_CSV: &str = "\
 Tahun,Pertanian,Industri,Jasa
 2021,3.8,4.2,5.1
 2022,4.1,4.5,5.6

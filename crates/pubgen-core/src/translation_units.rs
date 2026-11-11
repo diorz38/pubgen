@@ -190,6 +190,54 @@ pub fn collect_units(draft: &WorkspaceDraft) -> Vec<TransUnit> {
     out
 }
 
+fn extract_table_note_content(row: &[String]) -> Option<String> {
+    let col1 = row.first()?.trim();
+    if col1.is_empty() {
+        return None;
+    }
+    // Case 1: "Catatan: content..." in first cell
+    if let Some((lbl, after_colon)) = col1.split_once(':')
+        && is_table_note_row(lbl)
+    {
+        let mut parts = Vec::new();
+        let after = after_colon.trim();
+        if !after.is_empty() {
+            parts.push(after);
+        }
+        parts.extend(row.iter().skip(1).map(|s| s.trim()).filter(|s| !s.is_empty()));
+        let content = parts.join(" ");
+        if !content.trim().is_empty() {
+            return Some(content);
+        }
+    }
+    // Case 2: col1 is note keyword ("Catatan", "Sumber", "Note", etc.)
+    if is_table_note_row(col1)
+        && let Some(col2) = row.get(1)
+    {
+        let col2 = col2.trim();
+        if col2.contains(':') {
+            let (_, after_colon) = col2.split_once(':').unwrap_or(("", ""));
+            let mut parts = Vec::new();
+            let after = after_colon.trim();
+            if !after.is_empty() {
+                parts.push(after);
+            }
+            parts.extend(row.iter().skip(2).map(|s| s.trim()).filter(|s| !s.is_empty()));
+            let content = parts.join(" ");
+            if !content.trim().is_empty() {
+                return Some(content);
+            }
+        } else if row.len() > 1 {
+            let parts: Vec<&str> = row.iter().skip(1).map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+            let content = parts.join(" ");
+            if !content.trim().is_empty() {
+                return Some(content);
+            }
+        }
+    }
+    None
+}
+
 fn collect_card(draft: &WorkspaceDraft, card: &PublicationCard, protected: &[String], out: &mut Vec<TransUnit>, seen: &mut BTreeSet<String>) {
     match card.kind {
         CardKind::Cover => {
@@ -204,6 +252,7 @@ fn collect_card(draft: &WorkspaceDraft, card: &PublicationCard, protected: &[Str
         CardKind::Table => {
             push(out, seen, protected, &card.title, UnitRole::TableTitle, &card.id);
             if let Some(rows) = csv_rows(draft, card_source(card)) {
+                let mut in_table_notes = false;
                 for (index, row) in rows.iter().enumerate() {
                     if index == 0 {
                         // The renderer splits every header column (`tables.rs:132-146`),
@@ -216,8 +265,21 @@ fn collect_card(draft: &WorkspaceDraft, card: &PublicationCard, protected: &[Str
                         continue;
                     }
                     let Some(first) = row.first().map(String::as_str) else { continue };
-                    if is_table_note_row(first) {
+                    if let Some(note_content) = extract_table_note_content(row) {
+                        in_table_notes = true;
+                        push(out, seen, protected, &note_content, UnitRole::TableNote, &card.id);
+                    } else if is_table_note_row(first) {
+                        in_table_notes = true;
                         push(out, seen, protected, first, UnitRole::TableNote, &card.id);
+                    } else if in_table_notes {
+                        // Continuation row under table notes (e.g. numbered items "1. ...", "2. ...")
+                        let non_empty: Vec<&str> = row.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+                        if !non_empty.is_empty() {
+                            let line = non_empty.join(" ");
+                            if !line.is_empty() && !is_numeric(&line) {
+                                push(out, seen, protected, &line, UnitRole::TableNote, &card.id);
+                            }
+                        }
                     } else {
                         push(out, seen, protected, first, UnitRole::TableRowLabel, &card.id);
                     }
@@ -345,7 +407,7 @@ fn csv_rows(draft: &WorkspaceDraft, source: Option<&str>) -> Option<Vec<Vec<Stri
         }
     }
     let delimiter = counts.iter().max_by_key(|entry| entry.1).filter(|entry| entry.1 > 0).map_or(b',', |entry| entry.0 as u8);
-    let mut reader = csv::ReaderBuilder::new().has_headers(false).delimiter(delimiter).from_reader(bytes);
+    let mut reader = csv::ReaderBuilder::new().has_headers(false).flexible(true).delimiter(delimiter).from_reader(bytes);
     let mut rows: Vec<Vec<String>> = Vec::new();
     for record in reader.records() {
         match record {
@@ -544,6 +606,23 @@ mod tests {
             assert!(units.iter().any(|u| u.role == UnitRole::TableHeader && u.text == "Kecamatan"), "staged {staged} vs source {source}: {units:?}");
             assert!(units.iter().any(|u| u.role == UnitRole::TableRowLabel && u.text == "Batujaya"), "staged {staged} vs source {source}: {units:?}");
         }
+    }
+
+    #[test]
+    fn table_note_contents_are_extracted_as_table_notes() {
+        let mut draft = draft();
+        let csv = b"Kecamatan;Jumlah\nBatujaya;100\nCatatan;:;N/A : Bukan Wilayah Potensi Tsunami\nSumber;:;Badan Pusat Statistik, Pendataan Potensi Desa (Podes)\n";
+        draft.csv.push(("csv/T1.csv".into(), csv.to_vec()));
+        draft.metadata.cards.push(card(CardKind::Table, "Data Desa", &[("source", "csv/T1.csv")]));
+        let units = collect_units(&draft);
+        assert!(
+            units.iter().any(|u| u.role == UnitRole::TableNote && u.text == "N/A : Bukan Wilayah Potensi Tsunami"),
+            "table note content must be collected, found: {units:?}"
+        );
+        assert!(
+            units.iter().any(|u| u.role == UnitRole::TableNote && u.text == "Badan Pusat Statistik, Pendataan Potensi Desa (Podes)"),
+            "table source content must be collected, found: {units:?}"
+        );
     }
 
     fn narrative_card(title: &str, source: &str) -> PublicationCard {

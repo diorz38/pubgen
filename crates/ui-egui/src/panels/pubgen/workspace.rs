@@ -33,6 +33,7 @@ pub enum OrchestratorTab {
 pub enum CardEditTab {
     #[default]
     KontenSumber,
+    OpsiGrafik,
     TataLetakSeksi,
     HeaderFooter,
 }
@@ -102,6 +103,10 @@ pub struct ContentItem {
     pub size_bytes: usize,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PublicationCard {
     pub kind: CardKind,
@@ -162,6 +167,48 @@ pub struct PublicationCard {
     // Chart specific
     pub chart_type: String,
     pub chart_image: String,
+    #[serde(default)]
+    pub chart_category_col: String,
+    #[serde(default)]
+    pub chart_data_start_row: usize,
+    #[serde(default)]
+    pub chart_data_end_row: usize,
+    #[serde(default)]
+    pub chart_series_1_col: String,
+    #[serde(default)]
+    pub chart_series_1_label_id: String,
+    #[serde(default)]
+    pub chart_series_1_label_en: String,
+    #[serde(default)]
+    pub chart_series_2_enabled: bool,
+    #[serde(default)]
+    pub chart_series_2_col: String,
+    #[serde(default)]
+    pub chart_series_2_label_id: String,
+    #[serde(default)]
+    pub chart_series_2_label_en: String,
+    #[serde(default)]
+    pub chart_series_3_enabled: bool,
+    #[serde(default)]
+    pub chart_series_3_col: String,
+    #[serde(default)]
+    pub chart_series_3_label_id: String,
+    #[serde(default)]
+    pub chart_series_3_label_en: String,
+    #[serde(default)]
+    pub chart_value_format: String,
+    #[serde(default)]
+    pub chart_max_value_override: String,
+    #[serde(default = "default_true")]
+    pub chart_show_value_labels: bool,
+    #[serde(default = "default_true")]
+    pub chart_show_legend: bool,
+    #[serde(default)]
+    pub chart_show_grid: bool,
+    #[serde(default)]
+    pub chart_raw_data: String,
+    #[serde(default = "default_true")]
+    pub chart_csv_grid_preview: bool,
 
     // MapChart specific (NEW)
     pub map_chart_type: String,
@@ -254,8 +301,29 @@ impl Default for PublicationCard {
             table_style: "Basic Grid".into(),
             table_theme: "BPS Blue".into(),
             table_layout_preset: "Standard".into(),
-            chart_type: "Line".into(),
+            chart_type: "Line Chart (Markers)".into(),
             chart_image: String::new(),
+            chart_category_col: "A".into(),
+            chart_data_start_row: 2,
+            chart_data_end_row: 6,
+            chart_series_1_col: "B".into(),
+            chart_series_1_label_id: "Pertanian".into(),
+            chart_series_1_label_en: String::new(),
+            chart_series_2_enabled: true,
+            chart_series_2_col: "C".into(),
+            chart_series_2_label_id: "Industri".into(),
+            chart_series_2_label_en: String::new(),
+            chart_series_3_enabled: true,
+            chart_series_3_col: "D".into(),
+            chart_series_3_label_id: "Jasa".into(),
+            chart_series_3_label_en: String::new(),
+            chart_value_format: "Number (1.234,5)".into(),
+            chart_max_value_override: String::new(),
+            chart_show_value_labels: true,
+            chart_show_legend: true,
+            chart_show_grid: false,
+            chart_raw_data: super::charts::dialog::DEFAULT_SAMPLE_CSV.into(),
+            chart_csv_grid_preview: true,
             map_chart_type: "Choropleth".into(),
             map_classification: "Quantile (4 kelas)".into(),
             map_color_palette: "BPS Biru-Teal".into(),
@@ -546,20 +614,6 @@ impl Default for OrchestratorWorkspaceState {
             PublicationCard::new_with(CardKind::Image, "Infografis / Gambar G1 (G1.png)", "Area Margin · Sumber: G1.png", "G1.png", 14, false),
         ];
 
-        let slots = vec![
-            SlotItem { name: "cover_headline".into(), budget: Some(60), text: "Perkembangan Nilai Tukar Petani Jawa Barat".into() },
-            SlotItem {
-                name: "ringkasan_eksekutif".into(),
-                budget: Some(280),
-                text: "NTP Jawa Barat pada Oktober 2026 sebesar 112,45 atau naik 0,65 persen dibanding bulan sebelumnya.".into(),
-            },
-            SlotItem {
-                name: "catatan_kaki_tabel".into(),
-                budget: Some(150),
-                text: "Sumber: Badan Pusat Statistik Provinsi Jawa Barat, Sensus Pertanian 2026.".into(),
-            },
-        ];
-
         let execution_log = vec![
             "[10:00:01] Profil publikasi aktif: BPS Berita Resmi Statistik (BRS)".into(),
             "[10:00:02] Geometri: A4 Facing=Ya (Double Page), Margin T:18 B:18 L:20 R:20 mm".into(),
@@ -568,12 +622,12 @@ impl Default for OrchestratorWorkspaceState {
             "[10:00:05] Audit QA Mutu: 0 kesalahan, 0 peringatan (Lolos Preflight 100%).".into(),
         ];
 
-        Self {
+        let mut default_state = Self {
             view: OrchestratorView::Home,
             is_dirty: false,
             recent_documents: Vec::new(),
             center_tab: OrchestratorTab::StrukturHalaman,
-            selected_profile: "bps_dda".into(),
+            selected_profile: "bps_brs".into(),
             right_dock_tab: OrchestratorRightTab::SumberKonten,
             right_dock_expanded: true,
             right_dock_w: default_right_dock_w(),
@@ -598,7 +652,7 @@ impl Default for OrchestratorWorkspaceState {
             meta_release_month: "Januari 2026".into(),
             meta_agency: "BADAN PUSAT STATISTIK PROVINSI JAWA BARAT".into(),
             cards,
-            slots,
+            slots: Vec::new(),
             last_qa_clean: true,
             last_output_pdf: Some("outputs/BRS_NTP_Jabar_2026.pdf".into()),
             execution_log,
@@ -618,7 +672,9 @@ impl Default for OrchestratorWorkspaceState {
             translate_glossary_pairs: Vec::new(),
             translate_reused: 0,
             compile_progress: None,
-        }
+        };
+        default_state.slots = detect_translation_rule_units(&default_state);
+        default_state
     }
 }
 
@@ -683,6 +739,56 @@ impl OrchestratorWorkspaceState {
                     }
                     if !card.chart_image.is_empty() {
                         settings.insert("chart_image".into(), serde_json::Value::String(card.chart_image.clone()));
+                    }
+                    if !card.chart_category_col.is_empty() {
+                        settings.insert("chart_category_col".into(), serde_json::Value::String(card.chart_category_col.clone()));
+                    }
+                    if card.chart_data_start_row > 0 {
+                        settings.insert("chart_data_start_row".into(), serde_json::Value::Number(card.chart_data_start_row.into()));
+                    }
+                    if card.chart_data_end_row > 0 {
+                        settings.insert("chart_data_end_row".into(), serde_json::Value::Number(card.chart_data_end_row.into()));
+                    }
+                    if !card.chart_series_1_col.is_empty() {
+                        settings.insert("chart_series_1_col".into(), serde_json::Value::String(card.chart_series_1_col.clone()));
+                    }
+                    if !card.chart_series_1_label_id.is_empty() {
+                        settings.insert("chart_series_1_label_id".into(), serde_json::Value::String(card.chart_series_1_label_id.clone()));
+                    }
+                    if !card.chart_series_1_label_en.is_empty() {
+                        settings.insert("chart_series_1_label_en".into(), serde_json::Value::String(card.chart_series_1_label_en.clone()));
+                    }
+                    settings.insert("chart_series_2_enabled".into(), serde_json::Value::Bool(card.chart_series_2_enabled));
+                    if !card.chart_series_2_col.is_empty() {
+                        settings.insert("chart_series_2_col".into(), serde_json::Value::String(card.chart_series_2_col.clone()));
+                    }
+                    if !card.chart_series_2_label_id.is_empty() {
+                        settings.insert("chart_series_2_label_id".into(), serde_json::Value::String(card.chart_series_2_label_id.clone()));
+                    }
+                    if !card.chart_series_2_label_en.is_empty() {
+                        settings.insert("chart_series_2_label_en".into(), serde_json::Value::String(card.chart_series_2_label_en.clone()));
+                    }
+                    settings.insert("chart_series_3_enabled".into(), serde_json::Value::Bool(card.chart_series_3_enabled));
+                    if !card.chart_series_3_col.is_empty() {
+                        settings.insert("chart_series_3_col".into(), serde_json::Value::String(card.chart_series_3_col.clone()));
+                    }
+                    if !card.chart_series_3_label_id.is_empty() {
+                        settings.insert("chart_series_3_label_id".into(), serde_json::Value::String(card.chart_series_3_label_id.clone()));
+                    }
+                    if !card.chart_series_3_label_en.is_empty() {
+                        settings.insert("chart_series_3_label_en".into(), serde_json::Value::String(card.chart_series_3_label_en.clone()));
+                    }
+                    if !card.chart_value_format.is_empty() {
+                        settings.insert("chart_value_format".into(), serde_json::Value::String(card.chart_value_format.clone()));
+                    }
+                    if !card.chart_max_value_override.is_empty() {
+                        settings.insert("chart_max_value_override".into(), serde_json::Value::String(card.chart_max_value_override.clone()));
+                    }
+                    settings.insert("chart_show_value_labels".into(), serde_json::Value::Bool(card.chart_show_value_labels));
+                    settings.insert("chart_show_legend".into(), serde_json::Value::Bool(card.chart_show_legend));
+                    settings.insert("chart_show_grid".into(), serde_json::Value::Bool(card.chart_show_grid));
+                    if !card.chart_raw_data.is_empty() {
+                        settings.insert("chart_raw_data".into(), serde_json::Value::String(card.chart_raw_data.clone()));
                     }
                 }
                 if card.kind == CardKind::Cover {
@@ -1001,6 +1107,9 @@ pub fn apply_ingest_report_to_state(
                     matches!(card.scope, pubgen_core::CardScope::NewPage),
                 );
                 pc.chapter_id = card.id.clone();
+                if !subtitle.is_empty() {
+                    pc.title_en = subtitle.to_string();
+                }
                 for (k, v) in &card.settings {
                     if let Some(s) = v.as_str() {
                         pc.settings.insert(k.clone(), s.to_string());
@@ -1027,10 +1136,10 @@ pub fn apply_ingest_report_to_state(
                             pc.toc_style = "TOC Paragraph".into();
                         }
                     }
-                    if let Some(cols) = pc.settings.get("toc_columns") {
+                    if let Some(cols) = pc.settings.get("toc_columns").or_else(|| pc.settings.get("column")).or_else(|| pc.settings.get("columns")) {
                         pc.toc_columns = cols.clone();
                     }
-                    if let Some(v) = card.settings.get("toc_layout_style") {
+                    if let Some(v) = card.settings.get("toc_layout_style").or_else(|| card.settings.get("layout")) {
                         if let Some(u) = v.as_u64() {
                             pc.toc_layout_style = u as usize;
                         } else if let Some(n) = v.as_i64() {
@@ -1043,7 +1152,7 @@ pub fn apply_ingest_report_to_state(
                                 pc.toc_layout_style = 0;
                             }
                         }
-                    } else if let Some(val) = pc.settings.get("toc_layout_style") {
+                    } else if let Some(val) = pc.settings.get("toc_layout_style").or_else(|| pc.settings.get("layout")) {
                         let lower = val.to_lowercase();
                         if lower == "1" || lower.contains("tablepage") || lower.contains("bps") {
                             pc.toc_layout_style = 1;
@@ -1056,13 +1165,40 @@ pub fn apply_ingest_report_to_state(
                         // Default to TablePage (BPS Catalog) layout for DDA catalog tables and charts
                         pc.toc_layout_style = 1;
                     }
-                    if let Some(hi) = pc.settings.get("toc_hanging_indent").and_then(|v| v.parse::<bool>().ok()) {
+                    if let Some(hi) = pc.settings.get("toc_hanging_indent").or_else(|| pc.settings.get("hanging_indent")).and_then(|v| {
+                        let lower = v.trim().to_lowercase();
+                        if lower == "yes" || lower == "true" || lower == "1" {
+                            Some(true)
+                        } else if lower == "no" || lower == "false" || lower == "0" {
+                            Some(false)
+                        } else {
+                            v.parse::<bool>().ok()
+                        }
+                    }) {
                         pc.toc_hanging_indent = hi;
                     }
-                    if let Some(is) = pc.settings.get("toc_include_self").and_then(|v| v.parse::<bool>().ok()) {
+                    if let Some(is) = pc.settings.get("toc_include_self").or_else(|| pc.settings.get("include_self")).and_then(|v| {
+                        let lower = v.trim().to_lowercase();
+                        if lower == "yes" || lower == "true" || lower == "1" {
+                            Some(true)
+                        } else if lower == "no" || lower == "false" || lower == "0" {
+                            Some(false)
+                        } else {
+                            v.parse::<bool>().ok()
+                        }
+                    }) {
                         pc.toc_include_self = is;
                     }
-                    if let Some(pb) = pc.settings.get("toc_pair_bilingual").and_then(|v| v.parse::<bool>().ok()) {
+                    if let Some(pb) = pc.settings.get("toc_pair_bilingual").or_else(|| pc.settings.get("pair_bilingual")).and_then(|v| {
+                        let lower = v.trim().to_lowercase();
+                        if lower == "yes" || lower == "true" || lower == "1" {
+                            Some(true)
+                        } else if lower == "no" || lower == "false" || lower == "0" {
+                            Some(false)
+                        } else {
+                            v.parse::<bool>().ok()
+                        }
+                    }) {
                         pc.toc_pair_bilingual = pb;
                     }
                 }
@@ -1278,8 +1414,79 @@ pub fn apply_ingest_report_to_state(
                     }
                 }
                 if pc.kind == CardKind::Chart {
-                    if let Some(img) = card.settings.get("image").and_then(|v| v.as_str()) {
+                    if let Some(ct) = card.settings.get("chart_type").and_then(|v| v.as_str()) {
+                        pc.chart_type = ct.to_string();
+                    }
+                    if let Some(img) = card.settings.get("image").or_else(|| card.settings.get("chart_image")).and_then(|v| v.as_str()) {
                         pc.chart_image = img.to_string();
+                    }
+                    if let Some(c) = card.settings.get("chart_category_col").and_then(|v| v.as_str()) {
+                        pc.chart_category_col = c.to_string();
+                    }
+                    if let Some(r) = card.settings.get("chart_data_start_row").and_then(|v| v.as_u64()) {
+                        pc.chart_data_start_row = r as usize;
+                    }
+                    if let Some(r) = card.settings.get("chart_data_end_row").and_then(|v| v.as_u64()) {
+                        pc.chart_data_end_row = r as usize;
+                    }
+                    if let Some(s) = card.settings.get("chart_series_1_col").and_then(|v| v.as_str()) {
+                        pc.chart_series_1_col = s.to_string();
+                    }
+                    if let Some(s) = card.settings.get("chart_series_1_label_id").and_then(|v| v.as_str()) {
+                        pc.chart_series_1_label_id = s.to_string();
+                    }
+                    if let Some(s) = card.settings.get("chart_series_1_label_en").and_then(|v| v.as_str()) {
+                        pc.chart_series_1_label_en = s.to_string();
+                    }
+                    if let Some(b) = card.settings.get("chart_series_2_enabled").and_then(|v| v.as_bool()) {
+                        pc.chart_series_2_enabled = b;
+                    }
+                    if let Some(s) = card.settings.get("chart_series_2_col").and_then(|v| v.as_str()) {
+                        pc.chart_series_2_col = s.to_string();
+                    }
+                    if let Some(s) = card.settings.get("chart_series_2_label_id").and_then(|v| v.as_str()) {
+                        pc.chart_series_2_label_id = s.to_string();
+                    }
+                    if let Some(s) = card.settings.get("chart_series_2_label_en").and_then(|v| v.as_str()) {
+                        pc.chart_series_2_label_en = s.to_string();
+                    }
+                    if let Some(b) = card.settings.get("chart_series_3_enabled").and_then(|v| v.as_bool()) {
+                        pc.chart_series_3_enabled = b;
+                    }
+                    if let Some(s) = card.settings.get("chart_series_3_col").and_then(|v| v.as_str()) {
+                        pc.chart_series_3_col = s.to_string();
+                    }
+                    if let Some(s) = card.settings.get("chart_series_3_label_id").and_then(|v| v.as_str()) {
+                        pc.chart_series_3_label_id = s.to_string();
+                    }
+                    if let Some(s) = card.settings.get("chart_series_3_label_en").and_then(|v| v.as_str()) {
+                        pc.chart_series_3_label_en = s.to_string();
+                    }
+                    if let Some(s) = card.settings.get("chart_value_format").and_then(|v| v.as_str()) {
+                        pc.chart_value_format = s.to_string();
+                    }
+                    if let Some(s) = card.settings.get("chart_max_value_override").and_then(|v| v.as_str()) {
+                        pc.chart_max_value_override = s.to_string();
+                    }
+                    if let Some(b) = card.settings.get("chart_show_value_labels").and_then(|v| v.as_bool()) {
+                        pc.chart_show_value_labels = b;
+                    }
+                    if let Some(b) = card.settings.get("chart_show_legend").and_then(|v| v.as_bool()) {
+                        pc.chart_show_legend = b;
+                    }
+                    if let Some(b) = card.settings.get("chart_show_grid").and_then(|v| v.as_bool()) {
+                        pc.chart_show_grid = b;
+                    }
+                    if let Some(s) = card.settings.get("chart_raw_data").and_then(|v| v.as_str()) {
+                        pc.chart_raw_data = s.to_string();
+                    }
+                    if (pc.chart_raw_data == super::charts::dialog::DEFAULT_SAMPLE_CSV || pc.chart_raw_data.trim().is_empty())
+                        && !pc.source.is_empty()
+                        && pc.source != "Tanpa sumber"
+                        && pc.source != "Manual"
+                    {
+                        let src = pc.source.clone();
+                        load_chart_data_from_source(&mut pc, &src, cache);
                     }
                 }
                 if pc.kind == CardKind::MapChart {
@@ -1370,6 +1577,7 @@ pub fn apply_ingest_report_to_state(
         report.assets.len(),
     ));
     state.status_message = Some((format!("Workbook {source_name} berhasil dimuat"), true));
+    refresh_detected_slots(state);
     state.is_dirty = false;
 }
 
@@ -3484,6 +3692,575 @@ fn render_log_eksekusi(_app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrat
     });
 }
 
+/// Helper to sanitize an ID or title into snake_case slot suffix
+fn clean_slot_id(id: &str) -> String {
+    let mut clean_id = id.trim();
+    for ext in [".csv", ".rtf", ".png", ".jpg", ".jpeg", ".md", ".txt"] {
+        if clean_id.to_lowercase().ends_with(ext) {
+            clean_id = &clean_id[..clean_id.len() - ext.len()];
+        }
+    }
+    if let Some(pos) = clean_id.rfind('/') {
+        clean_id = &clean_id[pos + 1..];
+    }
+    if let Some(pos) = clean_id.rfind('\\') {
+        clean_id = &clean_id[pos + 1..];
+    }
+    let mut s = String::new();
+    let mut last_dash = false;
+    for c in clean_id.chars() {
+        if c.is_alphanumeric() {
+            s.push(c.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash && !s.is_empty() {
+            s.push('_');
+            last_dash = true;
+        }
+    }
+    let trimmed = s.trim_end_matches('_');
+    if trimmed.is_empty() { "item".to_string() } else { trimmed.to_string() }
+}
+
+/// Dynamically detect all translation rule units / slots from the publication cards,
+/// staged content, and metadata based on the active publication profile rules.
+pub fn detect_translation_rule_units(state: &OrchestratorWorkspaceState) -> Vec<SlotItem> {
+    let mut out: Vec<SlotItem> = Vec::new();
+    let mut seen_texts = std::collections::BTreeSet::new();
+    let prof = state.selected_profile.as_str();
+
+    // Collect canonical units from the core draft
+    let draft = worksheet_draft(state);
+    let collected_units = pubgen_core::translation_units::collect_units(&draft);
+
+    let role_budget = |role: pubgen_core::translation_units::UnitRole| -> Option<usize> {
+        match prof {
+            "bps_brs" => match role {
+                pubgen_core::translation_units::UnitRole::CoverTitle => Some(60),
+                pubgen_core::translation_units::UnitRole::NarrativeTitle => Some(80),
+                pubgen_core::translation_units::UnitRole::NarrativeBody => Some(280),
+                pubgen_core::translation_units::UnitRole::TableTitle => Some(150),
+                pubgen_core::translation_units::UnitRole::TableHeader => Some(40),
+                pubgen_core::translation_units::UnitRole::TableRowLabel => Some(50),
+                pubgen_core::translation_units::UnitRole::TableNote => Some(150),
+                pubgen_core::translation_units::UnitRole::ChartTitle => Some(100),
+                pubgen_core::translation_units::UnitRole::ChartSeries => Some(35),
+                pubgen_core::translation_units::UnitRole::ImageCaption => Some(120),
+                _ => Some(100),
+            },
+            "bps_dda" => match role {
+                pubgen_core::translation_units::UnitRole::CoverTitle => Some(100),
+                pubgen_core::translation_units::UnitRole::DividerTitle => Some(60),
+                pubgen_core::translation_units::UnitRole::TocTitle => Some(40),
+                pubgen_core::translation_units::UnitRole::NarrativeTitle => Some(100),
+                pubgen_core::translation_units::UnitRole::NarrativeBody => Some(350),
+                pubgen_core::translation_units::UnitRole::TableTitle => Some(160),
+                pubgen_core::translation_units::UnitRole::TableHeader => Some(40),
+                pubgen_core::translation_units::UnitRole::TableRowLabel => Some(50),
+                pubgen_core::translation_units::UnitRole::TableNote => Some(150),
+                pubgen_core::translation_units::UnitRole::ChartTitle => Some(100),
+                pubgen_core::translation_units::UnitRole::ChartSeries => Some(35),
+                pubgen_core::translation_units::UnitRole::MapTitle => Some(80),
+                pubgen_core::translation_units::UnitRole::ImageCaption => Some(120),
+                pubgen_core::translation_units::UnitRole::HeaderFooter => Some(80),
+                _ => Some(100),
+            },
+            "corporate_annual" => match role {
+                pubgen_core::translation_units::UnitRole::CoverTitle => Some(80),
+                pubgen_core::translation_units::UnitRole::DividerTitle => Some(60),
+                pubgen_core::translation_units::UnitRole::NarrativeTitle => Some(90),
+                pubgen_core::translation_units::UnitRole::NarrativeBody => Some(400),
+                pubgen_core::translation_units::UnitRole::TableTitle => Some(150),
+                pubgen_core::translation_units::UnitRole::TableHeader => Some(40),
+                pubgen_core::translation_units::UnitRole::TableRowLabel => Some(50),
+                pubgen_core::translation_units::UnitRole::TableNote => Some(150),
+                pubgen_core::translation_units::UnitRole::ChartTitle => Some(100),
+                pubgen_core::translation_units::UnitRole::ChartSeries => Some(40),
+                pubgen_core::translation_units::UnitRole::ImageCaption => Some(120),
+                _ => Some(100),
+            },
+            "academic_monograph" => match role {
+                pubgen_core::translation_units::UnitRole::CoverTitle => Some(120),
+                pubgen_core::translation_units::UnitRole::DividerTitle => Some(60),
+                pubgen_core::translation_units::UnitRole::NarrativeTitle => Some(80),
+                pubgen_core::translation_units::UnitRole::NarrativeBody => Some(500),
+                pubgen_core::translation_units::UnitRole::TableTitle => Some(150),
+                pubgen_core::translation_units::UnitRole::TableHeader => Some(40),
+                pubgen_core::translation_units::UnitRole::TableRowLabel => Some(50),
+                pubgen_core::translation_units::UnitRole::TableNote => Some(150),
+                pubgen_core::translation_units::UnitRole::ChartTitle => Some(100),
+                pubgen_core::translation_units::UnitRole::ImageCaption => Some(120),
+                _ => Some(100),
+            },
+            _ => match role {
+                pubgen_core::translation_units::UnitRole::CoverTitle => Some(80),
+                pubgen_core::translation_units::UnitRole::TableTitle => Some(150),
+                pubgen_core::translation_units::UnitRole::TableNote => Some(150),
+                pubgen_core::translation_units::UnitRole::NarrativeBody => Some(300),
+                _ => Some(100),
+            },
+        }
+    };
+
+    if prof == "bps_brs" {
+        // 1. Cover Headline
+        let headline = if !state.meta_title.trim().is_empty() {
+            state.meta_title.clone()
+        } else if let Some(cov) = state.cards.iter().find(|c| c.kind == CardKind::Cover) {
+            cov.title.clone()
+        } else {
+            "Perkembangan Nilai Tukar Petani Jawa Barat".to_string()
+        };
+        seen_texts.insert(headline.clone());
+        out.push(SlotItem { name: "cover_headline".into(), budget: Some(60), text: headline });
+
+        // 2. Executive Summary / Ringkasan Eksekutif
+        let summary_text = if let Some(u) = collected_units.iter().find(|u| {
+            u.role == pubgen_core::translation_units::UnitRole::NarrativeBody
+                && (u.card_id.to_lowercase().contains("point") || u.text.contains("NTP"))
+        }) {
+            u.text.clone()
+        } else if let Some(card) = state.cards.iter().find(|c| {
+            c.kind == CardKind::Narrative
+                && (c.chapter_id.to_lowercase().contains("point")
+                    || c.source.to_lowercase().contains("point")
+                    || c.title.to_lowercase().contains("ringkasan"))
+        }) {
+            if let Some(pos) = card.title.find(':') {
+                let rest = card.title[pos + 1..].trim();
+                if rest.contains("NTP") {
+                    rest.to_string()
+                } else {
+                    "NTP Jawa Barat pada Oktober 2026 sebesar 112,45 atau naik 0,65 persen dibanding bulan sebelumnya.".to_string()
+                }
+            } else {
+                "NTP Jawa Barat pada Oktober 2026 sebesar 112,45 atau naik 0,65 persen dibanding bulan sebelumnya.".to_string()
+            }
+        } else {
+            "NTP Jawa Barat pada Oktober 2026 sebesar 112,45 atau naik 0,65 persen dibanding bulan sebelumnya.".to_string()
+        };
+        seen_texts.insert(summary_text.clone());
+        out.push(SlotItem { name: "ringkasan_eksekutif".into(), budget: Some(280), text: summary_text });
+
+        // 3. Table Footnote / Catatan Kaki Tabel
+        let note_text = if let Some(u) = collected_units.iter().find(|u| u.role == pubgen_core::translation_units::UnitRole::TableNote) {
+            u.text.clone()
+        } else {
+            "Sumber: Badan Pusat Statistik Provinsi Jawa Barat, Sensus Pertanian 2026.".to_string()
+        };
+        seen_texts.insert(note_text.clone());
+        out.push(SlotItem { name: "catatan_kaki_tabel".into(), budget: Some(150), text: note_text });
+
+        // 4. All other translation rule units from cards
+        for (card_idx, card) in state.cards.iter().enumerate() {
+            let card_core_id = if card.chapter_id.is_empty() { format!("card_{}", card_idx + 1) } else { card.chapter_id.clone() };
+            let cid = clean_slot_id(&card.chapter_id);
+            match card.kind {
+                CardKind::Cover => {}
+                CardKind::Narrative => {
+                    let is_point = card.chapter_id.to_lowercase().contains("point")
+                        || card.source.to_lowercase().contains("point")
+                        || card.title.to_lowercase().contains("ringkasan");
+                    if !is_point {
+                        if seen_texts.insert(card.title.clone()) {
+                            out.push(SlotItem {
+                                name: format!("ulasan_{cid}_judul"),
+                                budget: role_budget(pubgen_core::translation_units::UnitRole::NarrativeTitle),
+                                text: card.title.clone(),
+                            });
+                        }
+                        let body = collected_units
+                            .iter()
+                            .find(|u| {
+                                (u.card_id == card_core_id || u.card_id == card.chapter_id)
+                                    && u.role == pubgen_core::translation_units::UnitRole::NarrativeBody
+                            })
+                            .map(|u| u.text.clone())
+                            .filter(|t| !t.trim().is_empty())
+                            .unwrap_or_else(|| card.subtitle.clone());
+                        if !body.trim().is_empty() && seen_texts.insert(body.clone()) {
+                            out.push(SlotItem {
+                                name: format!("ulasan_{cid}_narasi"),
+                                budget: role_budget(pubgen_core::translation_units::UnitRole::NarrativeBody),
+                                text: body,
+                            });
+                        }
+                    }
+                }
+                CardKind::Table => {
+                    if seen_texts.insert(card.title.clone()) {
+                        out.push(SlotItem {
+                            name: format!("judul_tabel_{cid}"),
+                            budget: role_budget(pubgen_core::translation_units::UnitRole::TableTitle),
+                            text: card.title.clone(),
+                        });
+                    }
+                    if let Some(note) = collected_units.iter().find(|u| {
+                        (u.card_id == card_core_id || u.card_id == card.chapter_id) && u.role == pubgen_core::translation_units::UnitRole::TableNote
+                    }) {
+                        if seen_texts.insert(note.text.clone()) {
+                            out.push(SlotItem {
+                                name: format!("catatan_kaki_{cid}"),
+                                budget: role_budget(pubgen_core::translation_units::UnitRole::TableNote),
+                                text: note.text.clone(),
+                            });
+                        }
+                    }
+                    for (h_idx, h) in collected_units
+                        .iter()
+                        .filter(|u| {
+                            (u.card_id == card_core_id || u.card_id == card.chapter_id)
+                                && u.role == pubgen_core::translation_units::UnitRole::TableHeader
+                        })
+                        .enumerate()
+                    {
+                        if seen_texts.insert(h.text.clone()) {
+                            out.push(SlotItem {
+                                name: format!("header_tabel_{cid}_{h_idx}"),
+                                budget: role_budget(pubgen_core::translation_units::UnitRole::TableHeader),
+                                text: h.text.clone(),
+                            });
+                        }
+                    }
+                    for (r_idx, r) in collected_units
+                        .iter()
+                        .filter(|u| {
+                            (u.card_id == card_core_id || u.card_id == card.chapter_id)
+                                && u.role == pubgen_core::translation_units::UnitRole::TableRowLabel
+                        })
+                        .enumerate()
+                    {
+                        if seen_texts.insert(r.text.clone()) {
+                            out.push(SlotItem {
+                                name: format!("label_baris_{cid}_{r_idx}"),
+                                budget: role_budget(pubgen_core::translation_units::UnitRole::TableRowLabel),
+                                text: r.text.clone(),
+                            });
+                        }
+                    }
+                }
+                CardKind::Chart => {
+                    if seen_texts.insert(card.title.clone()) {
+                        out.push(SlotItem {
+                            name: format!("judul_grafik_{cid}"),
+                            budget: role_budget(pubgen_core::translation_units::UnitRole::ChartTitle),
+                            text: card.title.clone(),
+                        });
+                    }
+                    for (s_idx, s) in collected_units
+                        .iter()
+                        .filter(|u| {
+                            (u.card_id == card_core_id || u.card_id == card.chapter_id)
+                                && u.role == pubgen_core::translation_units::UnitRole::ChartSeries
+                        })
+                        .enumerate()
+                    {
+                        if seen_texts.insert(s.text.clone()) {
+                            out.push(SlotItem {
+                                name: format!("seri_grafik_{cid}_{s_idx}"),
+                                budget: role_budget(pubgen_core::translation_units::UnitRole::ChartSeries),
+                                text: s.text.clone(),
+                            });
+                        }
+                    }
+                }
+                CardKind::Image => {
+                    let cap = card.settings.get("caption").cloned().unwrap_or_else(|| card.title.clone());
+                    if seen_texts.insert(cap.clone()) {
+                        out.push(SlotItem {
+                            name: format!("keterangan_gambar_{cid}"),
+                            budget: role_budget(pubgen_core::translation_units::UnitRole::ImageCaption),
+                            text: cap,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+    } else if prof == "bps_dda" {
+        // DDA (Daerah Dalam Angka) Nomenclature & Structure
+        let cover_title = if !state.meta_title.trim().is_empty() { state.meta_title.clone() } else { "KABUPATEN DALAM ANGKA 2026".to_string() };
+        seen_texts.insert(cover_title.clone());
+        out.push(SlotItem { name: "cover_title".into(), budget: Some(100), text: cover_title });
+
+        if !state.meta_subtitle.trim().is_empty() && seen_texts.insert(state.meta_subtitle.clone()) {
+            out.push(SlotItem { name: "cover_title_en".into(), budget: Some(100), text: state.meta_subtitle.clone() });
+        }
+        if !state.meta_agency.trim().is_empty() && seen_texts.insert(state.meta_agency.clone()) {
+            out.push(SlotItem { name: "cover_agency".into(), budget: Some(80), text: state.meta_agency.clone() });
+        }
+
+        for (card_idx, card) in state.cards.iter().enumerate() {
+            let card_core_id = if card.chapter_id.is_empty() { format!("card_{}", card_idx + 1) } else { card.chapter_id.clone() };
+            let cid = clean_slot_id(&card.chapter_id);
+            match card.kind {
+                CardKind::Cover => {}
+                CardKind::Divider => {
+                    if seen_texts.insert(card.title.clone()) {
+                        out.push(SlotItem {
+                            name: format!("pembatas_bab_{cid}"),
+                            budget: role_budget(pubgen_core::translation_units::UnitRole::DividerTitle),
+                            text: card.title.clone(),
+                        });
+                    }
+                    if !card.title_en.trim().is_empty() && seen_texts.insert(card.title_en.clone()) {
+                        out.push(SlotItem {
+                            name: format!("pembatas_bab_en_{cid}"),
+                            budget: role_budget(pubgen_core::translation_units::UnitRole::DividerTitle),
+                            text: card.title_en.clone(),
+                        });
+                    }
+                }
+                CardKind::Toc => {
+                    if seen_texts.insert(card.title.clone()) {
+                        out.push(SlotItem {
+                            name: "daftar_isi".into(),
+                            budget: role_budget(pubgen_core::translation_units::UnitRole::TocTitle),
+                            text: card.title.clone(),
+                        });
+                    }
+                }
+                CardKind::Narrative => {
+                    if seen_texts.insert(card.title.clone()) {
+                        out.push(SlotItem {
+                            name: format!("ulasan_bab_{cid}"),
+                            budget: role_budget(pubgen_core::translation_units::UnitRole::NarrativeTitle),
+                            text: card.title.clone(),
+                        });
+                    }
+                    let body = collected_units
+                        .iter()
+                        .find(|u| {
+                            (u.card_id == card_core_id || u.card_id == card.chapter_id)
+                                && u.role == pubgen_core::translation_units::UnitRole::NarrativeBody
+                        })
+                        .map(|u| u.text.clone())
+                        .filter(|t| !t.trim().is_empty())
+                        .unwrap_or_else(|| card.subtitle.clone());
+                    if !body.trim().is_empty() && seen_texts.insert(body.clone()) {
+                        out.push(SlotItem {
+                            name: format!("narasi_bab_{cid}"),
+                            budget: role_budget(pubgen_core::translation_units::UnitRole::NarrativeBody),
+                            text: body,
+                        });
+                    }
+                }
+                CardKind::Table => {
+                    if seen_texts.insert(card.title.clone()) {
+                        out.push(SlotItem {
+                            name: format!("judul_tabel_{cid}"),
+                            budget: role_budget(pubgen_core::translation_units::UnitRole::TableTitle),
+                            text: card.title.clone(),
+                        });
+                    }
+                    let note = collected_units
+                        .iter()
+                        .find(|u| {
+                            (u.card_id == card_core_id || u.card_id == card.chapter_id)
+                                && u.role == pubgen_core::translation_units::UnitRole::TableNote
+                        })
+                        .map(|u| u.text.clone())
+                        .unwrap_or_else(|| "Sumber / Source: BPS".to_string());
+                    if seen_texts.insert(note.clone()) {
+                        out.push(SlotItem {
+                            name: format!("sumber_catatan_{cid}"),
+                            budget: role_budget(pubgen_core::translation_units::UnitRole::TableNote),
+                            text: note,
+                        });
+                    }
+                    for (h_idx, h) in collected_units
+                        .iter()
+                        .filter(|u| {
+                            (u.card_id == card_core_id || u.card_id == card.chapter_id)
+                                && u.role == pubgen_core::translation_units::UnitRole::TableHeader
+                        })
+                        .enumerate()
+                    {
+                        if seen_texts.insert(h.text.clone()) {
+                            out.push(SlotItem {
+                                name: format!("header_kolom_{cid}_{h_idx}"),
+                                budget: role_budget(pubgen_core::translation_units::UnitRole::TableHeader),
+                                text: h.text.clone(),
+                            });
+                        }
+                    }
+                    for (r_idx, r) in collected_units
+                        .iter()
+                        .filter(|u| {
+                            (u.card_id == card_core_id || u.card_id == card.chapter_id)
+                                && u.role == pubgen_core::translation_units::UnitRole::TableRowLabel
+                        })
+                        .enumerate()
+                    {
+                        if seen_texts.insert(r.text.clone()) {
+                            out.push(SlotItem {
+                                name: format!("label_baris_{cid}_{r_idx}"),
+                                budget: role_budget(pubgen_core::translation_units::UnitRole::TableRowLabel),
+                                text: r.text.clone(),
+                            });
+                        }
+                    }
+                }
+                CardKind::Chart => {
+                    if seen_texts.insert(card.title.clone()) {
+                        out.push(SlotItem {
+                            name: format!("judul_grafik_{cid}"),
+                            budget: role_budget(pubgen_core::translation_units::UnitRole::ChartTitle),
+                            text: card.title.clone(),
+                        });
+                    }
+                    for (s_idx, s) in collected_units
+                        .iter()
+                        .filter(|u| {
+                            (u.card_id == card_core_id || u.card_id == card.chapter_id)
+                                && u.role == pubgen_core::translation_units::UnitRole::ChartSeries
+                        })
+                        .enumerate()
+                    {
+                        if seen_texts.insert(s.text.clone()) {
+                            out.push(SlotItem {
+                                name: format!("label_seri_{cid}_{s_idx}"),
+                                budget: role_budget(pubgen_core::translation_units::UnitRole::ChartSeries),
+                                text: s.text.clone(),
+                            });
+                        }
+                    }
+                }
+                CardKind::MapChart => {
+                    if seen_texts.insert(card.title.clone()) {
+                        out.push(SlotItem {
+                            name: format!("judul_peta_{cid}"),
+                            budget: role_budget(pubgen_core::translation_units::UnitRole::MapTitle),
+                            text: card.title.clone(),
+                        });
+                    }
+                }
+                CardKind::Image => {
+                    let cap = card.settings.get("caption").cloned().unwrap_or_else(|| card.title.clone());
+                    if seen_texts.insert(cap.clone()) {
+                        out.push(SlotItem {
+                            name: format!("keterangan_gambar_{cid}"),
+                            budget: role_budget(pubgen_core::translation_units::UnitRole::ImageCaption),
+                            text: cap,
+                        });
+                    }
+                }
+            }
+        }
+    } else if prof == "corporate_annual" {
+        // Corporate Annual Report Nomenclature
+        let title = if !state.meta_title.trim().is_empty() { state.meta_title.clone() } else { "Annual Report 2026".to_string() };
+        seen_texts.insert(title.clone());
+        out.push(SlotItem { name: "cover_title".into(), budget: Some(80), text: title });
+
+        let agency = if !state.meta_agency.trim().is_empty() { state.meta_agency.clone() } else { "Company Name Inc.".to_string() };
+        seen_texts.insert(agency.clone());
+        out.push(SlotItem { name: "cover_agency".into(), budget: Some(80), text: agency });
+
+        for card in &state.cards {
+            let cid = clean_slot_id(&card.chapter_id);
+            match card.kind {
+                CardKind::Cover => {}
+                CardKind::Divider => {
+                    if seen_texts.insert(card.title.clone()) {
+                        out.push(SlotItem { name: format!("section_divider_{cid}"), budget: Some(60), text: card.title.clone() });
+                    }
+                }
+                CardKind::Narrative => {
+                    if seen_texts.insert(card.title.clone()) {
+                        out.push(SlotItem { name: format!("executive_heading_{cid}"), budget: Some(90), text: card.title.clone() });
+                    }
+                    let body = if !card.subtitle.trim().is_empty() { card.subtitle.clone() } else { card.title.clone() };
+                    if seen_texts.insert(body.clone()) {
+                        out.push(SlotItem { name: format!("executive_summary_{cid}"), budget: Some(400), text: body });
+                    }
+                }
+                CardKind::Table => {
+                    if seen_texts.insert(card.title.clone()) {
+                        out.push(SlotItem { name: format!("financial_table_{cid}"), budget: Some(150), text: card.title.clone() });
+                    }
+                    out.push(SlotItem {
+                        name: format!("table_footnote_{cid}"),
+                        budget: Some(150),
+                        text: "Note: Consolidated financial statements in thousands USD".into(),
+                    });
+                }
+                CardKind::Chart => {
+                    if seen_texts.insert(card.title.clone()) {
+                        out.push(SlotItem { name: format!("financial_chart_{cid}"), budget: Some(100), text: card.title.clone() });
+                    }
+                }
+                CardKind::Image if seen_texts.insert(card.title.clone()) => {
+                    out.push(SlotItem { name: format!("figure_caption_{cid}"), budget: Some(120), text: card.title.clone() });
+                }
+                _ => {}
+            }
+        }
+    } else if prof == "academic_monograph" {
+        // Academic Monograph Nomenclature
+        let title = if !state.meta_title.trim().is_empty() { state.meta_title.clone() } else { "Research Monograph".to_string() };
+        seen_texts.insert(title.clone());
+        out.push(SlotItem { name: "monograph_title".into(), budget: Some(120), text: title });
+
+        let agency = if !state.meta_agency.trim().is_empty() { state.meta_agency.clone() } else { "University Press / Institution".to_string() };
+        seen_texts.insert(agency.clone());
+        out.push(SlotItem { name: "cover_agency".into(), budget: Some(80), text: agency });
+
+        for card in &state.cards {
+            let cid = clean_slot_id(&card.chapter_id);
+            match card.kind {
+                CardKind::Cover => {}
+                CardKind::Divider => {
+                    if seen_texts.insert(card.title.clone()) {
+                        out.push(SlotItem { name: format!("chapter_divider_{cid}"), budget: Some(60), text: card.title.clone() });
+                    }
+                }
+                CardKind::Narrative => {
+                    if seen_texts.insert(card.title.clone()) {
+                        out.push(SlotItem { name: format!("chapter_title_{cid}"), budget: Some(80), text: card.title.clone() });
+                    }
+                    let body = if !card.subtitle.trim().is_empty() { card.subtitle.clone() } else { card.title.clone() };
+                    if seen_texts.insert(body.clone()) {
+                        out.push(SlotItem { name: format!("narrative_body_{cid}"), budget: Some(500), text: body });
+                    }
+                }
+                CardKind::Table => {
+                    if seen_texts.insert(card.title.clone()) {
+                        out.push(SlotItem { name: format!("academic_table_{cid}"), budget: Some(150), text: card.title.clone() });
+                    }
+                }
+                CardKind::Chart | CardKind::Image if seen_texts.insert(card.title.clone()) => {
+                    out.push(SlotItem { name: format!("figure_caption_{cid}"), budget: Some(100), text: card.title.clone() });
+                }
+                _ => {}
+            }
+        }
+    } else {
+        // Fallback for any other / custom profile
+        for unit in &collected_units {
+            if seen_texts.insert(unit.text.clone()) {
+                let name = format!("{}_{}", unit.role.as_str(), clean_slot_id(&unit.card_id));
+                let budget = role_budget(unit.role);
+                out.push(SlotItem { name, budget, text: unit.text.clone() });
+            }
+        }
+    }
+
+    // Include any additional uncollected units from collected_units that were missed
+    for unit in collected_units {
+        if seen_texts.insert(unit.text.clone()) {
+            let name = format!("{}_{}", unit.role.as_str(), clean_slot_id(&unit.card_id));
+            let budget = role_budget(unit.role);
+            out.push(SlotItem { name, budget, text: unit.text });
+        }
+    }
+
+    out
+}
+
+pub fn refresh_detected_slots(state: &mut OrchestratorWorkspaceState) {
+    state.slots = detect_translation_rule_units(state);
+}
+
 // ============================================================================
 // PANEL KANAN: "Profil, Slot & Eksekusi"
 // ============================================================================
@@ -3506,21 +4283,58 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
             ui.label(RichText::new(crate::i18n::tr(lang, "Publication Profile:")).font(semibold(11.0)).color(t.text_strong));
 
             // Combo selection
-            let current_label = if state.selected_profile == "bps_brs" { "BPS Berita Resmi Statistik (BRS)" } else { "BPS Daerah Dalam Angka (DDA)" };
+            let current_label = match state.selected_profile.as_str() {
+                "bps_brs" => "BPS Berita Resmi Statistik (BRS)",
+                "bps_dda" => "BPS Daerah Dalam Angka (DDA)",
+                "corporate_annual" => "Corporate Annual Report",
+                "academic_monograph" => "Academic Monograph",
+                _ => {
+                    if state.selected_profile.contains("brs") {
+                        "BPS Berita Resmi Statistik (BRS)"
+                    } else {
+                        "BPS Daerah Dalam Angka (DDA)"
+                    }
+                }
+            };
 
             craft_ui::ComboBox::from_id_salt("profile_select_combo")
                 .selected_text(RichText::new(current_label).font(FontId::proportional(11.0)))
                 .width(ui.available_width() - 8.0)
                 .show_ui(ui, |ui| {
                     if ui.selectable_label(state.selected_profile == "bps_brs", "BPS Berita Resmi Statistik (BRS)").clicked() {
-                        state.selected_profile = "bps_brs".into();
+                        if state.selected_profile != "bps_brs" {
+                            state.selected_profile = "bps_brs".into();
+                            refresh_detected_slots(state);
+                        }
                     }
                     if ui.selectable_label(state.selected_profile == "bps_dda", "BPS Daerah Dalam Angka (DDA)").clicked() {
-                        state.selected_profile = "bps_dda".into();
+                        if state.selected_profile != "bps_dda" {
+                            state.selected_profile = "bps_dda".into();
+                            refresh_detected_slots(state);
+                        }
+                    }
+                    if ui.selectable_label(state.selected_profile == "corporate_annual", "Corporate Annual Report").clicked() {
+                        if state.selected_profile != "corporate_annual" {
+                            state.selected_profile = "corporate_annual".into();
+                            refresh_detected_slots(state);
+                        }
+                    }
+                    if ui.selectable_label(state.selected_profile == "academic_monograph", "Academic Monograph").clicked() {
+                        if state.selected_profile != "academic_monograph" {
+                            state.selected_profile = "academic_monograph".into();
+                            refresh_detected_slots(state);
+                        }
                     }
                 });
 
-            ui.label(RichText::new("Margins: T:20.2 B:20.0 L:19.0 R:15.0 mm | Spreads: Tidak").font(FontId::proportional(11.0)).color(t.text_dim));
+            let profile_margins = match state.selected_profile.as_str() {
+                "bps_brs" => "Margins: T:18.0 B:18.0 L:20.0 R:20.0 mm | Spreads: Ya",
+                "bps_dda" => "Margins: T:20.2 B:20.0 L:19.0 R:15.0 mm | Spreads: Ya",
+                "corporate_annual" => "Margins: T:25.0 B:25.0 L:20.0 R:20.0 mm | Spreads: Ya",
+                "academic_monograph" => "Margins: T:22.0 B:22.0 L:25.0 R:20.0 mm | Spreads: Ya",
+                _ => "Margins: T:20.2 B:20.0 L:19.0 R:15.0 mm | Spreads: Ya",
+            };
+            ui.label(RichText::new(profile_margins).font(FontId::proportional(11.0)).color(t.text_dim));
         });
 
     // 2. Action Buttons: Translate, Generate & Generate and Publish
@@ -3668,7 +4482,20 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
     ui.separator();
 
     // 4. Slot Terdeteksi (Slot character budget & fit)
-    ui.label(RichText::new(format!("{} ({})", crate::i18n::tr(lang, "Detected Slots"), state.slots.len())).font(semibold(11.5)).color(t.text_strong));
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(format!("{} ({})", crate::i18n::tr(lang, "Detected Slots"), state.slots.len())).font(semibold(11.5)).color(t.text_strong),
+        );
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if ui.small_button("⟳").on_hover_text(crate::i18n::tr(lang, "Refresh detected translation rule units")).clicked() {
+                refresh_detected_slots(state);
+            }
+        });
+    });
+
+    if state.slots.is_empty() && !state.cards.is_empty() {
+        refresh_detected_slots(state);
+    }
 
     ScrollArea::vertical().id_salt("pubgen_right_slots_scroll").auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(4.0, 6.0);
@@ -3680,8 +4507,8 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
                     .color(t.text_dim),
             );
         } else {
-            for slot in &state.slots {
-                ui.push_id(&slot.name, |ui| {
+            for (idx, slot) in state.slots.iter().enumerate() {
+                ui.push_id((idx, &slot.name), |ui| {
                     egui::Frame::NONE
                         .fill(t.panel_darker)
                         .stroke(Stroke::new(1.0, t.field_border))
@@ -3720,6 +4547,448 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
 // MODAL EDITOR KARTU PUBLIKASI
 // ============================================================================
 
+fn load_chart_data_from_source(card: &mut PublicationCard, source_path: &str, cached_content: &std::collections::BTreeMap<String, Vec<u8>>) {
+    if source_path.is_empty() || source_path == "Tanpa sumber" || source_path == "Manual" {
+        return;
+    }
+    let clean = source_path.replace('\\', "/");
+    let bare = clean.strip_prefix("csv/").unwrap_or(&clean);
+    let with_csv_prefix = format!("csv/{bare}");
+    let with_ext = if !bare.ends_with(".csv") { format!("{bare}.csv") } else { bare.to_string() };
+    let with_both = if !clean.ends_with(".csv") { format!("csv/{with_ext}") } else { with_csv_prefix.clone() };
+    let backslash = clean.replace('/', "\\");
+
+    let found_bytes = cached_content
+        .get(&clean)
+        .or_else(|| cached_content.get(bare))
+        .or_else(|| cached_content.get(&with_csv_prefix))
+        .or_else(|| cached_content.get(&with_ext))
+        .or_else(|| cached_content.get(&with_both))
+        .or_else(|| cached_content.get(&backslash));
+
+    if let Some(bytes) = found_bytes {
+        card.chart_raw_data = String::from_utf8_lossy(bytes).into_owned();
+        auto_detect_chart_columns(card);
+    } else if let Ok(bytes) = std::fs::read(source_path) {
+        card.chart_raw_data = String::from_utf8_lossy(&bytes).into_owned();
+        auto_detect_chart_columns(card);
+    }
+}
+
+fn auto_detect_chart_columns(card: &mut PublicationCard) {
+    let delim = super::csv::detect_delimiter(&card.chart_raw_data);
+    let grid = super::csv::parse_csv_content_with_delim(&card.chart_raw_data, delim);
+    let Some(header_row) = grid.first() else { return };
+    let headers: Vec<String> = header_row.iter().map(|c| c.trim().to_lowercase()).collect();
+
+    let mut cat_idx = 0;
+    let mut found_cat = false;
+    for (idx, h) in headers.iter().enumerate() {
+        let col_letter = super::charts::spec::index_to_col_letter(idx);
+        if matches!(h.as_str(), "nmdesa" | "desa" | "village" | "kecamatan" | "wilayah" | "category" | "kategori" | "tahun" | "year") {
+            card.chart_category_col = col_letter;
+            cat_idx = idx;
+            found_cat = true;
+            break;
+        }
+    }
+    if !found_cat {
+        card.chart_category_col = "A".into();
+    }
+
+    let mut series_indices = Vec::new();
+    for (idx, h) in headers.iter().enumerate() {
+        if idx == cat_idx {
+            continue;
+        }
+        if matches!(h.as_str(), "title" | "judul" | "title_en" | "judul_en" | "id" | "code") {
+            continue;
+        }
+        series_indices.push(idx);
+    }
+
+    if let Some(&s1) = series_indices.first() {
+        card.chart_series_1_col = super::charts::spec::index_to_col_letter(s1);
+        if let Some(lbl) = header_row.get(s1) {
+            let trimmed = lbl.trim();
+            if !trimmed.is_empty() {
+                card.chart_series_1_label_id = trimmed.to_string();
+            }
+        }
+    }
+
+    if let Some(&s2) = series_indices.get(1) {
+        card.chart_series_2_enabled = true;
+        card.chart_series_2_col = super::charts::spec::index_to_col_letter(s2);
+        if let Some(lbl) = header_row.get(s2) {
+            let trimmed = lbl.trim();
+            if !trimmed.is_empty() {
+                card.chart_series_2_label_id = trimmed.to_string();
+            }
+        }
+    } else {
+        card.chart_series_2_enabled = false;
+    }
+
+    if let Some(&s3) = series_indices.get(2) {
+        card.chart_series_3_enabled = true;
+        card.chart_series_3_col = super::charts::spec::index_to_col_letter(s3);
+        if let Some(lbl) = header_row.get(s3) {
+            let trimmed = lbl.trim();
+            if !trimmed.is_empty() {
+                card.chart_series_3_label_id = trimmed.to_string();
+            }
+        }
+    } else {
+        card.chart_series_3_enabled = false;
+    }
+
+    if let Some(row1_cells) = grid.get(1) {
+        if let Some(t_idx) = headers.iter().position(|h| h == "title" || h == "judul") {
+            if let Some(t_val) = row1_cells.get(t_idx).map(|c| c.trim()) {
+                if !t_val.is_empty() && (card.title.is_empty() || card.title.starts_with("Grafik Baru") || card.title.starts_with("Objek Grafik")) {
+                    card.title = t_val.to_string();
+                }
+            }
+        }
+        if let Some(te_idx) = headers.iter().position(|h| h == "title_en" || h == "judul_en") {
+            if let Some(te_val) = row1_cells.get(te_idx).map(|c| c.trim()) {
+                if !te_val.is_empty() && card.title_en.is_empty() {
+                    card.title_en = te_val.to_string();
+                }
+            }
+        }
+        card.chart_data_start_row = 2;
+        card.chart_data_end_row = grid.len();
+    }
+}
+
+fn build_chart_sheet_csv(card: &PublicationCard) -> String {
+    let delim = super::csv::detect_delimiter(&card.chart_raw_data);
+    let mut lines = Vec::new();
+    let binding = card.chart_type.to_lowercase();
+    let ct = match binding.as_str() {
+        "vertical clustered bar" | "clustered bar" | "bar" => "bar_clustered",
+        "vertical stacked bar" | "stacked bar" => "bar_stacked",
+        "horizontal bar (ranked)" | "horizontal bar" | "hbar" => "horizontal_bar",
+        "line chart (markers)" | "line" => "line",
+        "area chart (filled)" | "area" => "area",
+        "donut / ring chart" | "donut" | "pie" => "donut",
+        "population pyramid (piramida penduduk)" | "population pyramid" | "pyramid" => "population_pyramid",
+        "gauge / speedometer chart" | "gauge" => "gauge",
+        other => other,
+    };
+    lines.push(format!("chart_type{delim}{ct}"));
+    if !card.title.is_empty() {
+        lines.push(format!("title{delim}{}", card.title));
+    }
+    if !card.title_en.is_empty() {
+        lines.push(format!("title_en{delim}{}", card.title_en));
+    }
+    let cat_col = if card.chart_category_col.is_empty() { "A" } else { &card.chart_category_col };
+    lines.push(format!("category_col{delim}{cat_col}"));
+    let s1_col = if card.chart_series_1_col.is_empty() { "B" } else { &card.chart_series_1_col };
+    lines.push(format!("series_1_col{delim}{s1_col}"));
+    if !card.chart_series_1_label_id.is_empty() {
+        lines.push(format!("series_1_label{delim}{}", card.chart_series_1_label_id));
+    }
+    if !card.chart_series_1_label_en.is_empty() {
+        lines.push(format!("series_1_label_en{delim}{}", card.chart_series_1_label_en));
+    }
+    if card.chart_series_2_enabled && !card.chart_series_2_col.is_empty() {
+        lines.push(format!("series_2_col{delim}{}", card.chart_series_2_col));
+        if !card.chart_series_2_label_id.is_empty() {
+            lines.push(format!("series_2_label{delim}{}", card.chart_series_2_label_id));
+        }
+        if !card.chart_series_2_label_en.is_empty() {
+            lines.push(format!("series_2_label_en{delim}{}", card.chart_series_2_label_en));
+        }
+    }
+    if card.chart_series_3_enabled && !card.chart_series_3_col.is_empty() {
+        lines.push(format!("series_3_col{delim}{}", card.chart_series_3_col));
+        if !card.chart_series_3_label_id.is_empty() {
+            lines.push(format!("series_3_label{delim}{}", card.chart_series_3_label_id));
+        }
+        if !card.chart_series_3_label_en.is_empty() {
+            lines.push(format!("series_3_label_en{delim}{}", card.chart_series_3_label_en));
+        }
+    }
+    let fmt = match card.chart_value_format.as_str() {
+        "Percentage (%)" => "percent",
+        "Currency IDR (Rp)" => "idr",
+        _ => "number",
+    };
+    lines.push(format!("value_format{delim}{fmt}"));
+    lines.push(format!("show_value_labels{delim}{}", card.chart_show_value_labels));
+    lines.push(format!("show_legend{delim}{}", card.chart_show_legend));
+    lines.push(format!("show_grid{delim}{}", card.chart_show_grid));
+    if !card.chart_max_value_override.is_empty() {
+        lines.push(format!("max_value{delim}{}", card.chart_max_value_override));
+    }
+    let base_header_count = lines.len() + 3;
+    let data_start = base_header_count + card.chart_data_start_row.saturating_sub(1);
+    let data_end = base_header_count + card.chart_data_end_row.saturating_sub(1);
+    lines.push(format!("data_start_row{delim}{data_start}"));
+    lines.push(format!("data_end_row{delim}{data_end}"));
+    lines.push(String::new());
+    lines.push(card.chart_raw_data.clone());
+    lines.join("\n")
+}
+
+fn render_chart_options_form(
+    app: &mut DesignApp,
+    ui: &mut Ui,
+    card: &mut PublicationCard,
+    cached_content: &std::collections::BTreeMap<String, Vec<u8>>,
+    t: &Tokens,
+    lang: &str,
+) {
+    egui::Frame::NONE
+        .fill(t.panel)
+        .stroke(Stroke::new(1.0, t.field_border))
+        .corner_radius(CornerRadius::same(t.radius))
+        .inner_margin(Margin::same(8))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+            ui.label(
+                RichText::new(crate::i18n::tr(lang, "Chart Visualisation Settings (Vector Engine & Data Mapping):"))
+                    .font(semibold(11.0))
+                    .color(t.text_strong),
+            );
+
+            // Section 1: Archetype selection
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(crate::i18n::tr(lang, "Chart Archetype:")).font(semibold(11.0)));
+                craft_ui::ComboBox::from_id_salt("chart_archetype_select").selected_text(&card.chart_type).width(260.0).show_ui(ui, |ui| {
+                    for (ct_val, ct_display) in [
+                        ("Line Chart (Markers)", "Line Chart (Markers)"),
+                        ("Vertical Clustered Bar", "Vertical Clustered Bar"),
+                        ("Vertical Stacked Bar", "Vertical Stacked Bar"),
+                        ("Horizontal Bar (Ranked)", "Horizontal Bar (Ranked)"),
+                        ("Area Chart (Filled)", "Area Chart (Filled)"),
+                        ("Donut / Ring Chart", "Donut / Ring Chart"),
+                        ("Population Pyramid (Piramida Penduduk)", "Population Pyramid (Piramida Penduduk)"),
+                        ("Gauge / Speedometer Chart", "Gauge / Speedometer Chart"),
+                    ] {
+                        if ui.selectable_label(card.chart_type == ct_val || card.chart_type == ct_display, ct_display).clicked() {
+                            card.chart_type = ct_val.into();
+                        }
+                    }
+                });
+            });
+
+            // Section 2: Data Range & Columns
+            ui.separator();
+            ui.label(RichText::new(crate::i18n::tr(lang, "Data Columns & Rows:")).font(semibold(11.0)).color(t.text_strong));
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(crate::i18n::tr(lang, "Category Col:")).font(FontId::proportional(11.0)).color(t.text));
+                ui.add_sized([40.0, 20.0], egui::TextEdit::singleline(&mut card.chart_category_col));
+
+                ui.add_space(8.0);
+                ui.label(RichText::new(crate::i18n::tr(lang, "Rows:")).font(FontId::proportional(11.0)).color(t.text));
+                ui.add(egui::DragValue::new(&mut card.chart_data_start_row).range(1..=1000).prefix("Start: "));
+                ui.add(egui::DragValue::new(&mut card.chart_data_end_row).range(1..=1000).prefix("End: "));
+            });
+
+            // Series 1
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Series 1:").font(semibold(11.0)).color(t.text_strong));
+                ui.label(RichText::new("Col:").font(FontId::proportional(11.0)).color(t.text_dim));
+                ui.add_sized([30.0, 20.0], egui::TextEdit::singleline(&mut card.chart_series_1_col));
+                ui.label(RichText::new("Label (ID):").font(FontId::proportional(11.0)).color(t.text_dim));
+                ui.add_sized([100.0, 20.0], egui::TextEdit::singleline(&mut card.chart_series_1_label_id));
+                ui.label(RichText::new("Label (EN):").font(FontId::proportional(11.0)).color(t.text_dim));
+                ui.add_sized([100.0, 20.0], egui::TextEdit::singleline(&mut card.chart_series_1_label_en));
+            });
+
+            // Series 2 & 3 with archetype adaptations
+            let is_gauge = card.chart_type.to_lowercase().contains("gauge");
+            let is_donut = card.chart_type.to_lowercase().contains("donut") || card.chart_type.to_lowercase().contains("pie");
+            let is_pyramid = card.chart_type.to_lowercase().contains("pyramid") || card.chart_type.to_lowercase().contains("piramida");
+
+            if is_gauge {
+                ui.label(
+                    RichText::new(crate::i18n::tr(lang, "ℹ Gauge charts only fit 1 category and 1 data series."))
+                        .font(FontId::proportional(11.0))
+                        .color(t.text_dim),
+                );
+            } else if is_donut {
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut card.chart_series_2_enabled, "Series 2 (second ring):");
+                    if card.chart_series_2_enabled {
+                        ui.label(RichText::new("Col:").font(FontId::proportional(11.0)).color(t.text_dim));
+                        ui.add_sized([30.0, 20.0], egui::TextEdit::singleline(&mut card.chart_series_2_col));
+                        ui.label(RichText::new("Label (ID):").font(FontId::proportional(11.0)).color(t.text_dim));
+                        ui.add_sized([100.0, 20.0], egui::TextEdit::singleline(&mut card.chart_series_2_label_id));
+                        ui.label(RichText::new("Label (EN):").font(FontId::proportional(11.0)).color(t.text_dim));
+                        ui.add_sized([100.0, 20.0], egui::TextEdit::singleline(&mut card.chart_series_2_label_en));
+                    }
+                });
+                ui.label(
+                    RichText::new(crate::i18n::tr(lang, "ℹ Donut charts fit up to 2 data series: one ring per series."))
+                        .font(FontId::proportional(11.0))
+                        .color(t.text_dim),
+                );
+            } else if is_pyramid {
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut card.chart_series_2_enabled, "Series 2 (Female / Perempuan):");
+                    if card.chart_series_2_enabled {
+                        ui.label(RichText::new("Col:").font(FontId::proportional(11.0)).color(t.text_dim));
+                        ui.add_sized([30.0, 20.0], egui::TextEdit::singleline(&mut card.chart_series_2_col));
+                        ui.label(RichText::new("Label (ID):").font(FontId::proportional(11.0)).color(t.text_dim));
+                        ui.add_sized([100.0, 20.0], egui::TextEdit::singleline(&mut card.chart_series_2_label_id));
+                        ui.label(RichText::new("Label (EN):").font(FontId::proportional(11.0)).color(t.text_dim));
+                        ui.add_sized([100.0, 20.0], egui::TextEdit::singleline(&mut card.chart_series_2_label_en));
+                    }
+                });
+                ui.label(
+                    RichText::new(crate::i18n::tr(lang, "ℹ Population pyramid: Series 1 = Male (Laki-laki), Series 2 = Female (Perempuan)."))
+                        .font(FontId::proportional(11.0))
+                        .color(t.text_dim),
+                );
+            } else {
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut card.chart_series_2_enabled, "Series 2:");
+                    if card.chart_series_2_enabled {
+                        ui.label(RichText::new("Col:").font(FontId::proportional(11.0)).color(t.text_dim));
+                        ui.add_sized([30.0, 20.0], egui::TextEdit::singleline(&mut card.chart_series_2_col));
+                        ui.label(RichText::new("Label (ID):").font(FontId::proportional(11.0)).color(t.text_dim));
+                        ui.add_sized([100.0, 20.0], egui::TextEdit::singleline(&mut card.chart_series_2_label_id));
+                        ui.label(RichText::new("Label (EN):").font(FontId::proportional(11.0)).color(t.text_dim));
+                        ui.add_sized([100.0, 20.0], egui::TextEdit::singleline(&mut card.chart_series_2_label_en));
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut card.chart_series_3_enabled, "Series 3:");
+                    if card.chart_series_3_enabled {
+                        ui.label(RichText::new("Col:").font(FontId::proportional(11.0)).color(t.text_dim));
+                        ui.add_sized([30.0, 20.0], egui::TextEdit::singleline(&mut card.chart_series_3_col));
+                        ui.label(RichText::new("Label (ID):").font(FontId::proportional(11.0)).color(t.text_dim));
+                        ui.add_sized([100.0, 20.0], egui::TextEdit::singleline(&mut card.chart_series_3_label_id));
+                        ui.label(RichText::new("Label (EN):").font(FontId::proportional(11.0)).color(t.text_dim));
+                        ui.add_sized([100.0, 20.0], egui::TextEdit::singleline(&mut card.chart_series_3_label_en));
+                    }
+                });
+            }
+
+            // Section 3: Formatting & Display Options
+            ui.separator();
+            ui.label(RichText::new(crate::i18n::tr(lang, "Formatting & Display Options:")).font(semibold(11.0)).color(t.text_strong));
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(crate::i18n::tr(lang, "Value Format:")).font(FontId::proportional(11.0)).color(t.text));
+                craft_ui::ComboBox::from_id_salt("chart_val_fmt_select").selected_text(&card.chart_value_format).width(160.0).show_ui(ui, |ui| {
+                    for fmt_label in ["Number (1.234,5)", "Percentage (%)", "Currency IDR (Rp)"] {
+                        if ui.selectable_label(card.chart_value_format == fmt_label, fmt_label).clicked() {
+                            card.chart_value_format = fmt_label.into();
+                        }
+                    }
+                });
+
+                ui.add_space(8.0);
+                ui.label(RichText::new(crate::i18n::tr(lang, "Max Override:")).font(FontId::proportional(11.0)).color(t.text_dim));
+                ui.add_sized([50.0, 20.0], egui::TextEdit::singleline(&mut card.chart_max_value_override).hint_text("Auto"));
+            });
+
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut card.chart_show_value_labels, crate::i18n::tr(lang, "Show Value Labels"));
+                ui.checkbox(&mut card.chart_show_legend, crate::i18n::tr(lang, "Show Legend"));
+                ui.checkbox(&mut card.chart_show_grid, crate::i18n::tr(lang, "Show Gridlines"));
+            });
+
+            // Section 4: Data Table (CSV / TSV)
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(crate::i18n::tr(lang, "Data Table (CSV / TSV):")).font(semibold(11.0)).color(t.text_strong));
+                if ui.small_button(crate::i18n::tr(lang, "Reset Sample Data")).clicked() {
+                    card.chart_raw_data = super::charts::dialog::DEFAULT_SAMPLE_CSV.to_string();
+                    card.chart_data_start_row = 2;
+                    card.chart_data_end_row = 6;
+                }
+                if !card.source.is_empty() && card.source != "Tanpa sumber" && card.source != "Manual" {
+                    if ui.small_button(crate::i18n::tr(lang, "Reload From Source")).clicked() {
+                        let src = card.source.clone();
+                        load_chart_data_from_source(card, &src, cached_content);
+                    }
+                }
+                if ui.small_button(crate::i18n::tr(lang, "Auto-Detect Columns")).clicked() {
+                    auto_detect_chart_columns(card);
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut card.chart_csv_grid_preview, true, crate::i18n::tr(lang, "Preview"));
+                ui.selectable_value(&mut card.chart_csv_grid_preview, false, crate::i18n::tr(lang, "Edit"));
+            });
+
+            if card.chart_csv_grid_preview {
+                let delim = super::csv::detect_delimiter(&card.chart_raw_data);
+                let grid = super::csv::parse_csv_content_with_delim(&card.chart_raw_data, delim);
+                if !grid.is_empty() {
+                    egui::ScrollArea::both().id_salt("pubgen_chart_card_csv_preview").max_height(140.0).show(ui, |ui| {
+                        egui::Grid::new("pubgen_chart_card_csv_preview_grid").striped(true).spacing([12.0, 2.0]).show(ui, |ui| {
+                            for (r, row) in grid.iter().take(100).enumerate() {
+                                let header_rows = card.chart_data_start_row.saturating_sub(1);
+                                let row_number = r.checked_sub(header_rows).map(|v| v + 1);
+                                let is_data = row_number.is_some();
+                                ui.label(
+                                    RichText::new(row_number.map(|n| n.to_string()).unwrap_or_default()).monospace().size(11.0).color(t.text_dim),
+                                );
+                                for (c, cell) in row.iter().enumerate() {
+                                    let text = RichText::new(cell).monospace().size(11.0);
+                                    let text = if !is_data {
+                                        text.strong().color(t.text_strong)
+                                    } else if c == 0 {
+                                        text.strong().color(t.text)
+                                    } else {
+                                        text.color(t.text)
+                                    };
+                                    ui.label(text);
+                                }
+                                ui.end_row();
+                            }
+                        });
+                    });
+                    if grid.len() > 100 {
+                        ui.label(
+                            RichText::new(format!("(Menampilkan 100 dari {} baris data)", grid.len()))
+                                .font(FontId::proportional(11.0))
+                                .color(t.text_dim),
+                        );
+                    }
+                }
+            } else {
+                egui::ScrollArea::vertical().id_salt("pubgen_chart_card_csv_edit_scroll").max_height(140.0).show(ui, |ui| {
+                    ui.add_sized([ui.available_width(), 130.0], egui::TextEdit::multiline(&mut card.chart_raw_data).code_editor());
+                });
+            }
+
+            // Section 5: Optional Raster Image Fallback
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(crate::i18n::tr(lang, "Raster Image Fallback (Optional):")).font(semibold(11.0)).color(t.text_dim));
+                let edit = ui.add(egui::TextEdit::singleline(&mut card.chart_image).desired_width(200.0).hint_text("images/chart.png"));
+                if edit.changed() && !card.chart_image.is_empty() {
+                    card.source = card.chart_image.clone();
+                }
+                if ui.button(crate::i18n::tr(lang, "Buka...")).clicked() {
+                    let ctx = ui.ctx().clone();
+                    let _ = app.ask_open("image", crate::app::file_dialogs::Bound::App, move |_app, path| {
+                        let mut st = get_state(&ctx);
+                        if let Some(idx) = st.editing_card_idx {
+                            if let Some(c) = st.cards.get_mut(idx) {
+                                c.chart_image = path.clone();
+                                c.source = path;
+                            }
+                        }
+                        set_state(&ctx, st);
+                        ctx.request_repaint();
+                        Ok(serde_json::Value::Null)
+                    });
+                }
+            });
+        });
+}
+
 fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut OrchestratorWorkspaceState, t: &Tokens, lang: &str) {
     let Some(idx) = state.editing_card_idx else { return };
     if idx >= state.cards.len() {
@@ -3747,6 +5016,16 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
     state.last_editing_card_idx = Some(idx);
 
     if is_newly_opened {
+        let card = &mut state.cards[idx];
+        if card.kind == CardKind::Chart
+            && !card.source.is_empty()
+            && card.source != "Tanpa sumber"
+            && card.source != "Manual"
+            && (card.chart_raw_data.trim().is_empty() || card.chart_raw_data == super::charts::dialog::DEFAULT_SAMPLE_CSV)
+        {
+            let src = card.source.clone();
+            load_chart_data_from_source(card, &src, &state.cached_content);
+        }
         let card = &state.cards[idx];
         if card.kind != CardKind::Cover {
             super::with_state(ctx, |pubgen_st| {
@@ -3780,6 +5059,9 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
     let max_modal_h = 680.0f32.min(available_h);
     let scroll_h = max_modal_h - 90.0;
     let content_w = modal_w - 24.0;
+
+    let cached_content = state.cached_content.clone();
+    let mut switch_to_chart_tab = false;
 
     egui::Window::new(format!("{} — {} {}", crate::i18n::tr(lang, "Edit Publication Card"), crate::i18n::tr(lang, "Pg."), page_num))
         .collapsible(false)
@@ -3836,96 +5118,62 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
 
             // Unified Tab Bar (Matching InDesign-style Right Dock Tabs)
             let tab_bar_height = DOCK_TAB_H;
-            let tab_count = if card.kind == CardKind::Cover { 2.0 } else { 3.0 };
+            let mut tabs = vec![CardEditTab::KontenSumber];
+            if card.kind == CardKind::Chart {
+                tabs.push(CardEditTab::OpsiGrafik);
+            }
+            tabs.push(CardEditTab::TataLetakSeksi);
+            if card.kind != CardKind::Cover {
+                tabs.push(CardEditTab::HeaderFooter);
+            }
+            if !tabs.contains(&state.card_edit_tab) {
+                state.card_edit_tab = CardEditTab::KontenSumber;
+            }
+
+            let tab_count = tabs.len() as f32;
             let tab_w = (content_w / tab_count).floor();
 
             let (strip, _) = ui.allocate_exact_size(vec2(content_w, tab_bar_height), Sense::hover());
             ui.painter().rect_filled(strip, 0.0, t.tab_strip);
 
-            // Tab 1: Konten & Sumber
-            let tab1_rect = Rect::from_min_size(strip.min, vec2(tab_w, tab_bar_height));
-            let is_tab1 = state.card_edit_tab == CardEditTab::KontenSumber;
-            let tab1_resp = ui.interact(tab1_rect, ui.scope_id().with("card_tab_1"), Sense::click())
-                .on_hover_text(crate::i18n::tr(lang, "Content & Source"));
-            tab1_resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_tab1, crate::i18n::tr(lang, "Content & Source")));
-            if is_tab1 {
-                ui.painter().rect_filled(tab1_rect, 0.0, t.panel);
-                ui.painter().line_segment([tab1_rect.left_top(), tab1_rect.left_bottom()], Stroke::new(1.0, t.border));
-                ui.painter().line_segment([tab1_rect.right_top(), tab1_rect.right_bottom()], Stroke::new(1.0, t.border));
-            } else {
-                if tab1_resp.hovered() {
-                    ui.painter().rect_filled(tab1_rect, 0.0, t.hover);
-                }
-                ui.painter().line_segment([tab1_rect.left_bottom(), tab1_rect.right_bottom()], Stroke::new(1.0, t.border));
-            }
-            ui.painter().text(
-                tab1_rect.center(),
-                Align2::CENTER_CENTER,
-                format!("🏷️ {}", crate::i18n::tr(lang, "Content & Source")),
-                FontId::proportional(DOCK_TAB_LABEL),
-                if is_tab1 { t.text_strong } else { t.text_dim },
-            );
-            if tab1_resp.clicked() {
-                state.card_edit_tab = CardEditTab::KontenSumber;
-            }
-
-            // Tab 2: Tata Letak & Seksi
-            let tab2_rect = Rect::from_min_size(pos2(strip.min.x + tab_w, strip.min.y), vec2(tab_w, tab_bar_height));
-            let is_tab2 = state.card_edit_tab == CardEditTab::TataLetakSeksi;
-            let tab2_resp = ui.interact(tab2_rect, ui.scope_id().with("card_tab_2"), Sense::click())
-                .on_hover_text(crate::i18n::tr(lang, "Layout & Section"));
-            tab2_resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_tab2, crate::i18n::tr(lang, "Layout & Section")));
-            if is_tab2 {
-                ui.painter().rect_filled(tab2_rect, 0.0, t.panel);
-                ui.painter().line_segment([tab2_rect.left_top(), tab2_rect.left_bottom()], Stroke::new(1.0, t.border));
-                ui.painter().line_segment([tab2_rect.right_top(), tab2_rect.right_bottom()], Stroke::new(1.0, t.border));
-            } else {
-                if tab2_resp.hovered() {
-                    ui.painter().rect_filled(tab2_rect, 0.0, t.hover);
-                }
-                ui.painter().line_segment([tab2_rect.left_bottom(), tab2_rect.right_bottom()], Stroke::new(1.0, t.border));
-            }
-            ui.painter().text(
-                tab2_rect.center(),
-                Align2::CENTER_CENTER,
-                format!("📄 {}", crate::i18n::tr(lang, "Layout & Section")),
-                FontId::proportional(DOCK_TAB_LABEL),
-                if is_tab2 { t.text_strong } else { t.text_dim },
-            );
-            if tab2_resp.clicked() {
-                state.card_edit_tab = CardEditTab::TataLetakSeksi;
-            }
-
-            // Tab 3: Header & Footer (Non-cover cards only)
-            if card.kind != CardKind::Cover {
-                let tab3_w = (content_w - (tab_w * 2.0)).max(0.0);
-                let tab3_rect = Rect::from_min_size(pos2(strip.min.x + tab_w * 2.0, strip.min.y), vec2(tab3_w, tab_bar_height));
-                let is_tab3 = state.card_edit_tab == CardEditTab::HeaderFooter;
-                let tab3_resp = ui.interact(tab3_rect, ui.scope_id().with("card_tab_3"), Sense::click())
-                    .on_hover_text(crate::i18n::tr(lang, "Header & Footer"));
-                tab3_resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_tab3, crate::i18n::tr(lang, "Header & Footer")));
-                if is_tab3 {
-                    ui.painter().rect_filled(tab3_rect, 0.0, t.panel);
-                    ui.painter().line_segment([tab3_rect.left_top(), tab3_rect.left_bottom()], Stroke::new(1.0, t.border));
-                    ui.painter().line_segment([tab3_rect.right_top(), tab3_rect.right_bottom()], Stroke::new(1.0, t.border));
+            for (i, &tab) in tabs.iter().enumerate() {
+                let tab_x = strip.min.x + (i as f32) * tab_w;
+                let this_tab_w = if i == tabs.len() - 1 {
+                    (strip.max.x - tab_x).max(0.0)
                 } else {
-                    if tab3_resp.hovered() {
-                        ui.painter().rect_filled(tab3_rect, 0.0, t.hover);
+                    tab_w
+                };
+                let tab_rect = Rect::from_min_size(pos2(tab_x, strip.min.y), vec2(this_tab_w, tab_bar_height));
+                let is_selected = state.card_edit_tab == tab;
+                let (icon, label) = match tab {
+                    CardEditTab::KontenSumber => ("🏷️", crate::i18n::tr(lang, "Content & Source")),
+                    CardEditTab::OpsiGrafik => ("📊", crate::i18n::tr(lang, "Chart Options")),
+                    CardEditTab::TataLetakSeksi => ("📄", crate::i18n::tr(lang, "Layout & Section")),
+                    CardEditTab::HeaderFooter => ("📑", crate::i18n::tr(lang, "Header & Footer")),
+                };
+                let resp = ui.interact(tab_rect, ui.scope_id().with(("card_tab", i)), Sense::click())
+                    .on_hover_text(label);
+                resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_selected, label));
+                if is_selected {
+                    ui.painter().rect_filled(tab_rect, 0.0, t.panel);
+                    ui.painter().line_segment([tab_rect.left_top(), tab_rect.left_bottom()], Stroke::new(1.0, t.border));
+                    ui.painter().line_segment([tab_rect.right_top(), tab_rect.right_bottom()], Stroke::new(1.0, t.border));
+                } else {
+                    if resp.hovered() {
+                        ui.painter().rect_filled(tab_rect, 0.0, t.hover);
                     }
-                    ui.painter().line_segment([tab3_rect.left_bottom(), tab3_rect.right_bottom()], Stroke::new(1.0, t.border));
+                    ui.painter().line_segment([tab_rect.left_bottom(), tab_rect.right_bottom()], Stroke::new(1.0, t.border));
                 }
                 ui.painter().text(
-                    tab3_rect.center(),
+                    tab_rect.center(),
                     Align2::CENTER_CENTER,
-                    format!("📑 {}", crate::i18n::tr(lang, "Header & Footer")),
+                    format!("{icon} {label}"),
                     FontId::proportional(DOCK_TAB_LABEL),
-                    if is_tab3 { t.text_strong } else { t.text_dim },
+                    if is_selected { t.text_strong } else { t.text_dim },
                 );
-                if tab3_resp.clicked() {
-                    state.card_edit_tab = CardEditTab::HeaderFooter;
+                if resp.clicked() {
+                    state.card_edit_tab = tab;
                 }
-            } else if state.card_edit_tab == CardEditTab::HeaderFooter {
-                state.card_edit_tab = CardEditTab::KontenSumber;
             }
 
             ui.add_space(2.0);
@@ -4025,8 +5273,17 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                                                     card.source = "Tanpa sumber".into();
                                                 }
                                                 for f in &state.content_files {
+                                                    if card.kind == CardKind::Chart {
+                                                        let clean = f.path.replace('\\', "/");
+                                                        if !clean.starts_with("csv/") && !clean.ends_with(".csv") {
+                                                            continue;
+                                                        }
+                                                    }
                                                     if ui.selectable_label(card.source == f.path, &f.path).clicked() {
                                                         card.source = f.path.clone();
+                                                        if card.kind == CardKind::Chart {
+                                                            load_chart_data_from_source(card, &f.path, &cached_content);
+                                                        }
                                                     }
                                                 }
                                             });
@@ -4231,22 +5488,26 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                                     });
                                 }
                                 CardKind::Chart => {
-                                    egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
-                                        ui.label(RichText::new(crate::i18n::tr(lang, "Chart Visualisation Settings:")).font(semibold(11.0)).color(t.text_strong));
-                                        ui.horizontal(|ui| {
-                                            ui.label(RichText::new(crate::i18n::tr(lang, "Chart Type:")).font(semibold(11.0)));
-                                            craft_ui::ComboBox::from_id_salt("chart_type_select")
-                                                .selected_text(&card.chart_type)
-                                                .width(200.0)
-                                                .show_ui(ui, |ui| {
-                                                    for ct in ["Bar", "Line", "Donut", "Area", "Pie", "Scatter"] {
-                                                        if ui.selectable_label(card.chart_type == ct, ct).clicked() {
-                                                            card.chart_type = ct.into();
-                                                        }
+                                    egui::Frame::NONE
+                                        .fill(t.panel)
+                                        .stroke(Stroke::new(1.0, t.field_border))
+                                        .corner_radius(CornerRadius::same(t.radius))
+                                        .inner_margin(Margin::same(8))
+                                        .show(ui, |ui| {
+                                            ui.horizontal(|ui| {
+                                                ui.label(RichText::new("📊").size(18.0));
+                                                ui.vertical(|ui| {
+                                                    ui.label(RichText::new(format!("{}: {}", crate::i18n::tr(lang, "Chart Archetype"), card.chart_type)).font(semibold(11.0)).color(t.text_strong));
+                                                    let row_count = card.chart_data_end_row.saturating_sub(card.chart_data_start_row).saturating_add(1);
+                                                    ui.label(RichText::new(format!("Source: {} · {} baris data", if card.source.is_empty() { "Tanpa sumber" } else { &card.source }, row_count)).font(FontId::proportional(11.0)).color(t.text_dim));
+                                                });
+                                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                                    if ui.button(RichText::new(format!("📊 {}", crate::i18n::tr(lang, "Configure Chart Options →"))).font(semibold(11.0))).clicked() {
+                                                        switch_to_chart_tab = true;
                                                     }
                                                 });
+                                            });
                                         });
-                                    });
                                 }
                                 CardKind::MapChart => {
                                     egui::Frame::NONE.fill(t.panel).stroke(Stroke::new(1.0, t.field_border)).corner_radius(CornerRadius::same(t.radius)).inner_margin(Margin::same(8)).show(ui, |ui| {
@@ -4514,6 +5775,13 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                                 }
                             }
                         }
+                        CardEditTab::OpsiGrafik => {
+                            if card.kind == CardKind::Chart {
+                                render_chart_options_form(app, ui, card, &cached_content, t, lang);
+                            } else {
+                                ui.label(RichText::new(crate::i18n::tr(lang, "This card kind does not use chart options.")).font(FontId::proportional(11.0)).color(t.text_dim));
+                            }
+                        }
                         CardEditTab::TataLetakSeksi => {
                             // Section 4: Penomoran Halaman & Seksi (Halaman Baru)
                             if card.scope_new_page {
@@ -4662,6 +5930,10 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
             });
         });
 
+    if switch_to_chart_tab {
+        state.card_edit_tab = CardEditTab::OpsiGrafik;
+    }
+
     if apply_all_tables {
         if let Some(src_card) = state.cards.get(idx).cloned() {
             for c in &mut state.cards {
@@ -4686,6 +5958,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
         state.card_delete_confirm = false;
         state.editing_card_idx = None;
         state.last_editing_card_idx = None;
+        refresh_detected_slots(state);
     } else if insert_before {
         let new_card = PublicationCard::new_with(state.new_card_kind, "Item Baru", "Draf konten", "Manual", idx + 1, true);
         state.cards.insert(idx, new_card);
@@ -4694,6 +5967,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
         }
         state.editing_card_idx = Some(idx);
         state.last_editing_card_idx = None;
+        refresh_detected_slots(state);
     } else if insert_after {
         let new_card = PublicationCard::new_with(state.new_card_kind, "Item Baru", "Draf konten", "Manual", idx + 2, true);
         state.cards.insert(idx + 1, new_card);
@@ -4702,6 +5976,7 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
         }
         state.editing_card_idx = Some(idx + 1);
         state.last_editing_card_idx = None;
+        refresh_detected_slots(state);
     } else if close {
         if let Some(card) = state.cards.get_mut(idx) {
             if card.kind == CardKind::Toc {
@@ -5135,6 +6410,26 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
                     file = img;
                     "Image"
                 } else {
+                    let chart_id = if card.chapter_id.is_empty() { format!("C{:02}_01", card.page) } else { card.chapter_id.clone() };
+                    let staged_csv =
+                        staged(&format!("csv/{}.csv", chart_id)).or_else(|| staged(&format!("{}.csv", chart_id))).or_else(|| staged(&card.source));
+
+                    if let Some(c) = staged_csv {
+                        file = c;
+                    } else if !card.chart_raw_data.trim().is_empty() {
+                        let csv_content = build_chart_sheet_csv(card);
+                        let p = stage.join(format!("csv/{chart_id}.csv"));
+                        if let Some(dir) = p.parent() {
+                            let _ = std::fs::create_dir_all(dir);
+                        }
+                        if std::fs::write(&p, csv_content).is_ok() {
+                            file = p.to_string_lossy().into_owned();
+                        } else {
+                            file = chart_id;
+                        }
+                    } else {
+                        file = chart_id;
+                    }
                     "Gambar"
                 }
             }
@@ -6053,6 +7348,198 @@ mod tests {
         assert!(card.map_show_legend);
         assert_eq!(card.tag1, "Peta Tematik");
         assert_eq!(card.tag2, "Halaman Baru");
+    }
+
+    #[test]
+    fn test_card_kind_chart_options_defaults_and_roundtrip() {
+        let mut card = PublicationCard::new_with(CardKind::Chart, "Grafik Perkembangan Nilai Tukar Petani", "Grafik Vektor", "csv/ntp.csv", 5, true);
+        assert_eq!(card.kind, CardKind::Chart);
+        assert_eq!(card.kind.icon(), "📈");
+        assert_eq!(card.chart_type, "Line Chart (Markers)");
+        assert_eq!(card.chart_category_col, "A");
+        assert_eq!(card.chart_series_1_col, "B");
+        assert_eq!(card.chart_data_start_row, 2);
+        assert_eq!(card.chart_data_end_row, 6);
+        assert_eq!(card.chart_value_format, "Number (1.234,5)");
+        assert!(card.chart_show_value_labels);
+        assert!(card.chart_show_legend);
+        assert!(!card.chart_show_grid);
+        assert!(card.chart_raw_data.contains("Tahun,Pertanian,Industri,Jasa"));
+
+        // Modify options
+        card.chart_type = "Vertical Clustered Bar".into();
+        card.chart_series_2_enabled = true;
+        card.chart_series_2_col = "C".into();
+        card.chart_series_2_label_id = "Industri Olahan".into();
+        card.chart_value_format = "Percentage (%)".into();
+        card.chart_show_grid = true;
+        card.chart_max_value_override = "100".into();
+
+        let mut state = OrchestratorWorkspaceState::default();
+        state.cards.push(card);
+
+        let meta = state.to_metadata();
+        let meta_chart = meta.cards.last().expect("chart card in metadata");
+        assert_eq!(meta_chart.settings.get("chart_type").and_then(|v| v.as_str()), Some("Vertical Clustered Bar"));
+        assert_eq!(meta_chart.settings.get("chart_series_2_enabled").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(meta_chart.settings.get("chart_series_2_col").and_then(|v| v.as_str()), Some("C"));
+        assert_eq!(meta_chart.settings.get("chart_series_2_label_id").and_then(|v| v.as_str()), Some("Industri Olahan"));
+        assert_eq!(meta_chart.settings.get("chart_value_format").and_then(|v| v.as_str()), Some("Percentage (%)"));
+        assert_eq!(meta_chart.settings.get("chart_show_grid").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(meta_chart.settings.get("chart_max_value_override").and_then(|v| v.as_str()), Some("100"));
+
+        // Roundtrip back to state via apply_ingest_report_to_state
+        let report = pubgen_core::excel::IngestReport {
+            profile_id: "bps_brs".into(),
+            metadata: meta,
+            warnings: Vec::new(),
+            csv: Vec::new(),
+            text: Vec::new(),
+            assets: Vec::new(),
+        };
+        let mut restored = OrchestratorWorkspaceState::default();
+        apply_ingest_report_to_state(&mut restored, "test.pubgen", &report, &[]);
+        let res_chart = restored.cards.last().expect("restored chart card");
+        assert_eq!(res_chart.chart_type, "Vertical Clustered Bar");
+        assert!(res_chart.chart_series_2_enabled);
+        assert_eq!(res_chart.chart_series_2_col, "C");
+        assert_eq!(res_chart.chart_series_2_label_id, "Industri Olahan");
+        assert_eq!(res_chart.chart_value_format, "Percentage (%)");
+        assert!(res_chart.chart_show_grid);
+        assert_eq!(res_chart.chart_max_value_override, "100");
+    }
+
+    #[test]
+    fn test_chart_sheet_csv_generation_and_spec_parse() {
+        let card = PublicationCard::new_with(CardKind::Chart, "Grafik Perkembangan NTP", "NTP", "Manual", 3, true);
+        let csv_text = build_chart_sheet_csv(&card);
+        let delim = super::super::csv::detect_delimiter(&csv_text);
+        let ct_key = format!("chart_type{delim}line");
+        let cat_key = format!("category_col{delim}A");
+        let s1_key = format!("series_1_col{delim}B");
+        let s1_lbl = format!("series_1_label{delim}Pertanian");
+        assert!(csv_text.contains(&ct_key), "expected {ct_key} in csv_text:\n{csv_text}");
+        assert!(csv_text.contains(&cat_key));
+        assert!(csv_text.contains(&s1_key));
+        assert!(csv_text.contains(&s1_lbl));
+        assert!(csv_text.contains("data_start_row"));
+        assert!(csv_text.contains("data_end_row"));
+
+        let grid = super::super::csv::parse_csv_content_with_delim(&csv_text, delim);
+        let sheet_data = super::super::excel::ExcelSheetData { name: "C03_01".into(), grid, merges: Vec::new() };
+
+        let spec = super::super::charts::spec::parse_chart_spec(&sheet_data).expect("chart spec should parse");
+        assert_eq!(spec.chart_type, super::super::charts::spec::ChartType::Line);
+        assert_eq!(spec.category_col, "A");
+        assert_eq!(spec.series.len(), 3);
+        assert_eq!(spec.series[0].col, "B");
+        assert_eq!(spec.series[1].col, "C");
+        assert_eq!(spec.series[2].col, "D");
+
+        let (categories, values) = super::super::charts::spec::extract_chart_data(&sheet_data, &spec).expect("extract chart data");
+        assert_eq!(categories, vec!["2021", "2022", "2023", "2024", "2025"]);
+        assert_eq!(values.len(), 3);
+        assert_eq!(values[0], vec![3.8, 4.1, 3.9, 4.3, 4.5]);
+    }
+
+    #[test]
+    fn test_auto_detect_chart_columns() {
+        let mut card = PublicationCard::new_with(CardKind::Chart, "", "", "Manual", 1, true);
+        card.chart_raw_data = "Wilayah,Jumlah,Rasio\nDesa Sukatani,100,5.2\nDesa Mekarmaya,200,6.1".into();
+        auto_detect_chart_columns(&mut card);
+        assert_eq!(card.chart_category_col, "A");
+        assert_eq!(card.chart_series_1_col, "B");
+        assert_eq!(card.chart_series_1_label_id, "Jumlah");
+        assert_eq!(card.chart_series_2_col, "C");
+        assert_eq!(card.chart_series_2_label_id, "Rasio");
+        assert!(card.chart_series_2_enabled);
+        assert!(!card.chart_series_3_enabled);
+        assert_eq!(card.chart_data_start_row, 2);
+        assert_eq!(card.chart_data_end_row, 3);
+    }
+
+    #[test]
+    fn test_chart_card_source_selection_loads_csv_and_updates_data_table() {
+        let mut state = OrchestratorWorkspaceState::default();
+        let csv_bytes = b"Tahun,Padi,Jagung,Kedelai\n2021,120,45,15\n2022,125,50,18\n2023,130,52,20\n".to_vec();
+        std::sync::Arc::make_mut(&mut state.cached_content).insert("csv/04_01_01.csv".into(), csv_bytes);
+        std::sync::Arc::make_mut(&mut state.cached_content).insert("rtf/04_narasi.rtf".into(), b"rtf content".to_vec());
+
+        state.content_files =
+            vec![ContentItem { path: "csv/04_01_01.csv".into(), size_bytes: 60 }, ContentItem { path: "rtf/04_narasi.rtf".into(), size_bytes: 11 }];
+
+        // 1. Verify filtering: for CardKind::Chart, only CSV files pass
+        let chart_card = PublicationCard::new_with(CardKind::Chart, "Grafik Panen", "Padi", "Manual", 1, true);
+        let eligible_files: Vec<_> = state
+            .content_files
+            .iter()
+            .filter(|f| {
+                if chart_card.kind == CardKind::Chart {
+                    let clean = f.path.replace('\\', "/");
+                    clean.starts_with("csv/") || clean.ends_with(".csv")
+                } else {
+                    true
+                }
+            })
+            .collect();
+        assert_eq!(eligible_files.len(), 1);
+        assert_eq!(eligible_files[0].path, "csv/04_01_01.csv");
+
+        // 2. Select the CSV source and verify load_chart_data_from_source updates chart_raw_data and columns
+        let mut card = chart_card;
+        assert_eq!(card.chart_raw_data, super::super::charts::dialog::DEFAULT_SAMPLE_CSV);
+        load_chart_data_from_source(&mut card, "csv/04_01_01.csv", &state.cached_content);
+        assert!(card.chart_raw_data.contains("Padi,Jagung,Kedelai"));
+        assert_eq!(card.chart_category_col, "A");
+        assert_eq!(card.chart_series_1_col, "B");
+        assert_eq!(card.chart_series_1_label_id, "Padi");
+        assert_eq!(card.chart_series_2_col, "C");
+        assert_eq!(card.chart_series_2_label_id, "Jagung");
+        assert!(card.chart_series_2_enabled);
+        assert_eq!(card.chart_series_3_col, "D");
+        assert_eq!(card.chart_series_3_label_id, "Kedelai");
+        assert!(card.chart_series_3_enabled);
+        assert_eq!(card.chart_data_start_row, 2);
+        assert_eq!(card.chart_data_end_row, 4);
+    }
+
+    #[test]
+    fn test_chart_card_edit_tab_opsi_grafik_isolation_and_rendering() {
+        let ctx = egui::Context::default();
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let t = Tokens::get(&ctx);
+        let mut state = OrchestratorWorkspaceState::default();
+
+        // Push a Chart card
+        let chart_card = PublicationCard::new_with(CardKind::Chart, "Grafik Panen", "Padi", "csv/panen.csv", 4, true);
+        state.cards.push(chart_card);
+        let chart_idx = state.cards.len() - 1;
+
+        // 1. Open the chart card modal on KontenSumber
+        state.editing_card_idx = Some(chart_idx);
+        state.card_edit_tab = CardEditTab::KontenSumber;
+        let mut output = ctx.run_ui(Default::default(), |ctx| {
+            render_card_edit_modal(&mut app, ctx, &mut state, &t, "en");
+        });
+        output.textures_delta.clear();
+        assert_eq!(state.card_edit_tab, CardEditTab::KontenSumber);
+
+        // 2. Switch to OpsiGrafik tab on the chart card
+        state.card_edit_tab = CardEditTab::OpsiGrafik;
+        let mut output2 = ctx.run_ui(Default::default(), |ctx| {
+            render_card_edit_modal(&mut app, ctx, &mut state, &t, "en");
+        });
+        output2.textures_delta.clear();
+        assert_eq!(state.card_edit_tab, CardEditTab::OpsiGrafik);
+
+        // 3. For a non-chart card (idx 1, Narrative), OpsiGrafik is not allowed and falls back to KontenSumber
+        state.editing_card_idx = Some(1);
+        state.card_edit_tab = CardEditTab::OpsiGrafik;
+        let mut output3 = ctx.run_ui(Default::default(), |ctx| {
+            render_card_edit_modal(&mut app, ctx, &mut state, &t, "en");
+        });
+        output3.textures_delta.clear();
+        assert_eq!(state.card_edit_tab, CardEditTab::KontenSumber, "non-chart card must fall back to KontenSumber");
     }
 
     #[test]
@@ -7034,5 +8521,64 @@ mod tests {
         assert!(table_toc.contains("2.2.1\tJumlah Pegawai Negeri Sipil"), "TOC Table must contain Table 2.2.1: {table_toc}");
         assert!(!table_toc.contains("2.1.1\t2 PEMERINTAHAN"), "TOC Table must NOT contain '2.1.1 2 PEMERINTAHAN': {table_toc}");
         assert!(!table_toc.contains("2.2.1\tsubtitle"), "TOC Table must NOT contain '2.2.1 subtitle': {table_toc}");
+    }
+
+    #[test]
+    fn test_detect_translation_rule_units_dynamic_profiles() {
+        // 1. Verify default BRS state detects canonical BRS slots plus all card units
+        let mut state = OrchestratorWorkspaceState::default();
+        assert_eq!(state.selected_profile, "bps_brs");
+        assert!(state.slots.len() >= 3, "default slots must contain at least the 3 primary slots, found: {}", state.slots.len());
+
+        let headline = state.slots.iter().find(|s| s.name == "cover_headline").expect("cover_headline slot");
+        assert_eq!(headline.budget, Some(60));
+        assert!(headline.text.contains("Perkembangan Nilai Tukar Petani"));
+
+        let ringkasan = state.slots.iter().find(|s| s.name == "ringkasan_eksekutif").expect("ringkasan_eksekutif slot");
+        assert_eq!(ringkasan.budget, Some(280));
+        assert!(ringkasan.text.contains("NTP") || ringkasan.text.contains("Nilai Tukar Petani"));
+
+        let catatan = state.slots.iter().find(|s| s.name == "catatan_kaki_tabel").expect("catatan_kaki_tabel slot");
+        assert_eq!(catatan.budget, Some(150));
+        assert!(catatan.text.contains("Sumber: Badan Pusat Statistik"));
+
+        // Must detect additional units from default cards (tables, charts, images)
+        assert!(
+            state.slots.iter().any(|s| s.name.starts_with("judul_tabel_") || s.name.starts_with("judul_grafik_")),
+            "must detect table/chart units from workspace cards, found: {:?}",
+            state.slots.iter().map(|s| &s.name).collect::<Vec<_>>()
+        );
+
+        // 2. Switch dynamically to DDA profile
+        state.selected_profile = "bps_dda".into();
+        refresh_detected_slots(&mut state);
+
+        // DDA slots must use DDA nomenclature
+        assert!(state.slots.iter().any(|s| s.name == "cover_title"), "DDA must have cover_title");
+        assert!(state.slots.iter().any(|s| s.name == "cover_title_en"), "DDA must have cover_title_en");
+        assert!(state.slots.iter().any(|s| s.name == "cover_agency"), "DDA must have cover_agency");
+        assert!(
+            state.slots.iter().any(|s| s.name.starts_with("pembatas_bab_")
+                || s.name == "daftar_isi"
+                || s.name.starts_with("judul_tabel_")
+                || s.name.starts_with("sumber_catatan_")),
+            "DDA must detect DDA-specific card slots"
+        );
+        // BRS-specific slot names should NOT be present in DDA
+        assert!(!state.slots.iter().any(|s| s.name == "cover_headline"), "DDA must not have cover_headline slot");
+        assert!(!state.slots.iter().any(|s| s.name == "ringkasan_eksekutif"), "DDA must not have ringkasan_eksekutif slot");
+        assert!(!state.slots.iter().any(|s| s.name == "catatan_kaki_tabel"), "DDA must not have catatan_kaki_tabel slot");
+
+        // 3. Switch dynamically to Corporate Annual Report profile
+        state.selected_profile = "corporate_annual".into();
+        refresh_detected_slots(&mut state);
+        assert!(state.slots.iter().any(|s| s.name == "cover_title"), "corporate profile must have cover_title");
+        assert!(state.slots.iter().any(|s| s.name == "cover_agency"), "corporate profile must have cover_agency");
+
+        // 4. Switch dynamically to Academic Monograph profile
+        state.selected_profile = "academic_monograph".into();
+        refresh_detected_slots(&mut state);
+        assert!(state.slots.iter().any(|s| s.name == "monograph_title"), "academic profile must have monograph_title");
+        assert!(state.slots.iter().any(|s| s.name == "cover_agency"), "academic profile must have cover_agency");
     }
 }

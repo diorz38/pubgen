@@ -113,7 +113,11 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
             card_settings.insert("theme".to_string(), serde_json::Value::String(thm.clone()));
         }
 
-        if kind == CardKind::Narrative {
+        if kind == CardKind::Toc {
+            let (t, s) = process_toc_sheet(name, &file_name, &kv, card_title, &mut card_settings);
+            card_title = t;
+            card_source = s;
+        } else if kind == CardKind::Narrative {
             let (t, s) = process_narrative_sheet(base_dir, name, &file_name, &rows, &kv, card_title, &mut card_settings, &mut texts);
             card_title = t;
             card_source = s;
@@ -425,6 +429,87 @@ fn process_narrative_sheet(
     (card_title, Some(rtf_path))
 }
 
+fn process_toc_sheet(
+    name: &str,
+    file_name: &str,
+    kv: &BTreeMap<String, String>,
+    card_title: String,
+    card_settings: &mut BTreeMap<String, serde_json::Value>,
+) -> (String, Option<String>) {
+    let upper = name.trim().to_ascii_uppercase();
+    let toc_style = if let Some(s) = kv.get("toc_style") {
+        let s_trim = s.trim();
+        let s_upper = s_trim.to_ascii_uppercase();
+        if s_upper.contains("TABLE") || s_upper.contains("TABEL") {
+            "TOC Table".to_string()
+        } else if s_upper.contains("CHART") || s_upper.contains("FIGURE") || s_upper.contains("GRAFIK") || s_upper.contains("GAMBAR") {
+            "TOC Chart".to_string()
+        } else if s_upper.contains("PARAGRAPH") || s_upper.contains("PARAGRAF") {
+            "TOC Paragraph".to_string()
+        } else {
+            s_trim.to_string()
+        }
+    } else if upper == "TCT" || upper.starts_with("TCT_") || upper.starts_with("TCT.") {
+        "TOC Table".to_string()
+    } else if upper == "TCF" || upper.starts_with("TCF_") || upper.starts_with("TCF.") {
+        "TOC Chart".to_string()
+    } else {
+        "TOC Paragraph".to_string()
+    };
+
+    let title = if let Some(t) = kv.get("title").or_else(|| kv.get("judul")) {
+        t.trim().to_string()
+    } else if card_title != *name
+        && !card_title.trim().is_empty()
+        && !["content_type", "toc_style", "column", "layout"].contains(&card_title.trim().to_ascii_lowercase().as_str())
+    {
+        card_title
+    } else {
+        match toc_style.as_str() {
+            "TOC Table" => "Daftar Tabel".to_string(),
+            "TOC Chart" => "Daftar Gambar".to_string(),
+            _ => "Daftar Isi".to_string(),
+        }
+    };
+
+    let title_en = if let Some(ten) = kv.get("title_en").or_else(|| kv.get("judul_en")) {
+        ten.trim().to_string()
+    } else {
+        match toc_style.as_str() {
+            "TOC Table" => "List of Tables".to_string(),
+            "TOC Chart" => "List of Figures".to_string(),
+            _ => "Table of Contents".to_string(),
+        }
+    };
+
+    card_settings.insert("toc_style".to_string(), serde_json::Value::String(toc_style.clone()));
+    card_settings.insert("title_en".to_string(), serde_json::Value::String(title_en));
+
+    if let Some(col) = kv.get("column").or_else(|| kv.get("columns")).or_else(|| kv.get("toc_columns")) {
+        card_settings.insert("toc_columns".to_string(), serde_json::Value::String(col.trim().to_string()));
+    }
+    if let Some(inc) = kv.get("include_self").or_else(|| kv.get("toc_include_self")) {
+        let lower = inc.trim().to_lowercase();
+        let b = lower == "yes" || lower == "true" || lower == "1";
+        card_settings.insert("toc_include_self".to_string(), serde_json::Value::Bool(b));
+    }
+    if let Some(layout) = kv.get("layout").or_else(|| kv.get("layout_style")).or_else(|| kv.get("toc_layout_style")) {
+        card_settings.insert("toc_layout_style".to_string(), serde_json::Value::String(layout.trim().to_string()));
+    }
+    if let Some(hi) = kv.get("hanging_indent").or_else(|| kv.get("toc_hanging_indent")) {
+        let lower = hi.trim().to_lowercase();
+        let b = lower == "yes" || lower == "true" || lower == "1";
+        card_settings.insert("toc_hanging_indent".to_string(), serde_json::Value::Bool(b));
+    }
+    if let Some(pb) = kv.get("pair_bilingual").or_else(|| kv.get("toc_pair_bilingual")) {
+        let lower = pb.trim().to_lowercase();
+        let b = lower == "yes" || lower == "true" || lower == "1";
+        card_settings.insert("toc_pair_bilingual".to_string(), serde_json::Value::Bool(b));
+    }
+
+    (title, Some(format!("csv/{file_name}.csv")))
+}
+
 fn process_image_or_divider_sheet(
     base_dir: &Path,
     name: &str,
@@ -640,6 +725,38 @@ pub fn is_dda_divider_sheet(name: &str) -> bool {
     upper == "DIV" || upper.starts_with("DIV") || upper.starts_with("PEMBATAS")
 }
 
+pub fn is_toc_sheet(name: &str, kv: &BTreeMap<String, String>) -> bool {
+    let upper = name.trim().to_ascii_uppercase();
+    if upper == "TCP"
+        || upper.starts_with("TCP_")
+        || upper.starts_with("TCP.")
+        || upper == "TCT"
+        || upper.starts_with("TCT_")
+        || upper.starts_with("TCT.")
+        || upper == "TCF"
+        || upper.starts_with("TCF_")
+        || upper.starts_with("TCF.")
+        || upper == "TOC"
+        || upper.starts_with("TOC_")
+        || upper.starts_with("TOC.")
+    {
+        return true;
+    }
+    if let Some(ct) = kv.get("content_type").or_else(|| kv.get("content")).or_else(|| kv.get("type")) {
+        let ct_upper = ct.trim().to_ascii_uppercase();
+        if ct_upper.contains("TABLE OF CONTENTS") || ct_upper == "TOC" || ct_upper.contains("DAFTAR ISI") {
+            return true;
+        }
+    }
+    if let Some(ts) = kv.get("toc_style") {
+        let ts_upper = ts.trim().to_ascii_uppercase();
+        if ts_upper.starts_with("TOC") {
+            return true;
+        }
+    }
+    false
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct TableSheetMetaCore {
     pub chapter_title: Option<String>,
@@ -817,6 +934,9 @@ fn classify_cxx_sheet(kv: &BTreeMap<String, String>) -> (CardKind, CardScope) {
 
 fn classify_sheet(name: &str, profile: &str, kv: &BTreeMap<String, String>) -> (CardKind, CardScope) {
     let upper = name.to_ascii_uppercase();
+    if is_toc_sheet(name, kv) {
+        return (CardKind::Toc, CardScope::NewPage);
+    }
     if profile == "bps_dda" {
         if is_dda_paragraph_sheet(&upper) {
             return (CardKind::Narrative, CardScope::NewPage);
@@ -1873,5 +1993,85 @@ mod tests {
             assert!(cov_card.settings.contains_key("release_date"));
             assert!(cov_card.settings.contains_key("agency"));
         }
+    }
+
+    #[test]
+    fn test_ingest_toc_sheets_tcp_tct_tcf() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let xlsx_path = dir.path().join("toc_test.xlsx");
+
+        let mut wb = rust_xlsxwriter::Workbook::new();
+
+        // 1. Sheet COVER
+        let cover_sheet = wb.add_worksheet().set_name("COVER").expect("cover sheet");
+        cover_sheet.write_string(0, 0, "title").expect("w");
+        cover_sheet.write_string(0, 1, "Kabupaten Dalam Angka").expect("w");
+
+        // 2. Sheet TCP (TOC Paragraph)
+        let tcp_sheet = wb.add_worksheet().set_name("TCP").expect("tcp sheet");
+        tcp_sheet.write_string(0, 0, "content_type").expect("w");
+        tcp_sheet.write_string(0, 1, "Table of Contents").expect("w");
+        tcp_sheet.write_string(1, 0, "toc_style").expect("w");
+        tcp_sheet.write_string(1, 1, "TOC Paragraph").expect("w");
+        tcp_sheet.write_string(2, 0, "column").expect("w");
+        tcp_sheet.write_string(2, 1, "1 column").expect("w");
+        tcp_sheet.write_string(3, 0, "include_self").expect("w");
+        tcp_sheet.write_string(3, 1, "yes").expect("w");
+
+        // 3. Sheet TCT (TOC Table)
+        let tct_sheet = wb.add_worksheet().set_name("TCT").expect("tct sheet");
+        tct_sheet.write_string(0, 0, "content_type").expect("w");
+        tct_sheet.write_string(0, 1, "Table of Contents").expect("w");
+        tct_sheet.write_string(1, 0, "toc_style").expect("w");
+        tct_sheet.write_string(1, 1, "TOC Table").expect("w");
+        tct_sheet.write_string(2, 0, "column").expect("w");
+        tct_sheet.write_string(2, 1, "2 column").expect("w");
+        tct_sheet.write_string(3, 0, "include_self").expect("w");
+        tct_sheet.write_string(3, 1, "no").expect("w");
+        tct_sheet.write_string(4, 0, "layout").expect("w");
+        tct_sheet.write_string(4, 1, "TablePage").expect("w");
+
+        // 4. Sheet TCF (TOC Chart)
+        let tcf_sheet = wb.add_worksheet().set_name("TCF").expect("tcf sheet");
+        tcf_sheet.write_string(0, 0, "content_type").expect("w");
+        tcf_sheet.write_string(0, 1, "Table of Contents").expect("w");
+        tcf_sheet.write_string(1, 0, "toc_style").expect("w");
+        tcf_sheet.write_string(1, 1, "TOC Chart").expect("w");
+        tcf_sheet.write_string(2, 0, "column").expect("w");
+        tcf_sheet.write_string(2, 1, "2 column").expect("w");
+        tcf_sheet.write_string(3, 0, "include_self").expect("w");
+        tcf_sheet.write_string(3, 1, "no").expect("w");
+        tcf_sheet.write_string(4, 0, "layout").expect("w");
+        tcf_sheet.write_string(4, 1, "TablePage").expect("w");
+
+        wb.save(&xlsx_path).expect("save xlsx");
+
+        let report = ingest_workbook(&xlsx_path).expect("ingest workbook");
+
+        let tcp_card = report.metadata.cards.iter().find(|c| c.id == "TCP").expect("TCP card");
+        assert_eq!(tcp_card.kind, CardKind::Toc);
+        assert_eq!(tcp_card.title, "Daftar Isi");
+        assert_eq!(tcp_card.settings.get("title_en").and_then(|v| v.as_str()), Some("Table of Contents"));
+        assert_eq!(tcp_card.settings.get("toc_style").and_then(|v| v.as_str()), Some("TOC Paragraph"));
+        assert_eq!(tcp_card.settings.get("toc_columns").and_then(|v| v.as_str()), Some("1 column"));
+        assert_eq!(tcp_card.settings.get("toc_include_self").and_then(|v| v.as_bool()), Some(true));
+
+        let tct_card = report.metadata.cards.iter().find(|c| c.id == "TCT").expect("TCT card");
+        assert_eq!(tct_card.kind, CardKind::Toc);
+        assert_eq!(tct_card.title, "Daftar Tabel");
+        assert_eq!(tct_card.settings.get("title_en").and_then(|v| v.as_str()), Some("List of Tables"));
+        assert_eq!(tct_card.settings.get("toc_style").and_then(|v| v.as_str()), Some("TOC Table"));
+        assert_eq!(tct_card.settings.get("toc_columns").and_then(|v| v.as_str()), Some("2 column"));
+        assert_eq!(tct_card.settings.get("toc_include_self").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(tct_card.settings.get("toc_layout_style").and_then(|v| v.as_str()), Some("TablePage"));
+
+        let tcf_card = report.metadata.cards.iter().find(|c| c.id == "TCF").expect("TCF card");
+        assert_eq!(tcf_card.kind, CardKind::Toc);
+        assert_eq!(tcf_card.title, "Daftar Gambar");
+        assert_eq!(tcf_card.settings.get("title_en").and_then(|v| v.as_str()), Some("List of Figures"));
+        assert_eq!(tcf_card.settings.get("toc_style").and_then(|v| v.as_str()), Some("TOC Chart"));
+        assert_eq!(tcf_card.settings.get("toc_columns").and_then(|v| v.as_str()), Some("2 column"));
+        assert_eq!(tcf_card.settings.get("toc_include_self").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(tcf_card.settings.get("toc_layout_style").and_then(|v| v.as_str()), Some("TablePage"));
     }
 }
