@@ -24,6 +24,10 @@
   <i>By the ArtCraft team.</i>
 </p>
 
+> [!NOTE]
+> This is the DesignCraft layout application. The publication generator built on it,
+> **Publication Generator Studio (PGS)**, is documented in [README.md](README.md).
+
 <p align="center">
   <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-4d7a0a?style=flat-square&logo=rust&logoColor=white">
   <img alt="Runs on macOS, Windows, Linux and the web" src="https://img.shields.io/badge/runs%20on-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux%20%C2%B7%20Web-7bb51c?style=flat-square">
