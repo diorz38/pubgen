@@ -1922,6 +1922,11 @@ mod tests {
 
     #[test]
     fn map_layout_matches_village_values_and_honours_max_override() {
+        // GeoJSON maps are gitignored; CI builds embed nothing → skip.
+        if super::super::stock_maps::EMBEDDED_CHART_MAPS.is_empty() {
+            eprintln!("skipping: no embedded GeoJSON maps (CI build)");
+            return;
+        }
         let mut spec = sample_spec(ChartType::Map);
         spec.geojson_path = Some("PANGKALAN".into());
         spec.max_value_override = Some(200.0);

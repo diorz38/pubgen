@@ -297,6 +297,7 @@ impl Default for ProfileTableStyling {
 // Bundled profile JSON strings
 pub static BUNDLED_BPS_DDA: &str = include_str!("../../../../../assets/pubgen/profiles/bps_dda.json");
 pub static BUNDLED_BPS_BRS: &str = include_str!("../../../../../assets/pubgen/profiles/bps_brs.json");
+pub static BUNDLED_BPS_GENERAL_REPORT: &str = include_str!("../../../../../assets/pubgen/profiles/bps_general_report.json");
 pub static BUNDLED_CORPORATE_ANNUAL: &str = include_str!("../../../../../assets/pubgen/profiles/corporate_annual.json");
 pub static BUNDLED_ACADEMIC_MONOGRAPH: &str = include_str!("../../../../../assets/pubgen/profiles/academic_monograph.json");
 
@@ -309,11 +310,12 @@ impl ProfileManager {
         Self::parse_or_fallback(BUNDLED_BPS_DDA, "bps_dda")
     }
 
-    /// Returns all 4 built-in publication profiles bundled with DesignCraft.
+    /// Returns all built-in publication profiles bundled with DesignCraft.
     pub fn builtin_profiles() -> Vec<PubgenProfile> {
         vec![
             Self::parse_or_fallback(BUNDLED_BPS_DDA, "bps_dda"),
             Self::parse_or_fallback(BUNDLED_BPS_BRS, "bps_brs"),
+            Self::parse_or_fallback(BUNDLED_BPS_GENERAL_REPORT, "bps_general_report"),
             Self::parse_or_fallback(BUNDLED_CORPORATE_ANNUAL, "corporate_annual"),
             Self::parse_or_fallback(BUNDLED_ACADEMIC_MONOGRAPH, "academic_monograph"),
         ]
@@ -365,7 +367,7 @@ mod tests {
     #[test]
     fn test_builtin_profiles_load_and_validate() {
         let profiles = ProfileManager::builtin_profiles();
-        assert_eq!(profiles.len(), 4);
+        assert_eq!(profiles.len(), 5);
 
         let dda = &profiles[0];
         assert_eq!(dda.id, "bps_dda");
@@ -381,12 +383,23 @@ mod tests {
         assert!(brs.geometry.facing_pages, "BPS/BRS print recto-verso");
         assert_eq!(brs.geometry.margins_mm.top, 18.0);
 
-        let corp = &profiles[2];
+        // The general report reuses the BRS worksheet contract but prints the DDA-style cover
+        // and a black, publication-title footer.
+        let general = &profiles[2];
+        assert_eq!(general.id, "bps_general_report");
+        assert_eq!(general.structure.header_footer_preset.as_deref(), Some("hf-bps-general"));
+        assert!(general.structure.include_inside_cover);
+        assert!(general.structure.include_back_cover);
+        assert!(!general.structure.bilingual);
+        assert!(general.table_styling.include_column_number_row);
+        assert!(!general.table_styling.include_table_footer);
+
+        let corp = &profiles[3];
         assert_eq!(corp.id, "corporate_annual");
         assert!(corp.table_styling.horizontal_rules_only);
         assert_eq!(corp.nomenclature.chapter_prefix, "Section");
 
-        let acad = &profiles[3];
+        let acad = &profiles[4];
         assert_eq!(acad.id, "academic_monograph");
         assert_eq!(acad.nomenclature.chart_prefix, "Gambar");
     }

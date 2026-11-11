@@ -33,6 +33,9 @@ pub struct ExcelCoverData {
     pub title1: String,
     pub title2: String,
     pub title_en: String,
+    /// Publication title for the running footer of profiles that print it (COVER key
+    /// `Title publication`); falls back to `title1` when the sheet has no such row.
+    pub title_publication: String,
     pub year: String,
     pub volume: String,
     pub catalogue: String,
@@ -509,6 +512,9 @@ pub fn parse_cover_sheet(sheet: &ExcelSheetData) -> ExcelCoverData {
             "style" => &mut cover.style,
             "level" => &mut cover.level,
             "titleid" | "title1" | "title" => &mut cover.title1,
+            // The publication title a profile can print in its running footer. A separate row from
+            // the cover headline lets a workbook title the sheet differently from the cover art.
+            "titlepublication" | "titlepub" | "judulpublikasi" => &mut cover.title_publication,
             "title2" => {
                 cover.title2 = value.clone();
                 if cover.title_en.is_empty() {
@@ -3914,8 +3920,9 @@ pub(crate) fn apply_excel_cover(st: &mut PubgenState, cover: &ExcelCoverData, ba
     }
     let is_brs_profile = st.active_profile().id == "bps_brs";
     let is_dda_profile = st.active_profile().id == "bps_dda";
+    let is_general_profile = st.active_profile().id == "bps_general_report";
 
-    if is_brs_profile || (!is_dda_profile && (!cover.release_no.is_empty() || !cover.points_body.is_empty())) {
+    if is_brs_profile || (!is_dda_profile && !is_general_profile && (!cover.release_no.is_empty() || !cover.points_body.is_empty())) {
         st.cover_style = 13;
         st.cover_include_inside_back = false;
         // BRS is single-language by default, but the document language stays authoritative:
@@ -3924,10 +3931,15 @@ pub(crate) fn apply_excel_cover(st: &mut PubgenState, cover: &ExcelCoverData, ba
         // (fix round 3), so the default language alone cannot change the output.
         st.bilingual_output = doc_language_is_bilingual(&st.doc_language) && !st.translations.is_empty();
         st.card2_table_footer = false;
-    } else if is_dda_profile {
+    } else if is_dda_profile || is_general_profile {
         st.cover_include_inside_back = true;
-        st.card2_table_footer = true;
-        st.bilingual_output = true;
+        st.card2_table_footer = !is_general_profile;
+        st.bilingual_output = !is_general_profile;
+    }
+    // The general report prints the DDA-style (generic template) cover; a workbook style row that
+    // resolves to the dedicated BRS cover must not reroute it.
+    if is_general_profile && st.cover_style == 13 {
+        st.cover_style = 3;
     }
     if !cover.table_theme.trim().is_empty()
         && let Some(th) = parse_table_color_theme(&cover.table_theme)
@@ -4020,7 +4032,10 @@ fn doc_language_is_bilingual(lang: &str) -> bool {
 /// profile header/footer. Shared by the Excel import pipeline and the Orchestrator
 /// workspace generator so both produce identical DesignCraft pages.
 pub fn generate_publication_pages(app: &mut DesignApp, st: &mut PubgenState) -> Result<String, String> {
-    let is_brs = st.active_profile().id == "bps_brs" || (st.active_profile().id != "bps_dda" && st.cover_style == 13);
+    let is_general = st.active_profile().id == "bps_general_report";
+    // The general report prints a DDA-style cover, so a stray cover style 13 must not reroute it
+    // into the dedicated BRS cover pipeline.
+    let is_brs = st.active_profile().id == "bps_brs" || (!is_general && st.active_profile().id != "bps_dda" && st.cover_style == 13);
     let is_dda = st.active_profile().id == "bps_dda" || st.hf_style.eq_ignore_ascii_case("hf-dda") || st.hf_style.eq_ignore_ascii_case("dda");
 
     // Ensure an active document exists. BPS profiles print A4: creating the document on the
@@ -4034,7 +4049,7 @@ pub fn generate_publication_pages(app: &mut DesignApp, st: &mut PubgenState) -> 
     let outside_pt = m.outside * 72.0 / 25.4;
 
     if app.session.active().is_none() {
-        if is_brs || is_dda {
+        if is_brs || is_dda || is_general {
             let _ = app.run(
                 "file.new",
                 json!({
@@ -4052,7 +4067,7 @@ pub fn generate_publication_pages(app: &mut DesignApp, st: &mut PubgenState) -> 
         } else {
             let _ = app.run("file.new", json!({}));
         }
-    } else if is_dda || is_brs {
+    } else if is_dda || is_brs || is_general {
         let _ = app.run(
             "layout.documentSetup",
             json!({
@@ -4073,8 +4088,8 @@ pub fn generate_publication_pages(app: &mut DesignApp, st: &mut PubgenState) -> 
     st.card1_auto_insert_tables = true;
     st.card1_range_all = true;
     st.card2_first_row_header = true;
-    st.card2_col_numbers = if is_brs { true } else { st.active_profile().table_styling.include_column_number_row };
-    st.card2_table_footer = !is_brs && st.active_profile().table_styling.include_table_footer;
+    st.card2_col_numbers = if is_brs || is_general { true } else { st.active_profile().table_styling.include_column_number_row };
+    st.card2_table_footer = if is_general { false } else { !is_brs && st.active_profile().table_styling.include_table_footer };
     // The document language is authoritative for bilingual output (plan acceptance): BRS
     // defaults to single-language ("Indonesian") when no language selects English, but a
     // bilingual document keeps the EN titles/captions the translation stage produced. A
@@ -4137,16 +4152,22 @@ pub fn generate_publication_pages(app: &mut DesignApp, st: &mut PubgenState) -> 
                 }
             }
             ensure_back_cover_at_end(app);
-            if is_brs {
-                st.hf_style = "hf-brs".into();
+            if is_brs || is_general {
+                st.hf_style = if is_brs { "hf-brs" } else { "hf-bps-general" }.into();
                 st.hf_sided = 0;
                 st.hf_scope = 0;
                 st.hf_header_single.clear();
                 st.hf_header_left.clear();
                 st.hf_header_right.clear();
-                st.hf_footer_single = "{title}\n{nopub}".into();
-                st.hf_footer_left = "{title}\n{nopub}".into();
-                st.hf_footer_right = "{title}\n{nopub}".into();
+                let footer = if is_brs { "{title}\n{nopub}" } else { "{title_publication}" };
+                st.hf_footer_single = footer.into();
+                st.hf_footer_left = footer.into();
+                st.hf_footer_right = footer.into();
+                if is_general {
+                    // Requirement: every header/footer glyph is black, not the BRS orange.
+                    st.hf_color_primary = "#000000".into();
+                    st.hf_color_text = "#000000".into();
+                }
                 super::header_footer::execute_apply_header_footer(app, st)?;
             }
             if let Some(cover_msg) = cover_res_msg {
@@ -4333,6 +4354,37 @@ pub(crate) mod flow_tests {
         apply_excel_cover(&mut st, &cover, None);
         assert_eq!(st.cover_title, "PRODUK DOMESTIK REGIONAL BRUTO");
         assert_eq!(st.cover_title2, "KABUPATEN KARAWANG");
+    }
+
+    #[test]
+    fn test_parse_cover_sheet_reads_title_publication() {
+        let sheet = ExcelSheetData {
+            name: "COV".into(),
+            grid: vec![vec!["title".into(), "Judul Sampul".into()], vec!["Title publication".into(), "Laporan Umum 2026".into()]],
+            merges: Vec::new(),
+        };
+        let cover = parse_cover_sheet(&sheet);
+        assert_eq!(cover.title1, "Judul Sampul");
+        assert_eq!(cover.title_publication, "Laporan Umum 2026");
+    }
+
+    /// The general report keeps the DDA-style template cover even for a BRS-shaped worksheet
+    /// carrying a release number; only BRS/DDA get the hard-coded cover/table overrides.
+    #[test]
+    fn test_general_report_cover_stays_dda_style_with_brs_workbook() {
+        let mut st = PubgenState::default();
+        st.apply_profile(super::super::profiles::ProfileManager::get_profile("bps_general_report"), false);
+        let cover = excel::ExcelCoverData {
+            title1: "LAPORAN UMUM".into(),
+            release_no: "61/10/32/Th. XXVIII".into(),
+            points_body: vec!["Poin utama".into()],
+            ..Default::default()
+        };
+        apply_excel_cover(&mut st, &cover, None);
+        assert_eq!(st.cover_style, 3, "general report uses the DDA-style cover");
+        assert!(st.cover_include_inside_back);
+        assert!(!st.bilingual_output);
+        assert!(!st.card2_table_footer);
     }
 
     #[test]

@@ -1578,6 +1578,12 @@ pub fn chart_dialog_ui(app: &mut DesignApp, ctx: &egui::Context, st: &mut Pubgen
 mod tests {
     #[test]
     fn test_map_chart_auto_detect_columns_and_build_spec() {
+        // GeoJSON maps are gitignored; CI builds embed nothing → skip.
+        if super::super::stock_maps::EMBEDDED_CHART_MAPS.is_empty() {
+            eprintln!("skipping: no embedded GeoJSON maps (CI build)");
+            return;
+        }
+
         let mut dlg = ChartDialog::default();
         dlg.chart_type = ChartType::Map;
         dlg.raw_data = DEFAULT_VILLAGE_SAMPLE_CSV.to_string();
@@ -1646,6 +1652,11 @@ mod tests {
 
     #[test]
     fn test_editing_chart_clears_the_whole_previous_chart() {
+        // GeoJSON maps are gitignored; CI builds embed nothing → skip.
+        if super::super::stock_maps::EMBEDDED_CHART_MAPS.is_empty() {
+            eprintln!("skipping: no embedded GeoJSON maps (CI build)");
+            return;
+        }
         let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({"width": 595.28, "height": 841.89})).unwrap();
 
@@ -1717,6 +1728,11 @@ mod tests {
 
     #[test]
     fn test_chart_dialog_apply_map_chart() {
+        // GeoJSON maps are gitignored; CI builds embed nothing → skip.
+        if super::super::stock_maps::EMBEDDED_CHART_MAPS.is_empty() {
+            eprintln!("skipping: no embedded GeoJSON maps (CI build)");
+            return;
+        }
         let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({"width": 595.28, "height": 841.89})).unwrap();
 
@@ -1737,6 +1753,11 @@ mod tests {
 
     #[test]
     fn test_map_chart_with_semicolon_delimited_csv() {
+        // GeoJSON maps are gitignored; CI builds embed nothing → skip.
+        if super::super::stock_maps::EMBEDDED_CHART_MAPS.is_empty() {
+            eprintln!("skipping: no embedded GeoJSON maps (CI build)");
+            return;
+        }
         let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({"width": 595.28, "height": 841.89})).unwrap();
 
@@ -1778,6 +1799,11 @@ mod tests {
 
     #[test]
     fn test_map_chart_new_page_manual_flow() {
+        // GeoJSON maps are gitignored; CI builds embed nothing → skip.
+        if super::super::stock_maps::EMBEDDED_CHART_MAPS.is_empty() {
+            eprintln!("skipping: no embedded GeoJSON maps (CI build)");
+            return;
+        }
         let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({"width": 595.28, "height": 841.89})).unwrap();
 
@@ -2082,6 +2108,11 @@ mod tests {
 
     #[test]
     fn test_map_chart_new_page_before_back_cover_flow() {
+        // GeoJSON maps are gitignored; CI builds embed nothing → skip.
+        if super::super::stock_maps::EMBEDDED_CHART_MAPS.is_empty() {
+            eprintln!("skipping: no embedded GeoJSON maps (CI build)");
+            return;
+        }
         let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({"pages": 4})).unwrap();
 

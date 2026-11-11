@@ -953,7 +953,11 @@ pub fn apply_ingest_report_to_state(
     state.recent_documents = vec![source_name.to_owned()];
     state.meta_title = report.metadata.title.clone();
     state.meta_subtitle = report.metadata.title_en.clone().unwrap_or_default();
-    state.selected_profile = report.profile_id.clone();
+    // The BPS General Report profile is an explicit user choice for BRS-shaped worksheets, so an
+    // import must not silently replace it with the detected BRS profile.
+    if state.selected_profile != "bps_general_report" {
+        state.selected_profile = report.profile_id.clone();
+    }
     state.page_layout_facing = matches!(report.metadata.layout, pubgen_core::PageLayout::Double);
     state.doc_language = match report.metadata.language {
         pubgen_core::Language::Id => "Indonesian",
@@ -1303,7 +1307,11 @@ pub fn apply_ingest_report_to_state(
                     }
                     if let Some(t) = pc.settings.get("title").or_else(|| pc.settings.get("title1")) {
                         if !t.is_empty() {
-                            pc.title = if state.selected_profile == "bps_dda" { t.clone() } else { format!("Sampul Rilis: {t}") };
+                            pc.title = if state.selected_profile == "bps_dda" || state.selected_profile == "bps_general_report" {
+                                t.clone()
+                            } else {
+                                format!("Sampul Rilis: {t}")
+                            };
                         }
                     }
                     if let Some(t2) = pc.settings.get("title2") {
@@ -1364,11 +1372,15 @@ pub fn apply_ingest_report_to_state(
                         if let Some(idx) = super::excel::cover_style_index(tmpl) {
                             pc.cover_style_idx = idx;
                         }
-                    } else if state.selected_profile == "bps_dda" {
+                    } else if state.selected_profile == "bps_dda" || state.selected_profile == "bps_general_report" {
                         pc.cover_template = "003_chevron_medallion.designcraft".to_string();
                         pc.cover_style_idx = 3;
                     }
-                    if state.selected_profile == "bps_dda" || pc.settings.contains_key("office_address") || pc.settings.contains_key("event_theme") {
+                    if state.selected_profile == "bps_dda"
+                        || state.selected_profile == "bps_general_report"
+                        || pc.settings.contains_key("office_address")
+                        || pc.settings.contains_key("event_theme")
+                    {
                         pc.cover_inside_back = true;
                     }
                     if let Some(th) = pc.settings.get("theme") {
@@ -1896,7 +1908,8 @@ pub fn set_workspace_glossary(ctx: &egui::Context, entries: &[pubgen_core::Gloss
 enum ProfileCardKind {
     Dda,
     Brs,
-    Generic,
+    General,
+    GeneralReport,
 }
 
 fn render_profile_card(ui: &mut Ui, t: &Tokens, kind: ProfileCardKind, title: &str, subtitle: &str, spec: &str, accent: Color32) -> bool {
@@ -1954,7 +1967,7 @@ fn render_profile_card(ui: &mut Ui, t: &Tokens, kind: ProfileCardKind, title: &s
                 Color32::from_rgb(230, 235, 245),
             );
         }
-        ProfileCardKind::Generic => {
+        ProfileCardKind::General => {
             // Single page with ruled lines
             let pw = 30.0f32;
             let ph = 42.0f32;
@@ -1964,6 +1977,18 @@ fn render_profile_card(ui: &mut Ui, t: &Tokens, kind: ProfileCardKind, title: &s
                 let ly = p.min.y + 9.0 + (i as f32 * 7.0);
                 ui.painter().line_segment([pos2(p.min.x + 4.0, ly), pos2(p.max.x - 4.0, ly)], Stroke::new(0.8, Color32::from_rgb(210, 210, 210)));
             }
+        }
+        ProfileCardKind::GeneralReport => {
+            // Cover-art page, a two-line centred chapter title and a black running footer.
+            let pw = 30.0f32;
+            let ph = 42.0f32;
+            let p = Rect::from_center_size(pos2(cx, cy), vec2(pw, ph));
+            ui.painter().rect(p, 1.0, Color32::WHITE, Stroke::new(0.8, Color32::from_rgb(180, 180, 180)), egui::StrokeKind::Inside);
+            let band = Rect::from_min_size(p.min, vec2(pw, 9.0));
+            ui.painter().rect_filled(band, 1.0, Color32::from_rgb(24, 24, 24));
+            ui.painter().text(pos2(cx, p.min.y + 18.0), Align2::CENTER_CENTER, "BAB 01", semibold(5.0), Color32::BLACK);
+            ui.painter().text(pos2(cx, p.min.y + 25.0), Align2::CENTER_CENTER, "Pendahuluan", semibold(4.0), Color32::BLACK);
+            ui.painter().line_segment([pos2(p.min.x + 4.0, p.max.y - 5.0), pos2(p.max.x - 4.0, p.max.y - 5.0)], Stroke::new(1.0, Color32::BLACK));
         }
     }
 
@@ -2190,9 +2215,26 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
 
                     // 3. General
                     let gen_sub = if lang.starts_with("id") { "Laporan Standar Umum" } else { "Generic Publication Report" };
-                    if render_profile_card(ui, t, ProfileCardKind::Generic, "General", gen_sub, "A4 (210 × 297 mm) • Single Page", t.text_dim) {
+                    if render_profile_card(ui, t, ProfileCardKind::General, "General", gen_sub, "A4 (210 × 297 mm) • Single Page", t.text_dim) {
                         state.selected_profile = "generic_report".into();
                         state.page_layout_facing = false;
+                        state.paper_size = "A4 (210 x 297 mm)".into();
+                        state.view = OrchestratorView::Studio;
+                    }
+
+                    // 4. BPS General Report
+                    let gr_sub = if lang.starts_with("id") { "Laporan Publikasi Umum BPS" } else { "BPS General Publication Report" };
+                    if render_profile_card(
+                        ui,
+                        t,
+                        ProfileCardKind::GeneralReport,
+                        "BPS General Report",
+                        gr_sub,
+                        "A4 (210 × 297 mm) • Facing Pages",
+                        t.text_strong,
+                    ) {
+                        state.selected_profile = "bps_general_report".into();
+                        state.page_layout_facing = true;
                         state.paper_size = "A4 (210 x 297 mm)".into();
                         state.view = OrchestratorView::Studio;
                     }
@@ -2757,6 +2799,8 @@ fn render_left_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         // Section 1: Pengaturan Umum Publikasi
         let profile_label = if state.selected_profile == "bps_dda" {
             crate::i18n::tr(lang, "General Settings (DDA BPS Profile)")
+        } else if state.selected_profile == "bps_general_report" {
+            crate::i18n::tr(lang, "General Settings (BPS General Report Profile)")
         } else {
             crate::i18n::tr(lang, "General Settings (BRS BPS Profile)")
         };
@@ -4305,6 +4349,7 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
             let current_label = match state.selected_profile.as_str() {
                 "bps_brs" => "BPS Berita Resmi Statistik (BRS)",
                 "bps_dda" => "BPS Daerah Dalam Angka (DDA)",
+                "bps_general_report" => "BPS General Report",
                 "corporate_annual" => "Corporate Annual Report",
                 "academic_monograph" => "Academic Monograph",
                 _ => {
@@ -4332,6 +4377,12 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
                             refresh_detected_slots(state);
                         }
                     }
+                    if ui.selectable_label(state.selected_profile == "bps_general_report", "BPS General Report").clicked() {
+                        if state.selected_profile != "bps_general_report" {
+                            state.selected_profile = "bps_general_report".into();
+                            refresh_detected_slots(state);
+                        }
+                    }
                     if ui.selectable_label(state.selected_profile == "corporate_annual", "Corporate Annual Report").clicked() {
                         if state.selected_profile != "corporate_annual" {
                             state.selected_profile = "corporate_annual".into();
@@ -4349,6 +4400,7 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
             let profile_margins = match state.selected_profile.as_str() {
                 "bps_brs" => "Margins: T:18.0 B:18.0 L:20.0 R:20.0 mm | Spreads: Ya",
                 "bps_dda" => "Margins: T:20.2 B:20.0 L:19.0 R:15.0 mm | Spreads: Ya",
+                "bps_general_report" => "Margins: T:18.0 B:18.0 L:20.0 R:20.0 mm | Spreads: Ya",
                 "corporate_annual" => "Margins: T:25.0 B:25.0 L:20.0 R:20.0 mm | Spreads: Ya",
                 "academic_monograph" => "Margins: T:22.0 B:22.0 L:25.0 R:20.0 mm | Spreads: Ya",
                 _ => "Margins: T:20.2 B:20.0 L:19.0 R:15.0 mm | Spreads: Ya",
@@ -6583,6 +6635,24 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
             } else {
                 card.settings.get("title_en").cloned().unwrap_or_default()
             },
+            // Footer source for the general-report profile: the COVER/COV "Title publication"
+            // row (stored by the ingest under `title_publication`). It falls back to the cover
+            // headline when the workbook has no dedicated row.
+            title_publication: {
+                let raw = card.settings.get("title_publication").or_else(|| card.settings.get("title publication")).cloned().unwrap_or_default();
+                if !raw.trim().is_empty() {
+                    raw
+                } else if !card.title.trim().is_empty() {
+                    card.title
+                        .strip_prefix("Sampul Rilis: ")
+                        .or_else(|| card.title.strip_prefix("Sampul Publikasi: "))
+                        .or_else(|| card.title.strip_prefix("Sampul: "))
+                        .unwrap_or(&card.title)
+                        .to_string()
+                } else {
+                    state.meta_title.clone()
+                }
+            },
             year: if !card.cover_year.trim().is_empty() { card.cover_year.clone() } else { card.settings.get("year").cloned().unwrap_or_default() },
             volume: if !card.cover_volume.trim().is_empty() {
                 card.cover_volume.clone()
@@ -6640,6 +6710,11 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         st.excel_cover = Some(cover.clone());
         super::excel::apply_excel_cover(&mut st, &cover, Some(&stage));
         sync_card_to_pubgen_state(card, state, &mut st);
+        // The cover card keeps whatever style the package shipped (usually the BRS cover); the
+        // general-report profile prints the DDA-style template cover instead.
+        if state.selected_profile == "bps_general_report" && st.cover_style == 13 {
+            st.cover_style = 3;
+        }
     }
 
     // Catalog rows: [type, number, title, file, template, title_en, file_en, theme] like the converted XLSX catalog.
@@ -6854,7 +6929,7 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         || (state.doc_language.to_lowercase().contains("indonesia") && state.doc_language.to_lowercase().contains("english"));
     if is_bilingual || state.selected_profile == "bps_dda" {
         st.bilingual_output = true;
-    } else if state.selected_profile == "bps_brs" {
+    } else if state.selected_profile == "bps_brs" || state.selected_profile == "bps_general_report" {
         st.bilingual_output = false;
     }
     // T7: seed the generation cache from the translation memory so a compile reuses
@@ -8803,6 +8878,63 @@ mod tests {
             let dir = std::path::PathBuf::from(dir);
             if std::fs::create_dir_all(&dir).is_ok() {
                 let target = dir.join("brs_workspace_output.designcraft");
+                let _ = app.run("file.saveAs", serde_json::json!({"path": target.to_string_lossy()}));
+            }
+        }
+    }
+
+    /// The BPS General Report profile reuses the BRS worksheet but prints the DDA-style cover and
+    /// a black running footer carrying the COVER/COV publication title. An explicit profile choice
+    /// must also survive the import that auto-detects the workbook as BRS.
+    #[test]
+    fn test_bps_general_report_workspace_generates_dda_cover_and_black_footer() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()).unwrap_or_default();
+        let p_path = root.join("plan").join("pubgen").join("samples").join("brs").join("Perkembangan Nilai Tukar Petani.pubgen");
+        if !p_path.is_file() {
+            return;
+        }
+        let opened = pubgen_core::container::open_pubgen(&p_path).expect("open pubgen");
+        let report = pubgen_core::excel::IngestReport {
+            profile_id: opened.metadata.profile_id.clone(),
+            metadata: opened.metadata.clone(),
+            csv: opened.content.csv.clone(),
+            text: opened.content.text.clone(),
+            assets: opened.content.assets.clone(),
+            warnings: Vec::new(),
+        };
+        let mut state = OrchestratorWorkspaceState::default();
+        state.selected_profile = "bps_general_report".into();
+        apply_ingest_report_to_state(&mut state, "Perkembangan Nilai Tukar Petani.pubgen", &report, &[]);
+        assert_eq!(state.selected_profile, "bps_general_report", "the explicit general-report choice survives import");
+
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", serde_json::json!({"facingPages": true})).expect("new doc");
+        generate_from_workspace(&mut app, &state).expect("generate general-report pages");
+
+        let active = app.session.active().expect("active document");
+        assert!(active.doc.page_count() >= 10, "general-report pages: {}", active.doc.page_count());
+
+        // Footer: the COVER publication title, printed in black, with no BRS release line.
+        let hf = active.doc.header_footer.as_ref().expect("the general-report header/footer is applied");
+        assert_eq!(hf.preset, "hf-bps-general");
+        assert_eq!(hf.colors.text_color, "#000000", "header/footer text is black");
+        assert!(!hf.footer.single.trim().is_empty(), "footer prints the publication title");
+        assert!(!hf.footer.single.contains("BRS No."), "no release line in the general-report footer");
+        let footer = hf.footer.single.to_lowercase();
+        assert!(footer.contains("nilai tukar petani"), "footer comes from the COVER title publication: {footer}");
+
+        // DDA-style cover: inside and back covers are generated as well.
+        assert!(super::super::covers::find_back_cover_page(&active.doc).is_some(), "the DDA-style back cover exists");
+
+        // Paragraph style Title is black for this profile (BRS keeps its orange accent).
+        let title_style = active.doc.styles.paragraph.iter().find(|s| s.name == "Title").expect("the Title paragraph style exists");
+        assert_eq!(title_style.chars.fill.as_deref(), Some("[Black]"), "Title paragraphs are black");
+
+        // `PUBGEN_TEST_OUTPUT=<dir>` keeps the generated document for a visual check.
+        if let Some(dir) = std::env::var_os("PUBGEN_TEST_OUTPUT") {
+            let dir = std::path::PathBuf::from(dir);
+            if std::fs::create_dir_all(&dir).is_ok() {
+                let target = dir.join("bps_general_report_output.designcraft");
                 let _ = app.run("file.saveAs", serde_json::json!({"path": target.to_string_lossy()}));
             }
         }

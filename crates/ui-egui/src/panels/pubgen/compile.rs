@@ -3025,7 +3025,7 @@ fn render_new_project_toc_tab(ui: &mut Ui, dialog: &mut NewProjectDialog, t: &To
     ui.label(RichText::new(crate::i18n::tr(lang, "Running Headers & Footers:")).strong().size(12.0).color(t.text));
     ui.horizontal(|ui| {
         ui.label(RichText::new("Preset:").size(11.0).color(t.text));
-        let presets = ["hf-dda", "book", "standard", "minimal", "hf-brs"];
+        let presets = ["hf-dda", "book", "standard", "minimal", "hf-brs", "hf-bps-general"];
         craft_ui::ComboBox::from_id_salt("new_proj_hf_preset").selected_text(&dialog.header_footer_preset).width(120.0).show_ui(ui, |ui| {
             for p in presets {
                 ui.selectable_value(&mut dialog.header_footer_preset, p.into(), p);

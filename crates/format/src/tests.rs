@@ -958,5 +958,5 @@ fn a_story_frame_that_does_not_exist_is_dropped_on_open() {
     back.check().unwrap();
     assert_eq!(back.stories[&kept_story].frames, vec![kept]);
     assert!(!back.stories.contains_key(&removed_story), "the emptied story is gone");
-    assert_eq!(all_item_ids(&back), vec![u64::from(kept.0)]);
+    assert_eq!(all_item_ids(&back), vec![kept.0]);
 }

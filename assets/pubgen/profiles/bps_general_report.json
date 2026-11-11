@@ -1,0 +1,93 @@
+{
+  "id": "bps_general_report",
+  "name": "BPS General Report",
+  "description": "Laporan publikasi BPS format umum: input XLSX seperti BRS (COV, POINT, U*, T*, C*, G*), sampul gaya DDA, footer dari judul publikasi, judul BAB dua baris rata tengah, teks hitam.",
+  "sector": "BpsOfficial",
+  "geometry": {
+    "page_size": "A4",
+    "facing_pages": true,
+    "margins_mm": {
+      "top": 18.0,
+      "bottom": 18.0,
+      "inside": 20.0,
+      "outside": 20.0
+    }
+  },
+  "structure": {
+    "has_front_matter": false,
+    "front_matter_numbering": "none",
+    "restart_body_numbering": false,
+    "require_chapter_dividers": false,
+    "include_inside_cover": true,
+    "include_back_cover": true,
+    "bilingual": false,
+    "header_footer_preset": "hf-bps-general"
+  },
+  "nomenclature": {
+    "chapter_prefix": "BAB",
+    "table_prefix": "Tabel",
+    "chart_prefix": "Grafik",
+    "toc_title": "Daftar Isi",
+    "list_tables_title": "Daftar Tabel",
+    "list_charts_title": "Daftar Grafik",
+    "source_labels": [
+      "Sumber:",
+      "Source:",
+      "Data:"
+    ],
+    "note_labels": [
+      "Catatan:",
+      "Note:",
+      "Notes:"
+    ]
+  },
+  "sheet_routing": {
+    "cover_patterns": [
+      "(?i)^cov$",
+      "(?i)^cover$",
+      "(?i)^sampul$"
+    ],
+    "divider_patterns": [
+      "(?i)^ringkasan.*",
+      "(?i)^section.*"
+    ],
+    "narrative_patterns": [
+      "(?i)^point$",
+      "(?i)^u\\d+.*",
+      "(?i)^brs.*",
+      "(?i)^utama.*",
+      "(?i)^ringkasan.*",
+      "(?i)^ulasan.*",
+      "(?i)^narrative.*"
+    ],
+    "table_patterns": [
+      "(?i)^t\\d+.*",
+      "(?i)^tabel.*",
+      "(?i)^table.*",
+      "(?i)^\\d+[_.]\\d+.*"
+    ],
+    "chart_patterns": [
+      "(?i)^c\\d+.*",
+      "(?i)^grafik.*",
+      "(?i)^chart.*"
+    ],
+    "graphic_patterns": [
+      "(?i)^g\\d+.*",
+      "(?i)^gambar.*",
+      "(?i)^image.*",
+      "(?i)^infografik.*"
+    ]
+  },
+  "table_styling": {
+    "include_column_number_row": true,
+    "include_table_footer": false,
+    "alternating_row_fills": true,
+    "horizontal_rules_only": false,
+    "default_theme_palette": "BRS6"
+  },
+  "typography": {
+    "body_font": "Lato",
+    "heading_font": "Lato",
+    "title_font": "Lato"
+  }
+}

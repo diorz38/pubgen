@@ -1036,6 +1036,7 @@ A profile is the publication's house style, declared once: which sheets are what
 |---|---|---|---|
 | **BPS Daerah Dalam Angka** (`bps_dda`) | Official KDA/KCDA yearbooks (default) | A4, facing pages, 20.2 / 20 / 19 / 15 mm | column-number row, theme palette, chapter dividers |
 | **BPS Berita Resmi Statistik** (`bps_brs`) | Press releases and periodic releases | A4, single page, 18 mm all round | no column numbers, zebra rows |
+| **BPS General Report** (`bps_general_report`) | General publication reports with a BRS-style worksheet | A4, facing pages, 18 / 18 / 20 / 20 mm, DDA-style cover; black footer from the publication title, `BAB` titles split over two centred lines | column numbers, no total row, black paragraph text |
 | **Laporan Tahunan Korporat** (`corporate_annual`) | Corporate annual and sustainability reports | A4, facing, 25 / 25 / 22 / 18 mm, `Section` / `Table` / `Figure` labels | horizontal rules only, corporate navy |
 | **Monograf Akademik & Riset** (`academic_monograph`) | Research papers, policy briefs, LKIP/LAKIP | A4, facing, 25 / 25 / 25 / 20 mm, `Gambar` for figures | APA-style three-line tables, monochrome |
 

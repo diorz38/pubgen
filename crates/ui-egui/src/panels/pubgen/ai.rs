@@ -3042,7 +3042,7 @@ mod tests {
         assert_eq!(assembled_unit(masked, &[Some(en.to_string())]).ok().as_deref(), Some(en));
         // Restoring that answer puts the original figures back, so the editor never has to fix a
         // translated statistic by hand.
-        let masked_source = translate::mask::mask(&"Pada tahun 2020, jumlah penduduk 1.234 jiwa.".to_string(), &[]);
+        let masked_source = translate::mask::mask("Pada tahun 2020, jumlah penduduk 1.234 jiwa.", &[]);
         assert_eq!(translate::mask::unmask_tolerant(en, &masked_source), "In 2020, the population was 1.234 people.");
     }
 

@@ -629,6 +629,9 @@ fn fill(d: &mut Document, toc: &Toc, width: Option<f64>) -> Result<usize> {
         }
         styles.push(e.entry_style.clone().unwrap_or_else(|| format!("TOC Level {}", f.level.max(1))));
     }
+    // Regenerating the table replaces its whole story, so text ranges that pointed into the old
+    // entries (hyperlinks, xrefs, index markers) retire with it, exactly like story.setText.
+    d.prune_story_text_ranges(toc.story);
     let st = d.story_mut(toc.story).ok_or(designcraft_doc::DocError::NoStory(toc.story))?;
     let len = st.len();
     st.replace(0..len, &text);

@@ -1060,6 +1060,14 @@ fn parse_cover(rows: &[Vec<String>], metadata: &mut PublicationMetadata, warning
                 metadata.title = value.clone();
                 metadata.extra.insert("title".into(), value);
             }
+            // The publication title a running footer can print. It stays separate from the cover
+            // headline, but doubles as the document title when the sheet has no `title` row.
+            "titlepublication" | "titlepub" | "judulpublikasi" => {
+                if metadata.title.is_empty() {
+                    metadata.title = value.clone();
+                }
+                metadata.extra.insert("title_publication".into(), value);
+            }
             "title2" => {
                 if metadata.title_en.is_none() {
                     metadata.title_en = Some(value.clone());
@@ -1779,6 +1787,33 @@ mod tests {
     fn profiles_follow_sheet_names() {
         assert_eq!(detect_profile(&["POINT".into(), "U1".into()]), "bps_brs");
         assert_eq!(detect_profile(&["1.1.1".into()]), "bps_dda");
+    }
+
+    /// The `Title publication` row of COVER/COV feeds the general-report footer; it must survive
+    /// ingest even though the cover headline has its own `Title` row.
+    #[test]
+    fn test_cover_title_publication_row_is_preserved() {
+        let empty_metadata = || PublicationMetadata {
+            profile_id: "bps_brs".into(),
+            layout: PageLayout::Single,
+            language: Language::Id,
+            title: String::new(),
+            title_en: None,
+            cards: Vec::new(),
+            extra: BTreeMap::new(),
+        };
+        let rows =
+            vec![vec!["Title".to_string(), "Cover Headline".to_string()], vec!["Title publication".to_string(), "Laporan Umum 2026".to_string()]];
+        let mut metadata = empty_metadata();
+        let mut warnings = Vec::new();
+        parse_cover(&rows, &mut metadata, &mut warnings);
+        assert_eq!(metadata.title, "Cover Headline");
+        assert_eq!(metadata.extra.get("title_publication").map(String::as_str), Some("Laporan Umum 2026"));
+
+        // With no cover headline the publication title doubles as the document title.
+        let mut metadata = empty_metadata();
+        parse_cover(&[vec!["Title publication".to_string(), "Laporan Umum 2026".to_string()]], &mut metadata, &mut warnings);
+        assert_eq!(metadata.title, "Laporan Umum 2026");
     }
 
     #[test]

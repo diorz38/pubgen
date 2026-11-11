@@ -877,7 +877,7 @@ mod tests {
     fn table_headers_go_to_the_memory_only() {
         let mut c = table_card("Kecamatan");
         write_card_english(&mut c, UnitRole::TableHeader, "Kecamatan", "Subdistrict");
-        assert!(c.settings.get("title_en").is_none(), "headers render through st.translations, not the card");
+        assert!(!c.settings.contains_key("title_en"), "headers render through st.translations, not the card");
     }
 
     #[test]
