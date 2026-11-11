@@ -111,6 +111,9 @@ Generated-in-code art is original and has no file to list: the UI icon set (`cra
 | `docs/images/thumb04.png` | DesignCraft contributors | screenshot of Table from CSV card in DesignCraft | MIT OR Apache-2.0 | Original UI screenshot |
 | `docs/images/thumb05.png` | DesignCraft contributors | screenshot of Pubgen card in DesignCraft | MIT OR Apache-2.0 | Original UI screenshot |
 | `docs/images/thumb06.png` | DesignCraft contributors | screenshot of Quick Actions card in DesignCraft | MIT OR Apache-2.0 | Original UI screenshot |
+| `docs/images/pgs-layout-mode.png` | DesignCraft contributors | screenshot of the PGS layout mode in DesignCraft | MIT OR Apache-2.0 | Original UI screenshot |
+| `docs/images/pgs-orchestrator-home.png` | DesignCraft contributors | screenshot of the PGS Orchestrator home in DesignCraft | MIT OR Apache-2.0 | Original UI screenshot |
+| `docs/images/pgs-orchestrator-workspace.png` | DesignCraft contributors | screenshot of the PGS Orchestrator workspace in DesignCraft | MIT OR Apache-2.0 | Original UI screenshot |
 
 ## Assets bundled by the PDF backend
 
@@ -323,6 +326,8 @@ backend keeps the same files; hashes and upstream licence notices are retained h
 | `assets/pubgen/profiles/corporate_annual.json` | DesignCraft contributor (authored) | PubGen profile preset: Corporate Annual Report (clean rules, corporate margins) | CC0-1.0 | Built-in publication profile |
 | `assets/app-icon/pgs_icon.png` | PubGen contributors (authored) | original PGS app icon | CC0-1.0 | PubGen asset |
 | `assets/app-icon/pgs_icon.svg` | PubGen contributors (authored) | original PGS app icon | CC0-1.0 | PubGen asset |
+| `assets/app-icon/pgs_icon.ico` | PubGen contributors (authored) | rendered from `assets/app-icon/pgs_icon.svg` | CC0-1.0 | PGS app icon (Windows) |
+| `assets/app-icon/pgs_icon_256.png` | PubGen contributors (authored) | rendered from `assets/app-icon/pgs_icon.svg` | CC0-1.0 | PGS app icon (256 px) |
 | `assets/app-icon/pgs_logo.jpg` | PubGen contributors (authored) | original PGS app logo | CC0-1.0 | PubGen asset |
 | `assets/app-icon/pubgen_file_icon.jpg` | PubGen contributors (authored) | original PubGen file icon | CC0-1.0 | PubGen asset |
 | `assets/pubgen/icons/gb.svg` | PubGen contributors (authored) | original language-flag icon (English) | CC0-1.0 | PubGen translation picker |
