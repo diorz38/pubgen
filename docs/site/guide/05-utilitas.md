@@ -1,12 +1,13 @@
 ## 6. Bagian 4: Utilitas Halaman & Tata Letak
 
-Dialog **Publication Tools ▸ Page & Layout Utilities…** menyediakan berbagai tombol pintas untuk mempercepat perapian naskah buku:
+Submenu **Publication Tools ▸ Page & Layout Utilities** berisi: **Publication Profile**, **Apply Profile Margins**, **Standard BPS Margins** (`Ctrl+Shift+M`), dan **Page Margins & Renumbering Options…** (kartu utilitas halaman). Tombol-tombol pintas di bawah ini mempercepat perapian naskah buku:
 
 
 ### Sakelar Halaman Tunggal vs Halaman Ganda (Facing Pages)
 - **Halaman Ganda (Double-sided / Facing Pages)**: Format wajib untuk buku cetak, di mana halaman kiri (*verso*) dan kanan (*recto*) berhadapan dengan margin cermin (ada ruang jilid di bagian dalam).
 - **Halaman Tunggal (Single-sided)**: Untuk dokumen digital PDF yang dibaca di layar monitor atau tablet.
 - Klik tombol sakelar untuk berganti mode kapan saja secara aman tanpa merusak posisi teks.
+- Di mode Orchestrator, pilihan yang sama ada di dock **Sources & Content ▸ General Settings ▸ Page Layout** (*Double Page (Facing)* / *Single Page (Non-Facing)*).
 
 ---
 
@@ -17,7 +18,7 @@ Dalam aturan tata letak buku formal, setiap bab baru sebaiknya selalu dimulai di
 ---
 
 ### Daftar Isi Otomatis (Add TOC / Rebuild TOC)
-Pubgen dapat memindai seluruh judul halaman di dokumen Anda dan menyusun Daftar Isi lengkap dengan titik-titik penuntun (*leader dots*) secara otomatis.
+PGS dapat memindai seluruh judul halaman di dokumen Anda dan menyusun Daftar Isi lengkap dengan titik-titik penuntun (*leader dots*) secara otomatis.
 
 #### Jenis Daftar Isi (TOC style)
 | Jenis | Isinya | Judul otomatis |
@@ -29,7 +30,7 @@ Pubgen dapat memindai seluruh judul halaman di dokumen Anda dan menyusun Daftar 
 
 Memilih **TOC Table** atau **TOC Chart** akan mengisi kolom Judul secara otomatis dan menengahkan baris judulnya;
 Anda tetap bisa mengubahnya. Penyaring ini tersimpan di dalam dokumen, sehingga **Rebuild TOC** dan menu
-*Layout ▸ Update Table of Contents* tetap mempertahankannya.
+*Layout ▸ Update Table of Contents* (mode DesignCraft) tetap mempertahankannya.
 
 **TOC Paragraph** adalah daftar bertingkat khas sebuah publikasi: halaman naratif (prakata dari lembar `GXX` dan
 ulasan bab dari lembar `RXX`) di tingkat pertama, lalu paragraf `Heading 1` dan `Heading 2` dari isi setiap bab di
@@ -67,7 +68,7 @@ Satu dokumen boleh memuat beberapa daftar sekaligus — misalnya *Daftar Table* 
      - **Header Berulang Otomatis**: Jika Daftar Isi memanjang lebih dari satu halaman, tulisan `Tabel` dan `Halaman` akan otomatis diulang di bagian paling atas halaman berikutnya!
 
 #### Memperbarui Daftar Isi (Rebuild TOC)
-Jika di kemudian hari Anda menambah, menghapus, atau menukar posisi halaman, klik **Rebuild TOC**. Pubgen
+Jika di kemudian hari Anda menambah, menghapus, atau menukar posisi halaman, klik **Rebuild TOC**. PGS
 memperbarui daftar **di halaman yang sedang dibuka** memakai jenis, judul, dan tata letak daftar itu sendiri,
 sehingga daftar lain di dokumen tidak tersentuh. Saat penomoran halaman diubah (Renumber), seluruh daftar di
 dokumen ikut diperbarui agar nomor halamannya tetap benar.
@@ -79,7 +80,7 @@ Untuk memasukkan naskah teks panjang seperti *Kata Pengantar*, *Undang-Undang St
 1. Simpan naskah Word Anda ke dalam format Rich Text Format (`.rtf`).
 2. Klik **Browse...** lalu pilih berkas `.rtf` tersebut.
 3. Klik **Insert RTF Story**.
-4. Pubgen akan mengalirkan teks secara otomatis mengikuti batas margin halaman. Jika teks terlalu panjang, Pubgen **secara otomatis membuatkan halaman-halaman baru dan menyambungkan kotak teksnya** hingga seluruh naskah selesai tertampung. Huruf tebal, miring, ukuran font, dan poin balet tetap terjaga rapi.
+4. PGS akan mengalirkan teks secara otomatis mengikuti batas margin halaman. Jika teks terlalu panjang, PGS **secara otomatis membuatkan halaman-halaman baru dan menyambungkan kotak teksnya** hingga seluruh naskah selesai tertampung. Huruf tebal, miring, ukuran font, dan poin balet tetap terjaga rapi.
 
 ---
 
@@ -97,7 +98,7 @@ Buku resmi umumnya terbagi menjadi dua bagian penomoran:
 
 #### Cara Penggunaan:
 1. Buka halaman Kata Pengantar atau Daftar Isi Anda.
-2. Di menu **Page Renumbering**, pilih **Style: Roman (i, ii, iii...)**, Start #: `1`. Klik **Restart page #**.
+2. Di dialog **Page Margins & Renumbering Options…**, pilih **Style: Roman (i, ii, iii...)**, Start #: `1`. Klik **Restart page #**.
 3. Buka Halaman 1 dari Bab pertama Anda.
 4. Pilih **Style: Arabic (1, 2, 3...)**, Start #: `1`. Klik **Restart page #**.
 5. Klik **Rebuild TOC**: Seluruh angka halaman di Daftar Isi otomatis diperbarui mengikuti skema penomoran Romawi untuk halaman awal dan Arab untuk halaman isi!

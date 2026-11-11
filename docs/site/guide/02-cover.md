@@ -1,20 +1,20 @@
 ## 3. Bagian 1: Publication Cover (Pembuat Halaman Sampul Otomatis)
 
-Menu **Publication Cover** memungkinkan Anda membuat halaman sampul depan buku/laporan berstandar eksekutif dengan satu kali klik. Buka dari **Publication ▸ Publication Cover**, atau gunakan kolom yang sama di alur Master Excel dan compiler (§7, §10).
+Menu **Publication Cover** memungkinkan Anda membuat halaman sampul depan buku/laporan berstandar eksekutif dengan satu kali klik. Buka dari **Publication ▸ Publication Cover**, **Automation & Content ▸ Automation ▸ Publication Cover**, atau gunakan kolom yang sama di alur Master Excel dan compiler (§7, §10).
 
 Selain sampul depan, **Add Inside cover and Back Cover** menyisipkan sampul dalam abu-abu di halaman 2 dan sampul belakang di akhir. **Map Overlay** menempatkan peta administrasi dekoratif di belakang teks dan logo sampul, dari peta bawaan maupun berkas `.geojson` Anda sendiri.
 
-![Fiture Pubgen:Publication Cover](../../images/thumb02.png)
+Di mode Orchestrator, sampul adalah kartu **Sampul** pertama pada daftar konten di Studio. Nilainya diisi dari sheet `COV`/`COVER` saat buku kerja diimpor lewat **Import Manifest (XLSX)**, lalu **Generate Publication** atau **Generate & Publish PDF** merender sampul itu bersama halaman lain. Dialog di bawah ini tetap dipakai untuk membuat atau mengganti sampul secara manual, baik dari mode DesignCraft maupun lewat menu Publication.
 
 ### Ikhtisar & Posisi Halaman
-- **Selalu Menjadi Halaman Depan**: Saat tombol **Generate Cover Page** diklik, Pubgen secara otomatis menyisipkan halaman baru persis sebelum Halaman 1 dan mengarahkan tampilan kanvas ke sampul tersebut. Halaman isi yang sudah ada sebelumnya tidak akan rusak atau bergeser keliru.
+- **Selalu Menjadi Halaman Depan**: Saat tombol **Generate Cover Page** diklik, PGS secara otomatis menyisipkan halaman baru persis sebelum Halaman 1 dan mengarahkan tampilan kanvas ke sampul tersebut. Halaman isi yang sudah ada sebelumnya tidak akan rusak atau bergeser keliru.
 - **Skala Otomatis yang Presisi**: Baik dokumen Anda berukuran **A4**, **A5**, maupun **B5**, seluruh elemen vektor, bentuk poligon, jarak bingkai, dan ukuran huruf akan disesuaikan secara proporsional.
 
 ---
 
 ### 13 Gaya Sampul Eksekutif
 
-Pubgen menyediakan 13 pilihan desain sampul siap pakai:
+PGS menyediakan 13 pilihan desain sampul siap pakai:
 
 #### 1. Wave Curves (`🌊 Wave`)
 - **Karakter Visual**: Mengalir dinamis, modern, dan luwes.
@@ -168,7 +168,7 @@ Pubgen menyediakan 13 pilihan desain sampul siap pakai:
 
 ### Pembuatan Sampul AI Base (Online / Gaya ≥ 100)
 
-Pubgen menghadirkan **Sampul AI Base**, yang memadukan latar belakang seni generatif kecerdasan buatan (*text-to-image AI*) dengan tipografi vektor tajam, pelat identitas instansi, dan tata letak geometris presisi milik DesignCraft.
+PGS menghadirkan **Sampul AI Base**, yang memadukan latar belakang seni generatif kecerdasan buatan (*text-to-image AI*) dengan tipografi vektor tajam, pelat identitas instansi, dan tata letak geometris presisi milik DesignCraft.
 
 ```
 +-------------------------------------------------------------------+
@@ -213,15 +213,15 @@ Sampul AI Base ditenagai oleh **Cloudflare Workers AI** menggunakan model Stable
 1. Klik tombol **AI Setup…** di dialog Cover (atau di samping tombol Translate).
 2. Masukkan **Cloudflare Account ID** dan **Cloudflare API Token** Anda.
 3. **Cakupan Token (Scope)**: Buat token di dasbor Cloudflare dengan hak akses khusus `Workers AI: Edit` saja. Jangan gunakan hak akses administrator menyeluruh.
-4. Klik **Verify**: Pubgen melakukan uji coba kecil (1 langkah) untuk memverifikasi kredensial tanpa memboroskan kuota. Token disimpan secara lokal di preferensi pengguna Anda, tidak pernah disisipkan ke dalam dokumen, dan tidak pernah diunggah ke repositori.
+4. Klik **Verify**: PGS melakukan uji coba kecil (1 langkah) untuk memverifikasi kredensial tanpa memboroskan kuota. Token disimpan secara lokal di preferensi pengguna Anda, tidak pernah disisipkan ke dalam dokumen, dan tidak pernah diunggah ke repositori.
 5. **Catatan Privasi**: Hanya templat deskripsi gaya seni abstrak yang dikirim ke Cloudflare. Judul publikasi, nama instansi, dan data rahasia daerah tetap berada 100% di komputer lokal Anda dan ditata sebagai bingkai teks vektor asli.
 
 #### Ekonomi Kuota & Pengecekan Awal (*Pre-Flight*)
 - **Konsumsi Neuron**: Setiap sampul SDXL 18 langkah mengonsumsi sekitar **~220 Neuron**. Cloudflare memberikan alokasi gratis sebesar **10.000 Neuron per hari** (diperbarui setiap pukul 00:00 UTC).
 - **Kapasitas Batch Aman**: Kuota harian gratis ini mencukupi pembuatan hingga sekitar **~45 sampul publikasi per hari**.
-- **Peringatan Pre-Flight**: Ketika Anda memulai pembuatan batch lebih dari 45 sampul dari buku kerja Excel, Pubgen akan menampilkan konfirmasi: *"45 of N fit today's free quota; the rest will fail after ~45 — continue?"*.
-- **Seed Judul Deterministik**: Pubgen menghasilkan *seed* acak 32-bit yang stabil dari *hash* judul publikasi (`hash(title)`). Publikasi dalam seri yang sama menghasilkan latar belakang seni yang konsisten dan serasi saat dibuat ulang.
-- **Stop-on-429 & Pelaporan**: Jika kuota harian habis di tengah jalan (HTTP 429), Pubgen berhenti secara rapi tanpa *crash*, mempertahankan semua sampul yang telah selesai dibuat, dan melaporkan daftar publikasi yang belum memiliki sampul.
+- **Peringatan Pre-Flight**: Ketika Anda memulai pembuatan batch lebih dari 45 sampul dari buku kerja Excel, PGS akan menampilkan konfirmasi: *"45 of N fit today's free quota; the rest will fail after ~45 — continue?"*.
+- **Seed Judul Deterministik**: PGS menghasilkan *seed* acak 32-bit yang stabil dari *hash* judul publikasi (`hash(title)`). Publikasi dalam seri yang sama menghasilkan latar belakang seni yang konsisten dan serasi saat dibuat ulang.
+- **Stop-on-429 & Pelaporan**: Jika kuota harian habis di tengah jalan (HTTP 429), PGS berhenti secara rapi tanpa *crash*, mempertahankan semua sampul yang telah selesai dibuat, dan melaporkan daftar publikasi yang belum memiliki sampul.
 - **Otomatisasi Lanjutan (Skip Existing)**: Menjalankan ulang proses batch akan secara otomatis mengenali halaman sampul yang telah ada (melalui label `#ai_preset:` pada bingkai latar belakang) dan hanya memproses publikasi yang belum selesai.
 
 #### Integrasi Excel (Lembar `COVER` / `COVERS`)
@@ -247,18 +247,18 @@ Anda dapat memilih tema baku atau memasukkan kode warna heksadesimal sendiri:
 
 ### Metadata & Isian Informasi Publikasi
 Lengkapi data publikasi Anda:
-- **Title**: Judul sampul (contoh: `KARAWANG TIMUR`). Diketik pada kotak multi-baris dan diletakkan ke halaman apa adanya. Pubgen akan memformat teks ini dengan font **Arial Black**.
+- **Title**: Judul sampul (contoh: `KARAWANG TIMUR`). Diketik pada kotak multi-baris dan diletakkan ke halaman apa adanya. PGS akan memformat teks ini dengan font **Arial Black**.
 - **Title 2**: Baris judul kedua (contoh: `DALAM ANGKA`). Berada pada bingkai milik desain sampul, di bawah judul utama dengan gaya tersendiri — lebih kecil dan berwarna lain. Isian ini diawali teks dummy `Title 2`.
 - **Year**: Masukkan tahun publikasi (contoh: `2026`). Ditampilkan menonjol dengan font tebal **Arial Black**.
 - **Volume**: Masukkan nomor edisi/volume (contoh: `Volume 23 2026`).
-- **Catalog BPS**: Masukkan nomor katalog resmi (contoh: `1102001.3215113`). Pubgen otomatis menambahkan awalan `Katalog BPS:` jika Anda belum mengetikkannya.
+- **Catalog BPS**: Masukkan nomor katalog resmi (contoh: `1102001.3215113`). PGS otomatis menambahkan awalan `Katalog BPS:` jika Anda belum mengetikkannya.
 - **Kode Terbitan**: Pilih **ISSN** atau **ISBN** lalu ketikkan nomor serinya (contoh: `2828-7436`).
 - **Teks Instansi**: Masukkan nama institusi (contoh: `BADAN PUSAT STATISTIK\nKABUPATEN KARAWANG`). Diformat rapi menggunakan **Arial Bold Italic**. Gunakan `\n` untuk memisahkan baris nama instansi dan nama daerah.
 
 ---
 
 ### Pemilih Gambar Kustom & Logo
-Pubgen secara otomatis menampilkan kotak pemilih gambar yang relevan dengan gaya yang sedang aktif:
+PGS secara otomatis menampilkan kotak pemilih gambar yang relevan dengan gaya yang sedang aktif:
 - **Skyline Image**: Untuk sampul bergaya *Wave Curves* dan *Chevron & Medallion*.
 - **Landscape Image**: Untuk sampul bergaya *Folded Origami* dan *Geometric Medallion*.
 - **Honeycomb Image**: Untuk sampul bergaya *Honeycomb Hexagon*. Foto Anda akan otomatis dipotong rapi mengikuti bentuk segi enam bersarang (*tri-hexagon*).

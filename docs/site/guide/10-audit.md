@@ -1,6 +1,6 @@
 ## 11. Audit Publication (Preflight QA)
 
-**Publication ▸ Audit Publication** (`Ctrl+Shift+Alt+A`), atau tombol **Audit Publication** di header panel, menjalankan daftar periksa publikasi sebelum dikirim ke percetakan atau dipublikasikan daring.
+**Publication ▸ Audit Publication** (`Ctrl+Shift+Alt+A`), atau tombol **Audit Publication** di panel PubGen (mode DesignCraft), menjalankan daftar periksa publikasi sebelum dikirim ke percetakan atau dipublikasikan daring. Di Studio Orchestrator, tombol **Run QA Audit** hanya menjalankan pemeriksaan ringkas pada alur kartu dan menandai status QA — audit lengkap tetap lewat menu **Audit Publication**.
 
 | Aturan | Yang diperiksa | Tingkat |
 |---|---|---|

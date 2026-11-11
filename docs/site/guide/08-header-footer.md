@@ -1,6 +1,6 @@
 ## 9. Header & Footer Setup
 
-**Publication ▸ Header & Footer Setup** membuka dialog templat. Header dan footer adalah objek dokumen, jadi milik halaman, bukan kotak teks.
+**Publication ▸ Header & Footer Setup** — atau **Automation & Content ▸ Automation** — membuka dialog templat. Header dan footer adalah objek dokumen, jadi milik halaman, bukan kotak teks.
 
 - **Style** — bawaan **Modern Minimal**, **Editorial Book**, dan **Corporate Report**, ditambah templat yang Anda simpan sendiri (bertanda **★**). Arahkan kursor ke baris atau tombol mata untuk pratinjau.
 - **Sided** — dua sisi (kiri/kanan bercermin) atau satu sisi.
@@ -12,6 +12,6 @@
 - **Save As New Template…** menyimpan pengaturan saat ini sebagai templat baru; tombol hapus menghapus templat kustom.
 - **Apply Header & Footer** menerapkannya ke dokumen; **Remove from Document** menghapusnya.
 
-Publication Compiler dapat menerapkan preset untuk Anda: `"headerFooter": { "preset": "book", "scope": "body" }` (§10).
+Publication Compiler dapat menerapkan preset untuk Anda: `"headerFooter": { "preset": "book", "scope": "body" }` (§10). Manifest `pubgen_project.json` adalah kontrak compiler/CLI; proyek sehari-hari di Orchestrator disimpan sebagai paket `.pubgen`.
 
 
