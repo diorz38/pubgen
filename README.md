@@ -15,7 +15,7 @@
 <h1 align="center">DesignCraft</h1>
 
 <p align="center">
-  <b>Page layout and publishing; an open-source, modern desktop publishing and page layout studio, built in pure Rust.</b>
+  <b>An open-source, modern desktop publishing and page layout studio, built in pure Rust.</b>
 </p>
 
 <p align="center">
