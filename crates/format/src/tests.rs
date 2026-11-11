@@ -950,8 +950,7 @@ fn a_story_frame_that_does_not_exist_is_dropped_on_open() {
     let mut d = Document::new(&NewDocument::default());
     let lid = d.default_layer();
     let (kept, kept_story) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(10.0, 10.0, 200.0, 200.0), lid, "kept", ParaFormat::default()).unwrap();
-    let (removed, removed_story) =
-        d.add_text_frame(SpreadRef::Doc(0), Rect::new(10.0, 210.0, 200.0, 400.0), lid, "", ParaFormat::default()).unwrap();
+    let (removed, removed_story) = d.add_text_frame(SpreadRef::Doc(0), Rect::new(10.0, 210.0, 200.0, 400.0), lid, "", ParaFormat::default()).unwrap();
     let sp = Arc::make_mut(&mut d.spreads[0]);
     sp.items.retain(|it| it.id != removed);
     assert_eq!(d.stories[&removed_story].frames, vec![removed]);
@@ -961,4 +960,3 @@ fn a_story_frame_that_does_not_exist_is_dropped_on_open() {
     assert!(!back.stories.contains_key(&removed_story), "the emptied story is gone");
     assert_eq!(all_item_ids(&back), vec![u64::from(kept.0)]);
 }
-

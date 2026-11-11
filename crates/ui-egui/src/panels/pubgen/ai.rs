@@ -2360,6 +2360,20 @@ pub fn translate_note_item(
         official.to_string()
     } else if let Some(ai_tr) = map.get(content_trimmed) {
         ai_tr.clone()
+    } else if let Some(stripped) = content_trimmed.strip_prefix("N/A : ").or_else(|| content_trimmed.strip_prefix("N/A: ")) {
+        let rest = stripped.trim();
+        let rest_en = glossary.lookup(rest).map(|s| s.to_string()).or_else(|| map.get(rest).cloned()).unwrap_or_else(|| rest.to_string());
+        format!("N/A : {rest_en}")
+    } else if let Some(stripped) = content_trimmed.strip_prefix("Badan Pusat Statistik, ") {
+        let bps_en = glossary.lookup("Badan Pusat Statistik").unwrap_or("BPS-Statistics Indonesia");
+        let rest = stripped.trim();
+        let rest_en = glossary.lookup(rest).map(|s| s.to_string()).or_else(|| map.get(rest).cloned()).unwrap_or_else(|| rest.to_string());
+        format!("{bps_en}, {rest_en}")
+    } else if let Some(stripped) = content_trimmed.strip_prefix("BPS, ") {
+        let bps_en = glossary.lookup("Badan Pusat Statistik").unwrap_or("BPS-Statistics Indonesia");
+        let rest = stripped.trim();
+        let rest_en = glossary.lookup(rest).map(|s| s.to_string()).or_else(|| map.get(rest).cloned()).unwrap_or_else(|| rest.to_string());
+        format!("{bps_en}, {rest_en}")
     } else if content_trimmed.contains('/') {
         let parts: Vec<String> = content_trimmed
             .split('/')
