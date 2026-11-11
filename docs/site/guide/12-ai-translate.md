@@ -1,12 +1,12 @@
 ## 13. Terjemahan AI & Memori Terminologi
 
-Pubgen menerjemahkan publikasi berbahasa Indonesia ke bahasa Inggris dengan model chat yang kompatibel dengan OpenAI pilihan Anda, dan menyimpan setiap keputusan di dalam paket proyek. Terjemahan disiapkan **sebelum** kompilasi: tahap **Translate Worksheet** di Orchestrator mengisi teks Inggris dan Anda mengulasnya. Halaman yang dihasilkan dari lembar kerja Orchestrator (**Generate Publication**) lalu merender teks Inggris itu — judul, keterangan, catatan, sel tabel yang berpasangan, dan badan narasi Inggris. Jalur kompilasi manifest/`pgs-cli compile` tidak membaca memori terjemahan (lihat batasan). Tindakan per halaman di dalam dokumen tetap tersedia untuk membetulkan satu halaman secara manual.
+PGS menerjemahkan publikasi berbahasa Indonesia ke bahasa Inggris dengan model chat yang kompatibel dengan OpenAI pilihan Anda, dan menyimpan setiap keputusan di dalam paket proyek. Terjemahan disiapkan **sebelum** kompilasi: tahap **Translate Worksheet** di Orchestrator (§2) mengisi teks Inggris dan Anda mengulasnya. Halaman yang dihasilkan dari lembar kerja Orchestrator (**Generate Publication**) lalu merender teks Inggris itu — judul, keterangan, catatan, sel tabel yang berpasangan, dan badan narasi Inggris. Jalur kompilasi manifest/`pgs-cli compile` tidak membaca memori terjemahan (lihat batasan). Tindakan per halaman di dalam dokumen tetap tersedia untuk membetulkan satu halaman secara manual.
 
 Semua di bawah ini memerlukan build daring (`--features pubgen,ai-translate-online`; aplikasi Studio mengaktifkannya) dan penyedia yang sudah dikonfigurasi. Model NLLB luring tidak dapat berjalan di build ini — baris **Offline on this computer** di dialog penyiapan menyatakannya.
 
 ### Penyiapan
 
-Buka **Publication Tools ▸ AI Translate ▸ Setup…**, atau tekan **AI Translator** di header panel Pubgen. Dialog **Translate with AI — setup** punya dua tab, **Setup** dan **Terminology**. Pilih salah satu dari empat baris, isi kolomnya, lalu tekan **Use AI**: satu permintaan kecil yang benar-benar berjalan membuktikan endpoint dan id model, setelah itu pengaturan disimpan dan penyedia tersebut siap dipakai.
+Buka **Publication Tools ▸ AI Translate ▸ Setup…**, atau tekan **AI Translator** di header panel PubGen (mode DesignCraft). Dialog **Translate with AI — setup** punya dua tab, **Setup** dan **Terminology**. Pilih salah satu dari empat baris, isi kolomnya, lalu tekan **Use AI**: satu permintaan kecil yang benar-benar berjalan membuktikan endpoint dan id model, setelah itu pengaturan disimpan dan penyedia tersebut siap dipakai.
 
 - **Online — Groq (free account)** — kunci gratis dari [console.groq.com/keys](https://console.groq.com/keys). **Refresh models** mengisi daftar dari akun Anda (endpoint speech-to-text, text-to-speech, embedding, dan safety disembunyikan); bawaannya `llama-3.3-70b-versatile`. Teks katalog dikirim ke cloud Groq, dan batas paket gratis membuat pekerjaan besar berjalan lebih lama, bukan gagal — 16 unit per permintaan, hingga tiga percobaan ulang setelah `429`.
 - **Custom API (OpenAI-compatible)** — endpoint chat apa pun: base URL (skema `http://` atau `https://` wajib dan tidak pernah ditebak), kunci opsional, dan model. **Refresh models** membaca `/models` endpoint tersebut.
@@ -84,7 +84,7 @@ Setiap unit yang diterima disimpan di `translation_memory.json` di dalam paket `
 
 Tindakan di dalam dokumen tetap ada untuk satu halaman. Mode Dual Lang harus aktif (**Publication Tools ▸ Dual Language Mode**, `Ctrl+Shift+L`) dan penyedia sudah dikonfigurasi. Lalu:
 
-- **Translate this Page** di panel Pubgen berubah menjadi **Translate Table on this Page** pada halaman tabel dan **Translate Review on this Page** pada halaman ulasan `RXX`; **Publication Tools ▸ AI Translate** menawarkan tindakan yang sama plus **Translate Table Pages…** untuk rentang halaman (dialog **Translate Table Pages (Batch)**).
+- **Translate this Page** di panel PubGen berubah menjadi **Translate Table on this Page** pada halaman tabel dan **Translate Review on this Page** pada halaman ulasan `RXX`; **Publication Tools ▸ AI Translate** menawarkan tindakan yang sama plus **Translate Table Pages…** untuk rentang halaman (dialog **Translate Table Pages (Batch)**).
 - Halaman ulasan mendapat judul bab dan badan kanannya diganti bahasa Inggris, gaya paragraf dipertahankan. Halaman tabel mendapat judul, sel header, dan kotak sumber/catatan diterjemahkan di tempat, bahasa Inggris di baris baru dengan huruf miring.
 - Bilah progres dan **Cancel** ada di baris status header panel; hasilnya di-cache, jadi proses kedua atas baris yang sama berjalan seketika.
 
@@ -124,4 +124,4 @@ pgs-cli translate <PROJECT.pubgen> --provider <groq|custom|local> --model <MODEL
 - **TLS hanya memercayai root publik.** Klien HTTP adalah ureq 2 dengan root store Mozilla yang dikompilasi ke dalamnya (webpki-roots); klien tidak membaca certificate store sistem operasi. Endpoint di balik CA privat — gateway internal atau proxy korporat — gagal dengan kesalahan sertifikat. Gunakan Local AI melalui `http://localhost` biasa, atau sertifikat dari CA yang dipercaya publik.
 - **Model luring tidak ada di build ini**, apa pun yang dilaporkan panel perangkat keras.
 
-> **Tidak ada di produk:** peringkas narasi *Draft Review* yang lama sudah dihapus pada Oktober 2026. Pubgen tidak menyusun prosa bab dari angka tabel saat ini; pekerjaan AI-nya adalah terjemahan dan terminologi. Bila perlu paragraf ulasan, tulis sendiri lalu tempatkan sebagai RTF.
+> **Tidak ada di produk:** peringkas narasi *Draft Review* yang lama sudah dihapus pada Oktober 2026. PGS tidak menyusun prosa bab dari angka tabel saat ini; pekerjaan AI-nya adalah terjemahan dan terminologi. Bila perlu paragraf ulasan, tulis sendiri lalu tempatkan sebagai RTF.

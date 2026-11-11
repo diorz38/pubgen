@@ -1,11 +1,11 @@
 ## 7. Master Excel: Satu Buku Kerja Menjadi Halaman Jadi
 
-Kartu **1. Data Source & Generate (Master Excel)** di bagian atas panel PubGen mengubah satu berkas `.xlsx` menjadi satu bab utuh — halaman, tabel, grafik, dan sampul — dalam satu tindakan.
+Di mode Orchestrator, buku kerja diimpor lewat **Import Manifest (XLSX)** — dari beranda, menu **Publication**, atau **Automation & Content ▸ Batch Generation** — dan hasilnya menjadi **kartu halaman** di Studio. Kartu **1. Data Source & Generate (Master Excel)** di panel PubGen (mode DesignCraft) menawarkan alur yang sama untuk kerja manual:
 
 | Kontrol | Fungsinya |
 |---|---|
 | **Auto-generate pages, tables & cover from sheets** | Aktif secara bawaan. Saat berkas dipilih, seluruh alur berjalan: "Page from CSV", tabel setiap sheet dengan opsi bawaannya, setiap halaman grafik, dan sampul dari sheet `COVER`. Matikan untuk hanya mengonversi buku kerja menjadi CSV. |
-| **Excel to CSV Data (.xlsx)…** | Pilih buku kerja. Pubgen menulis satu CSV katalog plus satu CSV tabel per sheet data, lalu (dengan auto-generate aktif) membuat halamannya. |
+| **Excel to CSV Data (.xlsx)…** | Pilih buku kerja. PGS menulis satu CSV katalog plus satu CSV tabel per sheet data, lalu (dengan auto-generate aktif) membuat halamannya. |
 | **Active: …** | Menampilkan nama buku kerja atau katalog yang dimuat beserta jumlah record katalog. |
 | **Download … / Download Generated CSVs as ZIP…** | Menyimpan semua CSV katalog dan tabel yang dihasilkan dalam satu `.zip`. |
 | Baris status | Melaporkan hasil generate atau kesalahan pertama, plus jumlah kosakata yang dijelaskan di §13. |
@@ -24,6 +24,8 @@ Kartu **1. Data Source & Generate (Master Excel)** di bagian atas panel PubGen m
 | `MXX_XX` | Halaman peta choropleth GeoJSON (§8). |
 | `A02` | Baris **Publication Note**: judul `Keterangan Publikasi` plus halaman catatan RTF dari sheet. Tidak menghasilkan CSV tabel. |
 
-Perutean sheet **mengikuti profil** (§12): pola sampul, pembatas, narasi, tabel, dan grafik berasal dari profil aktif, dan Pubgen berpindah profil otomatis saat mengenali nama sheet BRS, laporan keuangan korporat, atau akademik. Pilihan profil eksplisit selalu menang.
+Di mode Orchestrator, setiap sheet di atas menjadi satu kartu dalam daftar **Publication Content List**: `COVER` → **Sampul**, `DIV` → **Pembatas**, `GXX`/`BXX`/`RXX` → **Paragraf**, `XX_XX` → **Tabel**, `CXX_XX` → **Grafik**, `MXX_XX` → **Peta**, dan `A02` → **Paragraf** catatan publikasi. Kartu bisa diubah satu per satu lewat **Click to edit**. Setelah selesai, **Generate Publication** atau **Generate & Publish PDF** di dock **Profile & Execution** membangun halamannya.
+
+Perutean sheet **mengikuti profil** (§12): pola sampul, pembatas, narasi, tabel, dan grafik berasal dari profil aktif, dan PGS berpindah profil otomatis saat mengenali nama sheet BRS, laporan keuangan korporat, atau akademik. Pilihan profil eksplisit selalu menang.
 
 

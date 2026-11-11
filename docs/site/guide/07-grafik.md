@@ -1,8 +1,8 @@
 ## 8. Grafik Vektor & Infografis Statistik
 
-Grafik di Pubgen adalah objek dokumen asli — batang, garis, dan poligon vektor dengan teks sungguhan — bukan gambar. Tajam pada zoom berapa pun dan saat dicetak, serta masih bisa diedit setelah dibuat.
+Grafik di PGS adalah objek dokumen asli — batang, garis, dan poligon vektor dengan teks sungguhan — bukan gambar. Tajam pada zoom berapa pun dan saat dicetak, serta masih bisa diedit setelah dibuat.
 
-Buka pembuat grafik dari **Publication ▸ Vector Chart** (`Ctrl+Shift+V`), baris **Chart Options…** di **Object ▸ Chart Options…**, atau biarkan Master Excel mengubah sheet `CXX_XX` menjadi halaman grafik.
+Buka pembuat grafik dari **Publication ▸ Vector Chart** (`Ctrl+Shift+V`), **Automation & Content ▸ Automation ▸ Vector Chart**, baris **Object ▸ Chart Options…** (mode DesignCraft), atau biarkan **Import Manifest (XLSX)** mengubah sheet `CXX_XX` menjadi kartu **Grafik** — yang dirender saat **Generate Publication**.
 
 ### Sembilan arketipe
 

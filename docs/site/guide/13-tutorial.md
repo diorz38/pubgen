@@ -1,11 +1,33 @@
 ## 14. Tutorial Praktis Langkah demi Langkah
 
-### Tutorial 1: Menyusun Publikasi Lengkap dalam 3 Menit
+### Tutorial 1: Menyusun Publikasi di Mode Orchestrator
 
-Berikut alur kerja praktis menyusun publikasi statistik dari nol hingga selesai:
+Alur utama 0.9: impor sumber, pilih profil, periksa kartu, lalu terbitkan.
+
+1. **Buka sumber**:
+   - Jalankan **`pgs.exe`**. Beranda **Orchestrator** terbuka.
+   - Klik **Import Manifest (XLSX)** untuk buku kerja bab, atau **Open file (.pubgen)** untuk proyek yang sudah ada. Paket tab workspace langsung memuat daftar kartunya.
+2. **Pilih profil**:
+   - Klik kartu **BPS BRS** (A4, satu halaman) atau **BPS DDA** (A4, halaman berhadapan). Studio terbuka dengan profil tersebut; profil juga bisa diganti di combo **Publication Profile** pada dock **Profile & Execution**.
+3. **Periksa kartu**:
+   - Tab **Page Structure** menampilkan **Publication Content List** — Sampul, Paragraf, Grafik, Peta, Tabel, Gambar, Daftar Isi, Pembatas.
+   - Klik **Click to edit** untuk membetulkan judul, sumber, tata letak seksi, atau header & footer satu kartu. Tab **Visual Live Preview** menampilkan pratinjau halaman.
+4. **Terbitkan**:
+   - Di dock **Profile & Execution**, tekan **Generate Publication** (membangun halaman) atau **Generate & Publish PDF** (membangun halaman sekaligus mengekspor PDF rilis).
+   - Bila kanvas sudah pernah diedit manual, **Compilation Safety Guard** muncul lebih dulu. Pilih **Save as New Version (v2)** untuk menyimpan tata letak saat ini sebagai versi baru, **Overwrite Layout** untuk membangun ulang, atau **Cancel**.
+5. **Rapikan (opsional)**:
+   - Pilih pil **DesignCraft** untuk membuka kanvas tata letak, koreksi tipografi atau tabel secara manual, lalu kembali ke **Orchestrator** lewat pil mode.
+6. **Ekspor tambahan**:
+   - **Generate & Publish PDF** sudah menulis PDF rilis. Untuk ekspor lain, gunakan **File ▸ Output ▸ Export PDF…** (mode Orchestrator).
+
+---
+
+### Tutorial 1b: Menyusun Dokumen dari Nol (Mode DesignCraft)
+
+Alur manual ini berguna bila Anda ingin membangun dokumen kosong lalu memakai dialog generator satu per satu:
 
 1. **Membuat Dokumen Baru**:
-   - Tekan tombol pintas `Ctrl+N` (Menu `File` ▸ `New Document`). Pilih ukuran `A4`, centang *Facing Pages*.
+   - Tekan tombol pintas `Ctrl+N` (**File ▸ New Document** di mode DesignCraft). Pilih ukuran `A4`, centang *Facing Pages*.
 2. **Membuat Sampul Depan**:
    - Buka **Publication ▸ Publication Cover…**.
    - Pilih gaya **`⬡ Hexagon`** (atau arahkan kursor ke pil gaya untuk melihat pratinjau).
@@ -24,13 +46,13 @@ Berikut alur kerja praktis menyusun publikasi statistik dari nol hingga selesai:
    - Centang opsi `[x] Condition rules (Jumlah, Tahun, Kab, Kec...)`.
    - Klik **Insert Table**. Tabel statistik langsung terpasang rapi di bawah judul!
 5. **Membuat Daftar Isi**:
-   - Di **Publication Tools ▸ Page & Layout Utilities…**, klik **Add Blank Page**.
+   - Di **Publication Tools ▸ Page & Layout Utilities**, buka kartu utilitas halaman lalu klik **Add Blank Page**.
    - Buka **Publication ▸ Table of Contents…**, lalu pilih TOC style: `TOC Table` (kolom Judul otomatis terisi `Daftar Table`), pilih
      Layout: `TablePage`.
    - Klik **Add TOC**. Daftar isi langsung tercipta lengkap dengan nomor halamannya! Untuk daftar grafik, pindah ke
      halaman berikutnya lalu pilih TOC style: `TOC Chart` dan klik **Add TOC** lagi.
 6. **Mengekspor ke PDF**:
-   - Buka menu utama `File` ▸ `Export` ▸ `PDF (Print)`. Publikasi Anda siap untuk dicetak atau disebarluaskan secara digital!
+   - Buka **File ▸ Output ▸ Export PDF…** (mode Orchestrator) atau **File ▸ Export PDF…** (mode DesignCraft). Publikasi Anda siap untuk dicetak atau disebarluaskan secara digital!
 
 ---
 
@@ -76,14 +98,16 @@ Jika Anda memiliki tabel dengan kelompok kolom bersusun (misalnya: Jumlah Pendud
 
 ### Tutorial 4: Mengompilasi Seluruh Publikasi dari Satu Manifest
 
+Manifest/compiler adalah jalur multi-bab. Di Orchestrator, padanannya adalah satu paket **`.pubgen`** dengan satu daftar kartu per bab; gunakan tutorial ini bila Anda ingin mendeskripsikan banyak buku kerja bab sekaligus.
+
 Untuk buku tahunan dengan delapan sampai dua belas buku kerja bab, compiler menggantikan perulangan manual:
 
 1. **Kumpulkan buku kerja** dalam satu folder, misalnya `workbooks/BAB_01_2025.xlsx` … `workbooks/BAB_10_2025.xlsx`, dengan sheet `COVER` di bab 1 atau di buku kerja tersendiri.
-2. **Pilih profil** di header panel — `BPS Daerah Dalam Angka` untuk buku tahunan KDA/KCDA (§12). Nilai `"profile"` di manifest menang bila diisi.
-3. **Buat manifest**: di kartu Publication Compiler tekan **New…**, isi judul, daftar bab, margin, dan apakah akan mengekspor PDF, lalu tentukan lokasi penyimpanan `pubgen_project.json`. Skema lengkapnya ada di §10.
-4. **Compile**: tekan **Compile**. Bilah progres menyebut setiap langkah — dokumen baru, halaman induk, sampul depan, sampul dalam, bagian awal, placeholder daftar, tiap bab, sampul belakang, daftar isi, penomoran halaman, running header, simpan, PDF. **Cancel** berhenti dengan rapi dan tidak menyentuh hasil build sebelumnya.
+2. **Pilih profil** di beranda atau combo **Publication Profile** pada dock **Profile & Execution** — `BPS Daerah Dalam Angka` untuk buku tahunan KDA/KCDA (§12). Nilai `"profile"` di manifest menang bila diisi.
+3. **Buat manifest**: di kartu **Publication Compiler** (mode DesignCraft) tekan **New…**, isi judul, daftar bab, margin, dan apakah akan mengekspor PDF, lalu tentukan lokasi penyimpanan `pubgen_project.json`. Skema lengkapnya ada di §10.
+4. **Compile**: tekan **Compile** atau **Publication ▸ Compile Publication** (`Ctrl+Shift+B`). Bilah progres menyebut setiap langkah — dokumen baru, halaman induk, sampul depan, sampul dalam, bagian awal, placeholder daftar, tiap bab, sampul belakang, daftar isi, penomoran halaman, running header, simpan, PDF. **Cancel** berhenti dengan rapi dan tidak menyentuh hasil build sebelumnya.
 5. **Periksa**: baca baris status (halaman, bab, peringatan), lalu jalankan **Audit Publication** (§11) dan klik baris yang ditandai untuk langsung melompat ke sana.
-6. **Ekspor**: dengan `"exportPdf": true` PDF ditulis di samping dokumen; bila tidak, gunakan **File ▸ Export PDF…**.
+6. **Ekspor**: dengan `"exportPdf": true` PDF ditulis di samping dokumen; bila tidak, gunakan **File ▸ Output ▸ Export PDF…** (mode Orchestrator) atau **File ▸ Export PDF…** (mode DesignCraft).
 
 
 

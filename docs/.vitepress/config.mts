@@ -2,8 +2,8 @@ import { defineConfig } from 'vitepress'
 
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
-  title: 'Pubgen',
-  description: 'Generator Publikasi Otomatis — Panduan Lengkap Pengguna',
+  title: 'PGS',
+  description: 'Publication Generator Studio (PGS) — panduan pengguna generator publikasi statistik',
   base: '/pubgen/',
   lang: 'id',
 
@@ -29,8 +29,8 @@ export default defineConfig({
         {
           text: 'Pengenalan',
           items: [
-            { text: 'Apa itu Pubgen?', link: '/guide/01-pengenalan' },
-            { text: 'Publication Cover', link: '/guide/02-cover' },
+            { text: 'Apa itu PGS?', link: '/guide/01-pengenalan' },
+            { text: 'Sampul Publikasi', link: '/guide/02-cover' },
           ],
         },
         {
@@ -52,7 +52,7 @@ export default defineConfig({
         {
           text: 'Produksi & Mutu',
           items: [
-            { text: 'Publication Compiler', link: '/guide/09-compiler' },
+            { text: 'Compiler & Manifest', link: '/guide/09-compiler' },
             { text: 'Audit Publication', link: '/guide/10-audit' },
             { text: 'Publication Profiles', link: '/guide/11-profil' },
             { text: 'Terjemahan AI & Terminologi', link: '/guide/12-ai-translate' },
