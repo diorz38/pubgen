@@ -600,17 +600,17 @@ mod tests {
 
     #[test]
     fn parse_strips_json_fence() {
-        let fence: String = std::iter::repeat('\u{60}').take(3).collect();
+        let fence: String = "\u{60}".repeat(3);
         let fenced = format!("{fence}json\n[\"Halo\", \"Dunia\"]\n{fence}");
         let out = parse_translation(&fenced).expect("fenced array parses");
         assert_eq!(out, vec!["Halo", "Dunia"]);
         let out = parse_translation("[\"a\", \"b\"]").expect("bare array parses");
         assert_eq!(out, vec!["a", "b"]);
         let prose = "Sure! Here is the translation: [\"a\"]";
-        let err = parse_translation(prose).err().expect("prose is an error");
+        let err = parse_translation(prose).expect_err("prose is an error");
         assert!(matches!(err, TranslateError::Provider(_)));
         let obj = "{\"a\": 1}";
-        let err = parse_translation(obj).err().expect("object is an error");
+        let err = parse_translation(obj).expect_err("object is an error");
         assert!(matches!(err, TranslateError::Provider(_)));
     }
 
@@ -694,6 +694,7 @@ mod tests {
     }
 
     /// A canned TCP listener stands in for api.groq.com: one POST, one JSON reply.
+    #[allow(clippy::expect_used)] // test fixture: a bind/accept failure should fail the test loudly
     fn canned_server(reply_body: String) -> String {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("addr");
@@ -757,8 +758,7 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let err = t
             .translate(&["satu".into(), "dua".into()], Lang::Indonesian, Lang::English, None, &cancel, &mut |_, _| {})
-            .err()
-            .expect("mismatch is an error");
+            .expect_err("mismatch is an error");
         assert!(matches!(err, TranslateError::Provider(_)), "{err}");
     }
 
