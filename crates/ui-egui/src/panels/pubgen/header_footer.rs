@@ -44,6 +44,19 @@ pub fn resolve_brs_header_texts(st: &PubgenState) -> (String, String) {
     (title_line, nopub_line)
 }
 
+/// Resolves the single-line running-footer text of a BPS General Report: the COVER/COV
+/// "Title publication" row, then the cover's title, then the page-card title. No release number
+/// and no month suffix (those belong to a BRS bulletin footer).
+pub fn resolve_general_report_footer_text(st: &PubgenState) -> String {
+    let from_cover = st
+        .excel_cover
+        .as_ref()
+        .and_then(|cov| [cov.title_publication.trim(), cov.title1.trim()].into_iter().find(|s| !s.is_empty()).map(str::to_string));
+    let text = from_cover.unwrap_or_else(|| st.cover_title.trim().to_string());
+    // A publication title is one line: a multi-line cover cell contributes its first non-empty line.
+    text.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("").to_string()
+}
+
 /// Helper to extract a 4-digit year like 2026 from date or month strings.
 fn extract_year_from_text(s: &str) -> Option<String> {
     let bytes = s.as_bytes();
@@ -164,6 +177,25 @@ fn load_hf_template_to_state(st: &mut PubgenState, tpl: &Value) {
             st.hf_header_rule = false;
             st.hf_footer_rule = false;
             st.hf_top_accent_bar = false;
+            return;
+        }
+        if name.eq_ignore_ascii_case("hf-bps-general") || name.eq_ignore_ascii_case("bps-general") {
+            st.hf_sided = 0;
+            st.hf_header_offset = tpl.get("headerOffset").and_then(Value::as_f64).unwrap_or(24.0);
+            st.hf_footer_offset = tpl.get("footerOffset").and_then(Value::as_f64).unwrap_or(24.0);
+            let footer = resolve_general_report_footer_text(st);
+            let footer = if footer.is_empty() { "{title_publication}".to_string() } else { footer };
+            st.hf_header_single.clear();
+            st.hf_header_left.clear();
+            st.hf_header_right.clear();
+            st.hf_footer_single = footer.clone();
+            st.hf_footer_left = footer.clone();
+            st.hf_footer_right = footer;
+            st.hf_header_rule = false;
+            st.hf_footer_rule = false;
+            st.hf_top_accent_bar = false;
+            st.hf_color_primary = "#000000".to_string();
+            st.hf_color_text = "#000000".to_string();
             return;
         }
         if name.eq_ignore_ascii_case("hf-brs") || name.eq_ignore_ascii_case("brs") {
@@ -762,6 +794,7 @@ pub fn execute_apply_header_footer(app: &mut DesignApp, st: &PubgenState) -> Res
     }
 
     let is_brs = st.hf_style.eq_ignore_ascii_case("hf-brs") || st.hf_style.eq_ignore_ascii_case("brs");
+    let is_general = st.hf_style.eq_ignore_ascii_case("hf-bps-general") || st.hf_style.eq_ignore_ascii_case("bps-general");
     let is_dda = st.hf_style.eq_ignore_ascii_case("hf-dda") || st.hf_style.eq_ignore_ascii_case("dda") || st.hf_style.eq_ignore_ascii_case("bps-dda");
 
     // Same shapes the Header/Footer… dialog sends: "all", {"section": 0-based index}, {"range": [first, last]}.
@@ -782,7 +815,7 @@ pub fn execute_apply_header_footer(app: &mut DesignApp, st: &PubgenState) -> Res
             let start = st.hf_scope_start.max(1) as u64;
             let total = app.session.active().map(|s| s.doc.page_count()).unwrap_or(start as usize);
             let mut last = (total as u64).max(start);
-            if (is_brs || is_dda)
+            if (is_brs || is_dda || is_general)
                 && let Some(active) = app.session.active()
             {
                 let (_, _, back) = super::covers::find_existing_covers(&active.doc);
@@ -795,8 +828,9 @@ pub fn execute_apply_header_footer(app: &mut DesignApp, st: &PubgenState) -> Res
             if start <= last { json!({ "range": [start, last] }) } else { json!({ "range": [start, start] }) }
         }
         _ => {
-            // For BRS and DDA, running headers should not land on cover (page 1) or back cover (last page)
-            if is_brs || is_dda {
+            // For BRS, DDA and the general report, running headers should not land on cover
+            // (page 1) or back cover (last page)
+            if is_brs || is_dda || is_general {
                 if let Some(active) = app.session.active() {
                     let total = active.doc.page_count();
                     if total > 1 {
@@ -807,7 +841,7 @@ pub fn execute_apply_header_footer(app: &mut DesignApp, st: &PubgenState) -> Res
                             start = 4;
                         } else if inside.is_some() {
                             start = 3;
-                        } else if front.is_some() || is_brs {
+                        } else if front.is_some() || is_brs || is_general {
                             start = 2;
                         }
                         let mut last = total as u64;
@@ -830,6 +864,7 @@ pub fn execute_apply_header_footer(app: &mut DesignApp, st: &PubgenState) -> Res
     };
 
     let (brs_title, brs_nopub) = resolve_brs_header_texts(st);
+    let general_footer = resolve_general_report_footer_text(st);
     let (dda_title_line, dda_sub_line) = resolve_dda_footer_lines(st);
     let dda_footer = resolve_dda_footer_text(st);
     let dda_title = resolve_dda_publication_title(st);
@@ -869,11 +904,23 @@ pub fn execute_apply_header_footer(app: &mut DesignApp, st: &PubgenState) -> Res
 
     let expand_vars = |text: &str, is_footer: bool| -> String {
         let mut s = text.to_string();
+        if (s.is_empty() || s == "{page}") && is_general && is_footer {
+            return general_footer.clone();
+        }
         if (s.is_empty() || s == "{page}") && is_brs && is_footer {
             return format!("{brs_title}\n{brs_nopub}");
         }
+        if s.contains("{title_publication}") {
+            s = s.replace("{title_publication}", &general_footer);
+        }
         if s.contains("{title}") {
-            let t = if is_brs { &brs_title } else { &dda_title_line };
+            let t = if is_general {
+                &general_footer
+            } else if is_brs {
+                &brs_title
+            } else {
+                &dda_title_line
+            };
             s = s.replace("{title}", t);
         }
         if s.contains("{title_en}") {
@@ -900,21 +947,21 @@ pub fn execute_apply_header_footer(app: &mut DesignApp, st: &PubgenState) -> Res
         s
     };
 
-    let header_single = if is_brs && (st.hf_header_single == "{title}\n{nopub}" || st.hf_header_single.is_empty()) {
+    let header_single = if (is_brs || is_general) && (st.hf_header_single == "{title}\n{nopub}" || st.hf_header_single.is_empty()) {
         String::new()
     } else if is_dda && (st.hf_header_single.is_empty() || st.hf_header_single == "{running_header}" || st.hf_header_single == "{section}") {
         "{section}\u{e006}{page}".to_string()
     } else {
         expand_vars(&st.hf_header_single, false)
     };
-    let header_left = if is_brs && (st.hf_header_left == "{title}\n{nopub}" || st.hf_header_left.is_empty()) {
+    let header_left = if (is_brs || is_general) && (st.hf_header_left == "{title}\n{nopub}" || st.hf_header_left.is_empty()) {
         String::new()
     } else if is_dda && (st.hf_header_left.is_empty() || st.hf_header_left == "{running_header}" || st.hf_header_left == "{section}") {
         "{section}\u{e006}{page}".to_string()
     } else {
         expand_vars(&st.hf_header_left, false)
     };
-    let header_right = if is_brs && (st.hf_header_right == "{title}\n{nopub}" || st.hf_header_right.is_empty()) {
+    let header_right = if (is_brs || is_general) && (st.hf_header_right == "{title}\n{nopub}" || st.hf_header_right.is_empty()) {
         String::new()
     } else if is_dda
         && (st.hf_header_right.is_empty()
@@ -990,7 +1037,17 @@ pub fn execute_apply_header_footer(app: &mut DesignApp, st: &PubgenState) -> Res
         );
     }
 
-    app.run("layout.headerFooter.apply", params)?;
+    let mut applied = app.run("layout.headerFooter.apply", params.clone());
+    if applied.is_err() && is_general {
+        // The engine may not ship the `hf-bps-general` built-in preset yet: apply the same
+        // configuration through the `custom` base, which the explicit header/footer, geometry and
+        // color params above fully override anyway.
+        if let Some(obj) = params.as_object_mut() {
+            obj.insert("preset".to_string(), json!("custom"));
+        }
+        applied = app.run("layout.headerFooter.apply", params);
+    }
+    applied?;
 
     if is_dda {
         let _ = app.session.edit(|doc, _| {
@@ -1284,6 +1341,85 @@ pub(crate) mod tests {
         let (title, nopub) = resolve_brs_header_texts(&st);
         assert_eq!(title, "Perkembangan Nilai Tukar Petani Jawa Barat, September 2026");
         assert_eq!(nopub, "BRS No. 61/10/32/Th. XXVIII, 1 Oktober 2026");
+    }
+
+    #[test]
+    fn test_resolve_general_report_footer_text() {
+        let mut st = PubgenState::default();
+        st.cover_title.clear();
+        assert_eq!(resolve_general_report_footer_text(&st), "");
+
+        st.excel_cover = Some(super::excel::ExcelCoverData { title1: "TITLE ONE".into(), ..Default::default() });
+        assert_eq!(resolve_general_report_footer_text(&st), "TITLE ONE");
+
+        st.excel_cover = Some(super::excel::ExcelCoverData {
+            title_publication: "Statistik Kesejahteraan Rakyat 2026".into(),
+            title1: "OTHER TITLE".into(),
+            ..Default::default()
+        });
+        assert_eq!(resolve_general_report_footer_text(&st), "Statistik Kesejahteraan Rakyat 2026");
+
+        st.excel_cover = None;
+        st.cover_title = "  Cover Title\nSecond line  ".into();
+        assert_eq!(resolve_general_report_footer_text(&st), "Cover Title");
+    }
+
+    #[test]
+    fn test_load_hf_template_to_state_general_report() {
+        let mut st = PubgenState::default();
+        st.excel_cover = Some(super::excel::ExcelCoverData { title_publication: "Statistik Kesejahteraan Rakyat 2026".into(), ..Default::default() });
+        load_hf_template_to_state(&mut st, &json!({ "name": "hf-bps-general" }));
+
+        assert_eq!(st.hf_style, "hf-bps-general");
+        assert_eq!(st.hf_sided, 0);
+        assert_eq!(st.hf_header_offset, 24.0);
+        assert_eq!(st.hf_footer_offset, 24.0);
+        assert!(st.hf_header_single.is_empty() && st.hf_header_left.is_empty() && st.hf_header_right.is_empty(), "no running header");
+        assert_eq!(st.hf_footer_single, "Statistik Kesejahteraan Rakyat 2026");
+        assert_eq!(st.hf_footer_left, "Statistik Kesejahteraan Rakyat 2026");
+        assert_eq!(st.hf_footer_right, "Statistik Kesejahteraan Rakyat 2026");
+        assert!(!st.hf_header_rule && !st.hf_footer_rule && !st.hf_top_accent_bar);
+        assert_eq!(st.hf_color_primary, "#000000");
+        assert_eq!(st.hf_color_text, "#000000");
+
+        // The short alias is accepted too.
+        let mut alias = PubgenState::default();
+        alias.cover_title.clear();
+        load_hf_template_to_state(&mut alias, &json!({ "name": "bps-general" }));
+        assert_eq!(alias.hf_style, "bps-general");
+        assert_eq!(alias.hf_footer_single, "{title_publication}", "no cover title yet: keep the token");
+    }
+
+    #[test]
+    fn test_execute_apply_header_footer_general_report_black_footer() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({ "facingPages": false, "pages": 4 })).unwrap();
+
+        let mut st = PubgenState {
+            hf_style: "hf-bps-general".into(),
+            hf_sided: 0,
+            hf_scope: 0, // All pages -> body pages only, cover and back cover stay clean
+            hf_color_primary: "#000000".into(),
+            hf_color_text: "#000000".into(),
+            ..Default::default()
+        };
+        st.excel_cover = Some(super::excel::ExcelCoverData { title_publication: "Statistik Kesejahteraan Rakyat 2026".into(), ..Default::default() });
+        load_hf_template_to_state(&mut st, &json!({ "name": "hf-bps-general" }));
+
+        let res = execute_apply_header_footer(&mut app, &st);
+        assert!(res.is_ok(), "apply hf-bps-general should succeed: {res:?}");
+
+        let doc = &app.session.active().unwrap().doc;
+        assert!(doc.settings.facing_pages, "double-sided footers need facing pages");
+        let hf = doc.header_footer.as_ref().expect("header_footer present");
+        assert_eq!(hf.scope, designcraft_doc::HfScope::Range { first: 2, last: 4 }, "cover and back cover are skipped");
+        assert_eq!(hf.colors.text_color, "#000000", "footer text is black");
+        assert!(hf.header_items.left.is_none() && hf.header_items.right.is_none(), "no running header");
+
+        for id in [hf.footer_items.left, hf.footer_items.right].into_iter().flatten() {
+            let text = doc.item(id).and_then(|it| it.text_frame()).and_then(|tf| doc.story(tf.story)).map(|s| s.text.clone());
+            assert_eq!(text.as_deref(), Some("Statistik Kesejahteraan Rakyat 2026"), "the footer prints the COVER/COV publication title");
+        }
     }
 
     #[test]

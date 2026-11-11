@@ -227,6 +227,41 @@ pub fn preset_spec(preset: &str) -> Option<HeaderFooter> {
             footer_rule_items: SidedItems::default(),
             folio_items: SidedItems::default(),
         }),
+        "hf-bps-general" | "bps-general" => Some(HeaderFooter {
+            preset: "hf-bps-general".into(),
+            sided: Sided::Double,
+            scope: HfScope::All,
+            parent: None,
+            header_offset: 24.0,
+            footer_offset: 24.0,
+            header: SidedText::default(),
+            footer: SidedText { single: "{title_publication}".into(), left: "{title_publication}".into(), right: "{title_publication}".into() },
+            style: story::BASIC_PARAGRAPH.into(),
+            rule: false,
+            objects: HeaderFooterObjects {
+                header_rule: false,
+                header_rule_weight: 0.5,
+                footer_rule: false,
+                footer_rule_weight: 0.5,
+                top_accent_bar: false,
+                top_accent_bar_height: 4.0,
+                top_accent_bar_bleed: true,
+            },
+            // The general report prints every header/footer glyph in black.
+            colors: HeaderFooterColors {
+                primary: "#000000".into(),
+                accent: "#000000".into(),
+                dark: "#000000".into(),
+                rule_color: "#000000".into(),
+                text_color: "#000000".into(),
+            },
+            header_items: SidedItems::default(),
+            footer_items: SidedItems::default(),
+            rule_items: SidedItems::default(),
+            accent_bar_items: SidedItems::default(),
+            footer_rule_items: SidedItems::default(),
+            folio_items: SidedItems::default(),
+        }),
         "custom" => Some(HeaderFooter {
             preset: "custom".into(),
             sided: Sided::Double,
@@ -1578,6 +1613,19 @@ mod tests {
         assert!(expanded.contains('\u{e006}'));
         assert!(expanded.contains(var_char(2).unwrap())); // File Name is index 2
         assert!(expanded.contains(var_char(0).unwrap())); // Chapter Number is index 0
+    }
+
+    #[test]
+    fn test_hf_bps_general_preset_spec() {
+        let spec = preset_spec("hf-bps-general").expect("hf-bps-general preset");
+        assert_eq!(spec.preset, "hf-bps-general");
+        assert_eq!(spec.footer.single, "{title_publication}");
+        assert_eq!(spec.footer.left, "{title_publication}");
+        assert_eq!(spec.footer.right, "{title_publication}");
+        assert!(spec.header.single.is_empty() && spec.header.left.is_empty() && spec.header.right.is_empty());
+        assert_eq!(spec.colors.text_color, "#000000");
+        assert_eq!(spec.colors.primary, "#000000");
+        assert!(!spec.rule && !spec.objects.header_rule && !spec.objects.footer_rule);
     }
 
     #[test]

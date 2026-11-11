@@ -729,6 +729,188 @@ pub(crate) fn ensure_brs_heading_styles(app: &mut DesignApp, font: &str) {
     }
 }
 
+/// General-report counterpart of [`ensure_brs_heading_styles`]: the same Title / Heading 1 /
+/// Heading 2 definitions, with black text instead of the BRS orange accent.
+pub(crate) fn ensure_general_report_heading_styles(app: &mut DesignApp, font: &str) {
+    let _ = app.run("list.define", json!({"name": "BRS", "continueAcrossStories": true}));
+
+    let heading_chars = |size: f64| {
+        json!({
+            "fontFamily": font,
+            "fontStyle": "Bold",
+            "size": size,
+            "fill": "[Black]"
+        })
+    };
+
+    let h1_params = json!({
+        "name": "Heading 1",
+        "chars": heading_chars(13.0),
+        "para": {
+            "listType": "numbers",
+            "listName": "BRS",
+            "listLevel": 1,
+            "numberExpression": "^#.^t",
+            "restartNumbers": true,
+            "restartAfterLevel": 0,
+            "spaceBefore": 12.0,
+            "spaceAfter": 4.0
+        }
+    });
+    if app.run("style.paragraph.edit", h1_params.clone()).is_err() {
+        let _ = app.run("style.paragraph.create", h1_params);
+    }
+
+    let h2_params = json!({
+        "name": "Heading 2",
+        "chars": heading_chars(11.0),
+        "para": {
+            "listType": "numbers",
+            "listName": "BRS",
+            "listLevel": 2,
+            "numberExpression": "^1.^#.^t",
+            "restartNumbers": true,
+            "restartAfterLevel": 0,
+            "spaceBefore": 8.0,
+            "spaceAfter": 3.0
+        }
+    });
+    if app.run("style.paragraph.edit", h2_params.clone()).is_err() {
+        let _ = app.run("style.paragraph.create", h2_params);
+    }
+
+    let title_params = json!({
+        "name": "Title",
+        "chars": heading_chars(14.5),
+        "para": {
+            "spaceBefore": 0.0,
+            "spaceAfter": 6.0
+        }
+    });
+    if app.run("style.paragraph.edit", title_params.clone()).is_err() {
+        let _ = app.run("style.paragraph.create", title_params);
+    }
+}
+
+/// Which narrative heading a paragraph is, for the generated BRS / general-report pages.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NarrativeHeading {
+    Title,
+    H1,
+    H2,
+}
+
+/// Paragraph ranges of the narrative headings in `story`: an explicit heading paragraph style, or
+/// the short-heading heuristics the BRS narrative sheets rely on. `bab_titles` also treats a short
+/// paragraph that starts with "Bab XX" as a chapter Title, for worksheets whose narrative came from
+/// a source that did not carry the paragraph style.
+fn narrative_heading_targets(story: &designcraft_doc::story::Story, bab_titles: bool) -> Vec<(usize, usize, NarrativeHeading)> {
+    let mut styling_targets: Vec<(usize, usize, NarrativeHeading)> = Vec::new();
+    let para_ranges = story.para_ranges();
+    for (i, p) in story.paras.iter().enumerate() {
+        let Some(r) = para_ranges.get(i) else { continue };
+        let Some(raw) = story.text.get(r.clone()) else { continue };
+        let p_text = raw.trim();
+        if p_text.is_empty() {
+            continue;
+        }
+
+        let is_short_heading = p_text.len() <= 60 && !p_text.ends_with('.');
+
+        let is_title = p.style.eq_ignore_ascii_case("Title")
+            || (is_short_heading && (p_text.starts_with("A. ") || p_text.starts_with("B. ") || p_text.starts_with("C. ")))
+            || (bab_titles && !p_text.ends_with('.') && bab_title_parts(p_text).is_some());
+
+        let is_h1 = p.style.eq_ignore_ascii_case("Heading 1")
+            || (is_short_heading
+                && (p_text == "Nilai Tukar Petani (NTP)"
+                    || p_text.starts_with("Indeks Harga yang Diterima")
+                    || p_text.starts_with("NTP Menurut Subsektor")
+                    || p_text.starts_with("Perbandingan NTP")
+                    || p_text.starts_with("Nilai Tukar Usaha Petani")));
+
+        let is_h2 = p.style.eq_ignore_ascii_case("Heading 2")
+            || (is_short_heading
+                && (p_text.starts_with("Indeks Harga yang Dibayar")
+                    || p_text.starts_with("NTP Tanaman Pangan")
+                    || p_text.starts_with("NTP Tanaman Hortikultura")
+                    || p_text.starts_with("NTP Tanaman Perkebunan")
+                    || p_text.starts_with("NTP Peternakan")
+                    || p_text.starts_with("NTP Perikanan")));
+
+        if is_title {
+            styling_targets.push((r.start, r.end, NarrativeHeading::Title));
+        } else if is_h1 {
+            styling_targets.push((r.start, r.end, NarrativeHeading::H1));
+        } else if is_h2 {
+            styling_targets.push((r.start, r.end, NarrativeHeading::H2));
+        }
+    }
+    styling_targets
+}
+
+/// Splits a chapter heading that starts with "Bab"/"BAB"/"bab" and a chapter token into the prefix
+/// as written and whatever follows it. A chapter token is 1-3 digits or a Roman numeral, optionally
+/// followed by '.', ':' or '-'. `"BAB 01 Pemerintahan"` -> `("BAB 01", "Pemerintahan")`;
+/// `"BAB 01"` -> `("BAB 01", "")`; `None` when the text is not such a heading.
+fn bab_title_parts(text: &str) -> Option<(String, String)> {
+    let trimmed = text.trim();
+    if !trimmed.get(..3).is_some_and(|head| head.eq_ignore_ascii_case("bab")) {
+        return None;
+    }
+    let after_bab = trimmed.get(3..)?;
+    let lead_ws = after_bab.len().saturating_sub(after_bab.trim_start().len());
+    if lead_ws == 0 {
+        return None;
+    }
+    let token_start = after_bab.get(lead_ws..)?;
+    let mut token_len = 0usize;
+    let mut digits = 0usize;
+    for (i, c) in token_start.char_indices() {
+        if !c.is_ascii_digit() {
+            break;
+        }
+        digits = digits.saturating_add(1);
+        if digits > 3 {
+            return None;
+        }
+        token_len = i.saturating_add(c.len_utf8());
+    }
+    if digits == 0 {
+        for (i, c) in token_start.char_indices() {
+            if matches!(c, 'I' | 'V' | 'X' | 'L' | 'C' | 'D' | 'M' | 'i' | 'v' | 'x' | 'l' | 'c' | 'd' | 'm') {
+                token_len = i.saturating_add(c.len_utf8());
+            } else {
+                break;
+            }
+        }
+    }
+    if token_len == 0 {
+        return None;
+    }
+    let after_token = token_start.get(token_len..)?;
+    // The token must end the heading or sit behind a separator: "Babel 01" and "BAB 01A" are not
+    // chapter headings.
+    if let Some(next) = after_token.chars().next()
+        && !next.is_whitespace()
+        && !matches!(next, '.' | ':' | '-' | '\u{2013}' | '\u{2014}' | ',')
+    {
+        return None;
+    }
+    let prefix_end = 3usize.saturating_add(lead_ws).saturating_add(token_len);
+    let prefix = trimmed.get(..prefix_end)?.trim_end().to_string();
+    let rest =
+        after_token.trim_start().trim_start_matches(|c: char| c.is_whitespace() || matches!(c, '.' | ':' | '-' | '\u{2013}' | '\u{2014}' | ','));
+    Some((prefix, rest.trim_end().to_string()))
+}
+
+/// `("BAB 01", "Pemerintahan")` for `"BAB 01 Pemerintahan"`; `None` when there is no title after
+/// the chapter token, so the paragraph does not need a second line.
+fn split_bab_title(text: &str) -> Option<(String, String)> {
+    let (prefix, rest) = bab_title_parts(text)?;
+    if rest.is_empty() { None } else { Some((prefix, rest)) }
+}
+
 pub(crate) fn format_brs_narrative_story(app: &mut DesignApp, fid: u64, font: &str) {
     let Some(active) = app.session.active() else { return };
     let Some(it) = active.doc.item(designcraft_doc::ItemId(fid)) else { return };
@@ -746,73 +928,148 @@ pub(crate) fn format_brs_narrative_story(app: &mut DesignApp, fid: u64, font: &s
     let _ = app.run("type.char", json!({"fontFamily": font, "size": 12.0, "leading": {"kind": "points", "value": 15.0}}));
 
     // Inspect paragraphs and determine styling without holding borrow during app.run
-    #[derive(Clone, Copy)]
-    enum BHeading {
-        Title,
-        H1,
-        H2,
-    }
-    let mut styling_targets: Vec<(usize, usize, BHeading)> = Vec::new();
-
-    if let Some(active) = app.session.active()
-        && let Some(story) = active.doc.story(sid)
-    {
-        let para_ranges = story.para_ranges();
-        for (i, p) in story.paras.iter().enumerate() {
-            let Some(r) = para_ranges.get(i) else { continue };
-            let p_text = story.text.get(r.clone()).unwrap_or("").trim();
-            if p_text.is_empty() {
-                continue;
-            }
-
-            let is_short_heading = p_text.len() <= 60 && !p_text.ends_with('.');
-
-            let is_title = p.style.eq_ignore_ascii_case("Title")
-                || (is_short_heading && (p_text.starts_with("A. ") || p_text.starts_with("B. ") || p_text.starts_with("C. ")));
-
-            let is_h1 = p.style.eq_ignore_ascii_case("Heading 1")
-                || (is_short_heading
-                    && (p_text == "Nilai Tukar Petani (NTP)"
-                        || p_text.starts_with("Indeks Harga yang Diterima")
-                        || p_text.starts_with("NTP Menurut Subsektor")
-                        || p_text.starts_with("Perbandingan NTP")
-                        || p_text.starts_with("Nilai Tukar Usaha Petani")));
-
-            let is_h2 = p.style.eq_ignore_ascii_case("Heading 2")
-                || (is_short_heading
-                    && (p_text.starts_with("Indeks Harga yang Dibayar")
-                        || p_text.starts_with("NTP Tanaman Pangan")
-                        || p_text.starts_with("NTP Tanaman Hortikultura")
-                        || p_text.starts_with("NTP Tanaman Perkebunan")
-                        || p_text.starts_with("NTP Peternakan")
-                        || p_text.starts_with("NTP Perikanan")));
-
-            if is_title {
-                styling_targets.push((r.start, r.end, BHeading::Title));
-            } else if is_h1 {
-                styling_targets.push((r.start, r.end, BHeading::H1));
-            } else if is_h2 {
-                styling_targets.push((r.start, r.end, BHeading::H2));
-            }
-        }
-    }
+    let styling_targets = {
+        let Some(active) = app.session.active() else { return };
+        let Some(story) = active.doc.story(sid) else { return };
+        narrative_heading_targets(story, false)
+    };
 
     for (start, end, h_kind) in styling_targets {
         let _ = app.run("text.select", json!({"story": sid.0, "anchor": start, "focus": end}));
         match h_kind {
-            BHeading::Title => {
+            NarrativeHeading::Title => {
                 let _ = app.run("style.paragraph.apply", json!({"name": "Title"}));
                 let _ = app.run("type.char", json!({"fontFamily": font, "fontStyle": "Bold", "size": 14.5}));
             }
-            BHeading::H1 => {
+            NarrativeHeading::H1 => {
                 let _ = app.run("style.paragraph.apply", json!({"name": "Heading 1"}));
                 let _ = app.run("type.char", json!({"fontFamily": font, "fontStyle": "Bold", "size": 13.0}));
             }
-            BHeading::H2 => {
+            NarrativeHeading::H2 => {
                 let _ = app.run("style.paragraph.apply", json!({"name": "Heading 2"}));
                 let _ = app.run("type.char", json!({"fontFamily": font, "fontStyle": "Bold", "size": 11.0}));
             }
         }
+    }
+}
+
+/// General-report variant of [`format_brs_narrative_story`]: black heading text, and a Title that
+/// begins with "Bab XX" becomes a two-line, centred page title ("BAB 01" / the rest).
+pub(crate) fn format_general_report_narrative_story(app: &mut DesignApp, fid: u64, font: &str) {
+    let Some(active) = app.session.active() else { return };
+    let Some(it) = active.doc.item(designcraft_doc::ItemId(fid)) else { return };
+    let Some(tf) = it.text_frame() else { return };
+    let sid = tf.story;
+    let Some(story) = active.doc.story(sid) else { return };
+    if story.text.is_empty() {
+        return;
+    }
+
+    // Body/narrative text: 12pt on 15pt leading, black.
+    let _ = app.run("text.select", json!({"story": sid.0, "anchor": 0, "focus": story.text.len()}));
+    let _ = app.run("type.char", json!({"fontFamily": font, "size": 12.0, "leading": {"kind": "points", "value": 15.0}, "fill": "[Black]"}));
+
+    // Title paragraphs that start with "Bab XX": break each into "BAB XX" and the title after it.
+    // A split inserts a paragraph, so remember where each second line ends up: it belongs to the
+    // same page title and must carry the Title style even when the source paragraph was plain.
+    let (title_splits, continuation_indices): (Vec<(usize, String)>, Vec<usize>) = {
+        let Some(active) = app.session.active() else { return };
+        let Some(story) = active.doc.story(sid) else { return };
+        let para_ranges = story.para_ranges();
+        let mut splits: Vec<(usize, usize, String)> = Vec::new();
+        for (start, end, kind) in narrative_heading_targets(story, true) {
+            if kind != NarrativeHeading::Title {
+                continue;
+            }
+            let Some(text) = story.text.get(start..end) else { continue };
+            let Some((prefix, rest)) = split_bab_title(text) else { continue };
+            let Some(index) = para_ranges.iter().position(|r| r.start == start) else { continue };
+            splits.push((index, start, format!("{prefix}\n{rest}")));
+        }
+        splits.sort_by_key(|(index, _, _)| *index);
+        // Each earlier split inserts one paragraph, so the prefix of split k sits at
+        // old_index + k and its second line directly after it.
+        let continuations = splits.iter().enumerate().map(|(k, (index, _, _))| index.saturating_add(k).saturating_add(1)).collect();
+        let splits = splits.into_iter().map(|(_, start, replacement)| (start, replacement)).collect();
+        (splits, continuations)
+    };
+
+    if !title_splits.is_empty() {
+        let _ = app.session.edit(|doc, _| {
+            if let Some(story) = doc.story_mut(sid) {
+                // The last paragraph first, so the earlier byte offsets stay valid.
+                for (start, replacement) in title_splits.iter().rev() {
+                    let Some(tail) = story.text.get(*start..) else { continue };
+                    let end = tail.find('\n').map_or(story.text.len(), |i| start.saturating_add(i));
+                    story.replace(*start..end, replacement);
+                }
+            }
+            Ok(serde_json::Value::Null)
+        });
+    }
+
+    // Style the paragraphs of the rewritten story. Centring happens afterwards: a split line that
+    // inherited a plain paragraph style only becomes a Title during this pass, so its alignment can
+    // only be recognised once the style is on the paragraph.
+    let styling_targets = {
+        let Some(active) = app.session.active() else { return };
+        let Some(story) = active.doc.story(sid) else { return };
+        let mut targets = narrative_heading_targets(story, true);
+        let para_ranges = story.para_ranges();
+        for index in continuation_indices {
+            let Some(range) = para_ranges.get(index) else { continue };
+            targets.retain(|(start, _, _)| *start != range.start);
+            targets.push((range.start, range.end, NarrativeHeading::Title));
+        }
+        targets.sort_by_key(|(start, _, _)| *start);
+        targets
+    };
+
+    for (start, end, h_kind) in styling_targets {
+        let _ = app.run("text.select", json!({"story": sid.0, "anchor": start, "focus": end}));
+        match h_kind {
+            NarrativeHeading::Title => {
+                let _ = app.run("style.paragraph.apply", json!({"name": "Title"}));
+                let _ = app.run("type.char", json!({"fontFamily": font, "fontStyle": "Bold", "size": 14.5, "fill": "[Black]"}));
+            }
+            NarrativeHeading::H1 => {
+                let _ = app.run("style.paragraph.apply", json!({"name": "Heading 1"}));
+                let _ = app.run("type.char", json!({"fontFamily": font, "fontStyle": "Bold", "size": 13.0, "fill": "[Black]"}));
+            }
+            NarrativeHeading::H2 => {
+                let _ = app.run("style.paragraph.apply", json!({"name": "Heading 2"}));
+                let _ = app.run("type.char", json!({"fontFamily": font, "fontStyle": "Bold", "size": 11.0, "fill": "[Black]"}));
+            }
+        }
+    }
+
+    // Centre both lines of every chapter title that starts with "Bab XX": the "BAB XX" line and the
+    // title line below it.
+    let centred: Vec<(usize, usize)> = {
+        let Some(active) = app.session.active() else { return };
+        let Some(story) = active.doc.story(sid) else { return };
+        let para_ranges = story.para_ranges();
+        let mut centred: Vec<(usize, usize)> = Vec::new();
+        for (i, p) in story.paras.iter().enumerate() {
+            let Some(r) = para_ranges.get(i) else { continue };
+            let Some(text) = story.text.get(r.clone()) else { continue };
+            if !p.style.eq_ignore_ascii_case("Title") || bab_title_parts(text).is_none() {
+                continue;
+            }
+            centred.push((r.start, r.end));
+            let next_i = i.saturating_add(1);
+            if let Some(next) = para_ranges.get(next_i)
+                && story.paras.get(next_i).is_some_and(|p| p.style.eq_ignore_ascii_case("Title"))
+            {
+                centred.push((next.start, next.end));
+            }
+        }
+        centred
+    };
+
+    for (start, end) in centred {
+        let _ = app.run("text.select", json!({"story": sid.0, "anchor": start, "focus": end}));
+        let _ = app.run("type.alignCenter", json!({}));
     }
 }
 
@@ -1032,7 +1289,12 @@ fn execute_generate_pages_brs(
     doc_margins: designcraft_doc::Margins,
 ) -> Result<String, String> {
     let brs_font = st.body_font();
-    ensure_brs_heading_styles(app, &brs_font);
+    let is_general = st.active_profile().id == "bps_general_report";
+    if is_general {
+        ensure_general_report_heading_styles(app, &brs_font);
+    } else {
+        ensure_brs_heading_styles(app, &brs_font);
+    }
 
     let mut generated_count = 0usize;
     let mut inserted_tables_count = 0usize;
@@ -1231,7 +1493,11 @@ fn execute_generate_pages_brs(
                 let title_h = 16.0;
                 let title_rect = [margin.x0, cur_y, margin.x1, cur_y + title_h];
                 if let Some(sid) = frame_with_font_full(app, spread_idx, title_rect, &full_title, &brs_font, Some("Bold"), 10.5, None) {
-                    let theme_hex = if !theme_val.is_empty() {
+                    // The general report keeps its table titles black; BRS tints them with the
+                    // table's color theme.
+                    let theme_hex = if is_general {
+                        None
+                    } else if !theme_val.is_empty() {
                         parse_table_color_theme(theme_val).map(|t| t.header_footer)
                     } else if let Some(override_th) = &st.card2_theme_override {
                         parse_table_color_theme(override_th).map(|t| t.header_footer)
@@ -1321,7 +1587,11 @@ fn execute_generate_pages_brs(
                     inserted_rtfs_count = inserted_rtfs_count.saturating_add(1);
                 }
 
-                format_brs_narrative_story(app, fid, &brs_font);
+                if is_general {
+                    format_general_report_narrative_story(app, fid, &brs_font);
+                } else {
+                    format_brs_narrative_story(app, fid, &brs_font);
+                }
 
                 // Thread overset text to subsequent pages if the content overflows!
                 let last_fid = if let Ok(end_fid) = thread_overset_narrative(app, &mut cur_page_idx, fid, doc_margins) { end_fid } else { fid };
@@ -1598,7 +1868,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
         detect_document_margins(&active.doc)
     };
 
-    if st.active_profile().id == "bps_brs" {
+    if matches!(st.active_profile().id.as_str(), "bps_brs" | "bps_general_report") {
         return execute_generate_pages_brs(app, st, slice, doc_margins);
     }
 
@@ -7075,6 +7345,118 @@ Narrative;3;Catatan Akhir;narrative3.rtf\n";
         for name in ["Title", "Heading 1", "Heading 2"] {
             let style = active.doc.styles.para(name).unwrap();
             assert_eq!(style.chars.fill.as_deref(), Some("#F68839"), "{name} fill");
+        }
+    }
+
+    #[test]
+    fn test_general_report_title_and_headings_are_black() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+
+        ensure_general_report_heading_styles(&mut app, "Lato");
+
+        let active = app.session.active().unwrap();
+        for name in ["Title", "Heading 1", "Heading 2"] {
+            let style = active.doc.styles.para(name).unwrap();
+            assert_eq!(style.chars.fill.as_deref(), Some("[Black]"), "{name} fill");
+        }
+    }
+
+    #[test]
+    fn test_split_bab_title() {
+        assert_eq!(split_bab_title("BAB 01 Pemerintahan"), Some(("BAB 01".to_string(), "Pemerintahan".to_string())));
+        assert_eq!(split_bab_title("Bab 2 Keadaan Alam"), Some(("Bab 2".to_string(), "Keadaan Alam".to_string())));
+        assert_eq!(split_bab_title("BAB 02: Pemerintahan Daerah"), Some(("BAB 02".to_string(), "Pemerintahan Daerah".to_string())));
+        assert_eq!(split_bab_title("BAB II Pendahuluan"), Some(("BAB II".to_string(), "Pendahuluan".to_string())));
+        assert_eq!(split_bab_title("BAB 01 - Keadaan Alam"), Some(("BAB 01".to_string(), "Keadaan Alam".to_string())));
+
+        assert_eq!(split_bab_title("Pemerintahan"), None);
+        assert_eq!(split_bab_title("Babel 01"), None);
+        assert_eq!(split_bab_title("BAB 01A Pemerintahan"), None);
+        assert_eq!(split_bab_title("BAB 1234 Pemerintahan"), None);
+        // A heading that is only the chapter token has no second line to split off.
+        assert_eq!(split_bab_title("BAB 01"), None);
+        assert_eq!(bab_title_parts("BAB 01"), Some(("BAB 01".to_string(), String::new())));
+    }
+
+    #[test]
+    fn test_general_report_narrative_splits_and_centres_bab_title() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+        ensure_brs_heading_styles(&mut app, "Lato");
+
+        let story_id =
+            frame_with_font_full(&mut app, 0, [36.0, 36.0, 300.0, 200.0], "BAB 01 Pemerintahan Daerah\nIsi paragraf.", "Lato", None, 12.0, None)
+                .expect("text frame");
+        let fid = app
+            .session
+            .active()
+            .and_then(|a| a.doc.story(designcraft_doc::StoryId(story_id)).and_then(|s| s.frames.first().copied()))
+            .expect("frame of the story");
+        // Make the first paragraph a Title, as the placed narrative would be.
+        app.run("text.select", json!({"story": story_id, "anchor": 0, "focus": 19})).unwrap();
+        app.run("style.paragraph.apply", json!({"name": "Title"})).unwrap();
+
+        // The BRS formatter leaves the chapter title on one line; keep that document for comparison.
+        format_brs_narrative_story(&mut app, fid.0, "Lato");
+        save_output_document(&mut app, "general_report_bab_before.designcraft");
+
+        // The general report formats the same story with black text and splits the chapter title.
+        ensure_general_report_heading_styles(&mut app, "Lato");
+        format_general_report_narrative_story(&mut app, fid.0, "Lato");
+
+        {
+            let active = app.session.active().unwrap();
+            {
+                let story = active.doc.story(designcraft_doc::StoryId(story_id)).expect("story");
+                assert_eq!(story.text, "BAB 01\nPemerintahan Daerah\nIsi paragraf.");
+                assert_eq!(story.paras[0].style, "Title");
+                assert_eq!(story.paras[1].style, "Title");
+                assert_eq!(story.paras[0].para.align, Some(designcraft_doc::Align::Center), "chapter prefix line is centred");
+                assert_eq!(story.paras[1].para.align, Some(designcraft_doc::Align::Center), "chapter title line is centred");
+                assert_ne!(story.paras[2].para.align, Some(designcraft_doc::Align::Center), "body text stays left aligned");
+                assert_eq!(story.char_format_at(0).over.fill.as_deref(), Some("[Black]"), "chapter text is black");
+            }
+            assert_eq!(active.doc.styles.para("Title").unwrap().chars.fill.as_deref(), Some("[Black]"), "Title style is black");
+        }
+
+        save_output_document(&mut app, "general_report_bab_after.designcraft");
+    }
+
+    /// The chapter prefix alone identifies a page title: a worksheet narrative whose "BAB 02 …"
+    /// paragraph carries no explicit Title style still splits into two centred Title lines.
+    #[test]
+    fn test_general_report_splits_bab_title_without_an_explicit_title_style() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+        let story_id = frame_with_font_full(&mut app, 0, [36.0, 36.0, 300.0, 200.0], "BAB 02 Keadaan Alam\nIsi paragraf.", "Lato", None, 12.0, None)
+            .expect("text frame");
+        let fid = app
+            .session
+            .active()
+            .and_then(|a| a.doc.story(designcraft_doc::StoryId(story_id)).and_then(|s| s.frames.first().copied()))
+            .expect("frame of the story");
+
+        ensure_general_report_heading_styles(&mut app, "Lato");
+        format_general_report_narrative_story(&mut app, fid.0, "Lato");
+
+        let active = app.session.active().unwrap();
+        let story = active.doc.story(designcraft_doc::StoryId(story_id)).expect("story");
+        assert_eq!(story.text, "BAB 02\nKeadaan Alam\nIsi paragraf.");
+        assert_eq!(story.paras[0].style, "Title");
+        assert_eq!(story.paras[1].style, "Title");
+        assert_eq!(story.paras[0].para.align, Some(designcraft_doc::Align::Center), "chapter prefix line is centred");
+        assert_eq!(story.paras[1].para.align, Some(designcraft_doc::Align::Center), "chapter title line is centred");
+        assert_ne!(story.paras[2].para.align, Some(designcraft_doc::Align::Center), "body text stays left aligned");
+    }
+
+    /// `PUBGEN_TEST_OUTPUT=<dir>` keeps a generated document for a visual check (see the workspace tests).
+    fn save_output_document(app: &mut DesignApp, file_name: &str) {
+        let Some(dir) = std::env::var_os("PUBGEN_TEST_OUTPUT") else { return };
+        let dir = std::path::PathBuf::from(dir);
+        if std::fs::create_dir_all(&dir).is_ok() {
+            let target = dir.join(file_name);
+            let _ = app.run("file.saveAs", json!({"path": target.to_string_lossy()}));
         }
     }
 

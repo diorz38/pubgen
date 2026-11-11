@@ -826,6 +826,35 @@ impl PubgenState {
             self.hf_top_accent_bar = false;
             self.hf_color_primary = "#f68839".into();
             self.hf_color_text = "#f68839".into();
+        } else if profile.id == "bps_general_report" {
+            // BPS General Report: DDA-style cover, a black running footer that prints the
+            // COVER/COV "Title publication" row, and black paragraph text.
+            self.cover_style = 3;
+            self.cover_include_inside_back = true;
+            self.bilingual_output = false;
+            self.card2_table_footer = false;
+            self.card2_col_numbers = true;
+            self.card2_style = 4;
+            self.card2_color_theme = 4;
+            self.card2_theme_override = Some("BRS6".into());
+            self.hf_style = "hf-bps-general".into();
+            self.hf_sided = 0;
+            self.hf_header_offset = 24.0;
+            self.hf_footer_offset = 24.0;
+            self.hf_header_single = String::new();
+            self.hf_header_left = String::new();
+            self.hf_header_right = String::new();
+            self.hf_footer_single = "{title_publication}".into();
+            self.hf_footer_left = "{title_publication}".into();
+            self.hf_footer_right = "{title_publication}".into();
+            self.hf_header_rule = false;
+            self.hf_footer_rule = false;
+            self.hf_top_accent_bar = false;
+            self.hf_color_primary = "#000000".into();
+            self.hf_color_accent = "#000000".into();
+            self.hf_color_dark = "#000000".into();
+            self.hf_color_rule = "#000000".into();
+            self.hf_color_text = "#000000".into();
         } else if profile.id == "bps_dda" || self.hf_style == "hf-dda" {
             self.hf_style = "hf-dda".into();
             self.hf_sided = 0;
@@ -883,6 +912,25 @@ pub(crate) mod tests {
         assert_eq!(old_deser.toc_status, None);
         assert_eq!(old_deser.utilities_status, None);
         assert!(!old_deser.toc_insert_after);
+    }
+
+    #[test]
+    fn test_bps_general_report_profile_uses_dda_cover_and_black_text() {
+        let mut st = PubgenState::default();
+        st.apply_profile(super::super::profiles::ProfileManager::get_profile("bps_general_report"), false);
+        assert_eq!(st.active_profile_id, "bps_general_report");
+        // DDA-style template cover, front + inside + back.
+        assert_eq!(st.cover_style, 3);
+        assert!(st.cover_include_inside_back);
+        // Every header/footer glyph is black and the footer prints the publication title.
+        assert_eq!(st.hf_style, "hf-bps-general");
+        assert_eq!(st.hf_color_text, "#000000");
+        assert_eq!(st.hf_color_primary, "#000000");
+        assert_eq!(st.hf_footer_single, "{title_publication}");
+        // BRS-style worksheet, single language, no table total row.
+        assert!(!st.bilingual_output);
+        assert!(st.card2_col_numbers);
+        assert!(!st.card2_table_footer);
     }
 
     #[test]

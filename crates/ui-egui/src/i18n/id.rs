@@ -101,6 +101,7 @@ pub(super) const TABLE: &[(&str, &str)] = &[
     ("General", "Umum"),
     ("General Settings (BRS BPS Profile)", "Pengaturan Umum (Profil BRS BPS)"),
     ("General Settings (DDA BPS Profile)", "Pengaturan Umum (Profil DDA BPS)"),
+    ("General Settings (BPS General Report Profile)", "Pengaturan Umum (Profil BPS General Report)"),
     ("Generate & Publish PDF", "Generate & Rilis PDF"),
     ("Generate All Tables", "Buat Semua Tabel"),
     ("Generate Cover", "Buat Sampul"),
