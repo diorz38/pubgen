@@ -2027,6 +2027,24 @@ fn pgs_orchestrator_home_logo_texture(ctx: &egui::Context) -> Option<egui::Textu
     Some(tex)
 }
 
+/// Where a bundled sample workbook can live: the repository layout a checkout has, and the flat layout the
+/// Windows package ships at `samples\<profile>`, so the sample buttons work in a portable app too.
+fn sample_file_candidates(relative: &str) -> Vec<std::path::PathBuf> {
+    let mut candidates = vec![std::path::Path::new("plan/pubgen/samples").join(relative), std::path::Path::new("samples").join(relative)];
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("samples").join(relative));
+        }
+    }
+    candidates.push(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plan/pubgen/samples").join(relative));
+    candidates
+}
+
+/// First candidate of [`sample_file_candidates`] that exists, repository layout first.
+fn bundled_sample_file(relative: &str) -> Option<std::path::PathBuf> {
+    sample_file_candidates(relative).into_iter().find(|path| path.is_file())
+}
+
 pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, lang: &str) {
     let r = ui.available_rect_before_wrap();
     ui.painter().rect_filled(r, 0.0, t.panel_darker);
@@ -2093,9 +2111,9 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                         .add(egui::Button::new(RichText::new(brs_label).size(HOME_BUTTON)).corner_radius(HOME_PILL_RADIUS).min_size(vec2(0.0, 32.0)))
                         .clicked()
                     {
-                        let sample = std::path::Path::new("plan/pubgen/samples/brs/ntp202610.xlsx");
-                        if sample.is_file() {
-                            trigger_host_tab_action(ui.ctx(), HostTabAction::ImportPath(sample.to_path_buf()));
+                        let sample = bundled_sample_file("brs/ntp202610.xlsx");
+                        if let Some(sample) = sample {
+                            trigger_host_tab_action(ui.ctx(), HostTabAction::ImportPath(sample));
                         } else {
                             state.selected_profile = "bps_brs".into();
                             state.page_layout_facing = true;
@@ -2108,9 +2126,9 @@ pub fn render_orchestrator_home(_app: &mut DesignApp, ui: &mut Ui, state: &mut O
                         .add(egui::Button::new(RichText::new(dda_label).size(HOME_BUTTON)).corner_radius(HOME_PILL_RADIUS).min_size(vec2(0.0, 32.0)))
                         .clicked()
                     {
-                        let sample = std::path::Path::new("plan/pubgen/samples/SINGLE_LANG/BAB_02_2025.xlsx");
-                        if sample.is_file() {
-                            trigger_host_tab_action(ui.ctx(), HostTabAction::ImportPath(sample.to_path_buf()));
+                        let sample = bundled_sample_file("SINGLE_LANG/BAB_02_2025.xlsx");
+                        if let Some(sample) = sample {
+                            trigger_host_tab_action(ui.ctx(), HostTabAction::ImportPath(sample));
                         } else {
                             state.selected_profile = "bps_dda".into();
                             state.page_layout_facing = true;
@@ -8081,6 +8099,33 @@ mod tests {
 
         let doc = &app.session.active().unwrap().doc;
         assert!(doc.page_count() >= 5, "BRS sample should produce several pages, got {}", doc.page_count());
+    }
+
+    #[test]
+    fn test_bundled_sample_files_cover_the_repository_and_portable_layouts() {
+        let candidates = sample_file_candidates("brs/ntp202610.xlsx");
+        let rendered: Vec<String> = candidates.iter().map(|path| path.to_string_lossy().replace('\\', "/")).collect();
+        assert!(
+            rendered.iter().any(|path| path == "plan/pubgen/samples/brs/ntp202610.xlsx"),
+            "the repository layout is missing from the candidates: {rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|path| path == "samples/brs/ntp202610.xlsx"),
+            "the portable `samples\\<profile>` layout is missing from the candidates: {rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|path| path != "samples/brs/ntp202610.xlsx" && path.ends_with("/samples/brs/ntp202610.xlsx")),
+            "the layout next to the executable is missing from the candidates: {rendered:?}"
+        );
+
+        // A checkout keeps the sample in plan/pubgen/samples, so the button resolves it there; an install
+        // without that folder reports nothing instead of a path that does not exist.
+        let repo_sample = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plan/pubgen/samples/brs/ntp202610.xlsx");
+        if repo_sample.is_file() {
+            let found = bundled_sample_file("brs/ntp202610.xlsx").expect("the BRS sample workbook is in the source tree");
+            assert!(found.is_file(), "bundled_sample_file must return an existing file, got {found:?}");
+        }
+        assert_eq!(bundled_sample_file("brs/does_not_exist.xlsx"), None);
     }
 
     #[test]

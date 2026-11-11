@@ -168,16 +168,24 @@ if (Test-Path $AssetsSrc) {
   Copy-Item -Recurse -Force $AssetsSrc $Portable
 }
 
-# Pubgen samples: include all files from plan/pubgen/samples, excluding book_cover folder, and excluding *.csv and *.zip
+# Pubgen samples: include all files from plan/pubgen/samples, excluding book_cover folder, and excluding *.csv and *.zip.
+# Every profile lands flat at samples\<profile> with its own example files inside. A stale copy of the sample tree
+# inside a profile ("…\plan\pubgen\samples\…", which a manual re-copy leaves behind) is skipped: shipping it nests the
+# samples inside their own repository path, e.g. samples\brs\chart\plan\pubgen\samples\brs.
 $SamplesSrc = Join-Path $Root 'plan\pubgen\samples'
 $SamplesDest = Join-Path $Portable 'samples'
 if (Test-Path $SamplesSrc) {
   New-Item -ItemType Directory -Force -Path $SamplesDest | Out-Null
   $canonicalSamplesSrc = (Resolve-Path $SamplesSrc).Path
+  $script:skippedNestedCopies = 0
   Get-ChildItem -Path $SamplesSrc -Recurse | Where-Object {
     if ($_.PSIsContainer) { return $false }
     $relative = $_.FullName.Substring($canonicalSamplesSrc.Length).TrimStart('\', '/')
     if ($relative.StartsWith("book_cover\") -or $relative.StartsWith("book_cover/") -or $relative -eq "book_cover") {
+      return $false
+    }
+    if ($relative -match '(^|[\\/])(plan|pubgen)([\\/]|$)') {
+      $script:skippedNestedCopies++
       return $false
     }
     if ($_.Extension -eq '.csv' -or $_.Extension -eq '.zip') {
@@ -192,6 +200,22 @@ if (Test-Path $SamplesSrc) {
       New-Item -ItemType Directory -Force -Path $targetParent | Out-Null
     }
     Copy-Item -LiteralPath $_.FullName -Destination $targetFile -Force
+  }
+  if ($script:skippedNestedCopies -gt 0) {
+    Write-Warning "samples: skipped $($script:skippedNestedCopies) file(s) from a copy of the sample tree nested inside plan\pubgen\samples; delete that folder in the source tree to silence this."
+  }
+
+  # The portable app opens its example data from samples\<profile>, so the flat layout is part of the release
+  # contract: check it here and fail the build, instead of zipping samples the app cannot find.
+  foreach ($expected in @('brs\ntp202610.xlsx', 'brs\U1.rtf', 'SINGLE_LANG\BAB_02_2025.xlsx', 'DUAL_LANG\BAB_01_2025_ai_translate.xlsx', 'images\bps_logo.png')) {
+    if (-not (Test-Path (Join-Path $SamplesDest $expected))) {
+      throw "samples: samples\$expected is missing; plan\pubgen\samples must ship every profile's example files flat at samples\<profile>"
+    }
+  }
+  $NestedSampleDirs = @(Get-ChildItem -Path $SamplesDest -Recurse -Directory | Where-Object { $_.Name -eq 'plan' -or $_.Name -eq 'pubgen' })
+  if ($NestedSampleDirs.Count -gt 0) {
+    $relativeNested = $NestedSampleDirs | ForEach-Object { $_.FullName.Substring($SamplesDest.Length + 1) }
+    throw "samples: the portable package would ship nested sample folders ($($relativeNested -join ', ')); samples belong directly under samples\<profile>"
   }
 }
 
