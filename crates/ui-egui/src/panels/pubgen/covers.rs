@@ -3551,6 +3551,11 @@ pub(crate) mod tests {
 
     #[test]
     fn test_cover_map_overlay_uses_cover_geojson_with_highlight() {
+        // GeoJSON maps are gitignored; CI builds embed nothing → skip.
+        if super::super::charts::stock_maps::EMBEDDED_COVER_MAPS.is_empty() {
+            eprintln!("skipping: no embedded GeoJSON maps (CI build)");
+            return;
+        }
         let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({})).unwrap();
 
@@ -3574,6 +3579,11 @@ pub(crate) mod tests {
 
     #[test]
     fn test_back_cover_excludes_map_object_from_main_cover() {
+        // GeoJSON maps are gitignored; CI builds embed nothing → skip.
+        if super::super::charts::stock_maps::EMBEDDED_COVER_MAPS.is_empty() {
+            eprintln!("skipping: no embedded GeoJSON maps (CI build)");
+            return;
+        }
         let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({})).unwrap();
 
@@ -3606,6 +3616,11 @@ pub(crate) mod tests {
 
     #[test]
     fn test_cover_map_overlay_z_order_behind_textboxes_and_larger_bounds() {
+        // GeoJSON maps are gitignored; CI builds embed nothing → skip.
+        if super::super::charts::stock_maps::EMBEDDED_COVER_MAPS.is_empty() {
+            eprintln!("skipping: no embedded GeoJSON maps (CI build)");
+            return;
+        }
         let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({})).unwrap();
 

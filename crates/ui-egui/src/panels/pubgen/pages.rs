@@ -7027,6 +7027,11 @@ Grafik,01.01,Grafik 01.01 Pertumbuhan Ekonomi,C01_01.csv\n";
 
     #[test]
     fn test_mxx_map_chart_generation_and_three_line_title() {
+        // GeoJSON maps are gitignored; CI builds embed nothing → skip.
+        if super::super::charts::stock_maps::EMBEDDED_CHART_MAPS.is_empty() {
+            eprintln!("skipping: no embedded GeoJSON maps (CI build)");
+            return;
+        }
         let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({"width": 595.28, "height": 841.89})).unwrap();
 
