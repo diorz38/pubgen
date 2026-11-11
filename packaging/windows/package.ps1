@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
   Build, sign and package DesignCraft for Windows.
 
