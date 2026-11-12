@@ -4861,10 +4861,7 @@ fn resolve_chart_catalog_file(
     let staged = |rel: &str| -> String { stage.join(rel.replace('\\', "/")).to_string_lossy().into_owned() };
 
     // 1. The user's modified / independent data on the card (Opsi Grafik).
-    if !card.chart_raw_data.trim().is_empty()
-        && !is_sample_chart_data(&card.chart_raw_data)
-        && !csv_holds_chart_spec(&card.chart_raw_data)
-    {
+    if !card.chart_raw_data.trim().is_empty() && !is_sample_chart_data(&card.chart_raw_data) && !csv_holds_chart_spec(&card.chart_raw_data) {
         let p = stage.join(format!("csv/{chart_id}_from_data.csv"));
         if let Some(dir) = p.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -5028,11 +5025,8 @@ fn build_chart_sheet_csv(card: &PublicationCard) -> String {
     if !card.title.is_empty() {
         lines.push(format!("title{delim}{}", super::excel::escape_csv_field(&card.title)));
     }
-    let eff_title_en = if !card.title_en.is_empty() {
-        card.title_en.as_str()
-    } else {
-        card.settings.get("title_en").map(String::as_str).unwrap_or("")
-    };
+    let eff_title_en =
+        if !card.title_en.is_empty() { card.title_en.as_str() } else { card.settings.get("title_en").map(String::as_str).unwrap_or("") };
     if !eff_title_en.is_empty() {
         lines.push(format!("title_en{delim}{}", super::excel::escape_csv_field(eff_title_en)));
     }
@@ -6860,11 +6854,7 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
             }
         } else {
             let t = card.settings.get("theme").cloned().unwrap_or_default();
-            if t.starts_with('#') || t.starts_with("rgb") || t.starts_with("cmyk") {
-                t
-            } else {
-                String::new()
-            }
+            if t.starts_with('#') || t.starts_with("rgb") || t.starts_with("cmyk") { t } else { String::new() }
         };
         let chapter = card.settings.get("chapter").or_else(|| card.settings.get("chapter_title")).cloned().unwrap_or_else(|| {
             let ch_num = card.title.split_whitespace().find(|w| w.chars().any(|c| c.is_ascii_digit())).unwrap_or("");
@@ -7321,36 +7311,15 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
 }
 
 fn lighten_color(c: Color32, amount: u8) -> Color32 {
-    Color32::from_rgba_premultiplied(
-        c.r().saturating_add(amount),
-        c.g().saturating_add(amount),
-        c.b().saturating_add(amount),
-        c.a(),
-    )
+    Color32::from_rgba_premultiplied(c.r().saturating_add(amount), c.g().saturating_add(amount), c.b().saturating_add(amount), c.a())
 }
 
 fn darken_color(c: Color32, amount: u8) -> Color32 {
-    Color32::from_rgba_premultiplied(
-        c.r().saturating_sub(amount),
-        c.g().saturating_sub(amount),
-        c.b().saturating_sub(amount),
-        c.a(),
-    )
+    Color32::from_rgba_premultiplied(c.r().saturating_sub(amount), c.g().saturating_sub(amount), c.b().saturating_sub(amount), c.a())
 }
 
-fn custom_styled_button(
-    ui: &mut Ui,
-    size: [f32; 2],
-    label: &str,
-    base_color: Color32,
-    text_color: Color32,
-    enabled: bool,
-    t: &Tokens,
-) -> Response {
-    let (rect, resp) = ui.allocate_exact_size(
-        vec2(size[0], size[1]),
-        if enabled { Sense::click() } else { Sense::hover() },
-    );
+fn custom_styled_button(ui: &mut Ui, size: [f32; 2], label: &str, base_color: Color32, text_color: Color32, enabled: bool, t: &Tokens) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(size[0], size[1]), if enabled { Sense::click() } else { Sense::hover() });
     if ui.is_rect_visible(rect) {
         let (bg, fg, stroke) = if !enabled {
             (t.panel_darker, t.text_dim, Stroke::NONE)
@@ -9352,11 +9321,8 @@ Plawad,8.83,7,103.18\n";
         let active = app.session.active().expect("active document");
         let all_text: Vec<&str> = active.doc.stories.values().map(|s| s.text.as_str()).collect();
 
-        let para_toc = all_text
-            .iter()
-            .find(|t| t.contains("Daftar Isi") || t.contains("Table of Contents"))
-            .copied()
-            .expect("TOC Paragraph story must exist");
+        let para_toc =
+            all_text.iter().find(|t| t.contains("Daftar Isi") || t.contains("Table of Contents")).copied().expect("TOC Paragraph story must exist");
 
         // Bab 03 and Bab 04 paragraph headings must pair with their English translations
         assert!(

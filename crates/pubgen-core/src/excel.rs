@@ -2040,7 +2040,7 @@ mod tests {
     #[test]
     fn test_find_chart_linked_sheet_normalizes_spaces_and_matches_names() {
         let sheet_names = vec!["03_01L".to_string(), "03_02L".to_string(), "C03_01".to_string()];
-        
+
         let mut kv1 = BTreeMap::new();
         kv1.insert("data".into(), "03  01L".into()); // extra space from Excel
         assert_eq!(find_chart_linked_sheet(&kv1, &sheet_names), Some("03_01L".to_string()));
