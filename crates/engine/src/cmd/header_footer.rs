@@ -793,6 +793,27 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
 
         // Single vs Double sided processing
         let is_hf_brs = hf.preset.eq_ignore_ascii_case("hf-brs") || hf.preset.eq_ignore_ascii_case("brs");
+        // The DDA footer prints two lines (publication title + English title with year). At the
+        // 12 pt default it grows ~28.8 pt upward from the 24 pt footer offset, leaving under 4 pt
+        // to the 20 mm bottom margin line. 9 pt keeps the same two lines ~22.5 pt tall with a
+        // ~10 pt clearance, so the footer never crowds the body-text margin.
+        let is_hf_dda =
+            hf.preset.eq_ignore_ascii_case("hf-dda") || hf.preset.eq_ignore_ascii_case("dda") || hf.preset.eq_ignore_ascii_case("bps-dda");
+        let dda_footer_frame = |d: &mut Document,
+                                existing: Option<ItemId>,
+                                parent_idx: usize,
+                                rect: Rect,
+                                layer: designcraft_doc::LayerId,
+                                text: &str,
+                                style: &str,
+                                swatch: Option<&str>|
+         -> Result<Option<ItemId>> {
+            if is_hf_dda {
+                sync_styled_text_frame(d, existing, parent_idx, rect, layer, text, style, swatch, None, None, Some(9.0), None, 6)
+            } else {
+                sync_text_frame(d, existing, parent_idx, rect, layer, text, style, swatch, 6)
+            }
+        };
         match hf.sided {
             Sided::Single => {
                 // If previously double-sided items existed, remove them
@@ -911,17 +932,8 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                     )?;
                 } else {
                     remove_optional_item(d, hf.folio_items.single.take());
-                    hf.footer_items.single = sync_text_frame(
-                        d,
-                        hf.footer_items.single,
-                        parent_idx,
-                        f_rect,
-                        layer,
-                        &f_text,
-                        &style_to_use,
-                        text_swatch.as_deref(),
-                        6, // Bottom
-                    )?;
+                    hf.footer_items.single =
+                        dda_footer_frame(d, hf.footer_items.single, parent_idx, f_rect, layer, &f_text, &style_to_use, text_swatch.as_deref())?;
                 }
             }
             Sided::Double => {
@@ -1027,7 +1039,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                 } else {
                     remove_optional_item(d, hf.folio_items.left.take());
                     hf.footer_items.left =
-                        sync_text_frame(d, hf.footer_items.left, parent_idx, lf_rect, layer, &lf_text, &style_to_use, text_swatch.as_deref(), 6)?;
+                        dda_footer_frame(d, hf.footer_items.left, parent_idx, lf_rect, layer, &lf_text, &style_to_use, text_swatch.as_deref())?;
                 }
 
                 // Right (Recto)
@@ -1119,7 +1131,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                 } else {
                     remove_optional_item(d, hf.folio_items.right.take());
                     hf.footer_items.right =
-                        sync_text_frame(d, hf.footer_items.right, parent_idx, rf_rect, layer, &rf_text, &style_to_use, text_swatch.as_deref(), 6)?;
+                        dda_footer_frame(d, hf.footer_items.right, parent_idx, rf_rect, layer, &rf_text, &style_to_use, text_swatch.as_deref())?;
                 }
             }
         }
@@ -2188,6 +2200,61 @@ mod tests {
 
         let rf_text = text_of(hf.footer_items.right).expect("right footer text");
         assert!(rf_text.contains("Title") || rf_text.is_empty(), "right footer has title text");
+    }
+
+    /// The DDA footer prints two lines (publication title + English title with year). At the
+    /// 12 pt default the grown frame reached within ~4 pt of the 20 mm bottom margin line,
+    /// crowding the body text. The fix runs the DDA footer at 9 pt so it keeps clearance.
+    #[test]
+    fn test_hf_dda_footer_keeps_bottom_margin_clearance() {
+        const A4: (f64, f64) = (595.275_590_551_181_2, 841.889_763_779_527_7);
+        const DDA_BOTTOM_MM: f64 = 20.0;
+        let mut s = session_with_doc(true, 4);
+        s.edit(|d, _| {
+            let m = Margins {
+                top: 57.259_842_519_685_044,         // 20.2 mm
+                bottom: DDA_BOTTOM_MM * 72.0 / 25.4, // 20 mm ≈ 56.69 pt
+                inside: 53.858_267_716_535_44,       // 19 mm
+                outside: 42.519_685_039_370_08,      // 15 mm
+            };
+            for sp in &mut d.spreads {
+                let sp = Arc::make_mut(sp);
+                sp.pages.iter_mut().for_each(|pg| {
+                    pg.width = A4.0;
+                    pg.height = A4.1;
+                    pg.margins = m;
+                    pg.local_margins = true;
+                });
+                sp.relayout();
+            }
+            for p in &mut d.parents {
+                let p = Arc::make_mut(p);
+                p.pages.iter_mut().for_each(|pg| {
+                    pg.width = A4.0;
+                    pg.height = A4.1;
+                });
+                p.relayout();
+            }
+            Ok(serde_json::Value::Null)
+        })
+        .unwrap();
+
+        let footer_text = "PROVINSI JAWA BARAT DALAM ANGKA\nJAWA BARAT PROVINCE IN FIGURES\u{e006}2026";
+        let res = s.execute("layout.headerFooter.apply", &json!({ "preset": "hf-dda", "footer": { "left": footer_text, "right": footer_text } }));
+        assert!(res.is_ok(), "apply hf-dda should succeed: {res:?}");
+
+        let doc = &s.doc().unwrap().doc;
+        let hf = doc.header_footer.as_ref().unwrap();
+        let margin_line = A4.1 - DDA_BOTTOM_MM * 72.0 / 25.4;
+        for (side, id) in [("left", hf.footer_items.left), ("right", hf.footer_items.right)] {
+            let id = id.unwrap_or_else(|| panic!("the {side} footer frame exists"));
+            let b = doc.item(id).unwrap().bounds();
+            assert!(b.y0 >= margin_line + 8.0, "the {side} footer top {:.2} must clear the 20 mm margin line {:.2} by 8 pt", b.y0, margin_line);
+            assert!(b.height() <= 24.0, "the {side} footer stays compact at 9 pt, got {:.2} pt", b.height());
+            let tf = doc.item(id).unwrap().text_frame().unwrap();
+            let st = doc.story(tf.story).unwrap();
+            assert_eq!(st.paras.first().unwrap().chars.size, Some(9.0), "the {side} footer runs at 9 pt");
+        }
     }
 
     #[test]
