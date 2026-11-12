@@ -125,6 +125,11 @@ pub struct PublicationCard {
     pub cover_template: String,
     pub cover_map_style: u8,
     pub cover_add_map: bool,
+    /// 999 = custom GeoJSON path, otherwise an index into `list_stock_cover_maps()`.
+    #[serde(default)]
+    pub cover_map_stock_idx: usize,
+    #[serde(default)]
+    pub cover_map_custom_path: String,
     pub cover_inside_back: bool,
     pub cover_theme_preset: String,
     pub cover_ai_preset: String,
@@ -273,6 +278,8 @@ impl Default for PublicationCard {
             cover_template: "bps_brs_standard.designcraft".into(),
             cover_map_style: 0,
             cover_add_map: true,
+            cover_map_stock_idx: 0,
+            cover_map_custom_path: String::new(),
             cover_inside_back: false,
             cover_theme_preset: "Classic BPS (Blue/Gold)".into(),
             cover_ai_preset: "Geometris Abstrak Data".into(),
@@ -855,6 +862,11 @@ impl OrchestratorWorkspaceState {
                         settings.insert("palette".into(), serde_json::Value::String(card.cover_ai_palette.clone()));
                     }
                     settings.insert("add_map".into(), serde_json::Value::Bool(card.cover_add_map));
+                    settings.insert("cover_map_style".into(), serde_json::json!(card.cover_map_style));
+                    settings.insert("cover_map_stock_idx".into(), serde_json::json!(card.cover_map_stock_idx));
+                    if !card.cover_map_custom_path.is_empty() {
+                        settings.insert("cover_map_custom_path".into(), serde_json::Value::String(card.cover_map_custom_path.clone()));
+                    }
                     settings.insert("inside_back".into(), serde_json::Value::Bool(card.cover_inside_back));
                 }
                 if card.kind == CardKind::MapChart {
@@ -1322,6 +1334,18 @@ pub fn apply_ingest_report_to_state(
                     }
                     if let Some(yr) = pc.settings.get("year") {
                         pc.cover_year = yr.clone();
+                    }
+                    if let Some(am) = pc.settings.get("add_map").and_then(|v| v.parse::<bool>().ok()) {
+                        pc.cover_add_map = am;
+                    }
+                    if let Some(ms) = pc.settings.get("cover_map_style").and_then(|v| v.parse::<u64>().ok()) {
+                        pc.cover_map_style = ms.min(u8::MAX as u64) as u8;
+                    }
+                    if let Some(mi) = pc.settings.get("cover_map_stock_idx").and_then(|v| v.parse::<u64>().ok()) {
+                        pc.cover_map_stock_idx = mi.min(999) as usize;
+                    }
+                    if let Some(mp) = pc.settings.get("cover_map_custom_path") {
+                        pc.cover_map_custom_path = mp.clone();
                     }
                     if let Some(vol) = pc.settings.get("volume") {
                         pc.cover_volume = vol.clone();
@@ -1840,6 +1864,16 @@ pub(crate) fn sync_card_to_pubgen_state(card: &PublicationCard, state: &Orchestr
 
     pubgen_st.cover_style = card.cover_style_idx;
     pubgen_st.cover_add_map = card.cover_add_map;
+    // The cover card's GeoJSON choice drives `apply_cover_map_overlay` at generation time;
+    // without this copy every generated cover keeps the panel-default stock map.
+    pubgen_st.cover_map_style = card.cover_map_style as usize;
+    if card.cover_map_stock_idx == 999 && card.cover_map_custom_path.trim().is_empty() {
+        // "Custom GeoJSON…" with no path is not a usable selection; fall back to stock.
+        pubgen_st.cover_map_stock_idx = 0;
+    } else {
+        pubgen_st.cover_map_stock_idx = card.cover_map_stock_idx;
+    }
+    pubgen_st.cover_map_custom_path = card.cover_map_custom_path.clone();
     pubgen_st.cover_include_inside_back = card.cover_inside_back;
 
     if let Some(h) = card.settings.get("image_hero").or_else(|| card.settings.get("imagehero")).or_else(|| card.settings.get("image")) {
@@ -4827,10 +4861,7 @@ fn resolve_chart_catalog_file(
     let staged = |rel: &str| -> String { stage.join(rel.replace('\\', "/")).to_string_lossy().into_owned() };
 
     // 1. The user's modified / independent data on the card (Opsi Grafik).
-    if !card.chart_raw_data.trim().is_empty()
-        && !is_sample_chart_data(&card.chart_raw_data)
-        && !csv_holds_chart_spec(&card.chart_raw_data)
-    {
+    if !card.chart_raw_data.trim().is_empty() && !is_sample_chart_data(&card.chart_raw_data) && !csv_holds_chart_spec(&card.chart_raw_data) {
         let p = stage.join(format!("csv/{chart_id}_from_data.csv"));
         if let Some(dir) = p.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -4994,11 +5025,8 @@ fn build_chart_sheet_csv(card: &PublicationCard) -> String {
     if !card.title.is_empty() {
         lines.push(format!("title{delim}{}", super::excel::escape_csv_field(&card.title)));
     }
-    let eff_title_en = if !card.title_en.is_empty() {
-        card.title_en.as_str()
-    } else {
-        card.settings.get("title_en").map(String::as_str).unwrap_or("")
-    };
+    let eff_title_en =
+        if !card.title_en.is_empty() { card.title_en.as_str() } else { card.settings.get("title_en").map(String::as_str).unwrap_or("") };
     if !eff_title_en.is_empty() {
         lines.push(format!("title_en{delim}{}", super::excel::escape_csv_field(eff_title_en)));
     }
@@ -5665,6 +5693,16 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                                                 card.settings.insert("office_address".into(), pubgen_st.cover_office_address.clone());
                                                 card.cover_style_idx = pubgen_st.cover_style;
                                                 card.cover_add_map = pubgen_st.cover_add_map;
+                                                // The GeoJSON choice made in the embedded cover editor must
+                                                // travel with the card or generation redraws the default map.
+                                                card.cover_map_style = pubgen_st.cover_map_style.min(u8::MAX as usize) as u8;
+                                                card.cover_map_stock_idx = pubgen_st.cover_map_stock_idx;
+                                                card.cover_map_custom_path = pubgen_st.cover_map_custom_path.clone();
+                                                card.settings.insert("cover_map_style".into(), card.cover_map_style.to_string());
+                                                card.settings.insert("cover_map_stock_idx".into(), card.cover_map_stock_idx.to_string());
+                                                if !card.cover_map_custom_path.is_empty() {
+                                                    card.settings.insert("cover_map_custom_path".into(), card.cover_map_custom_path.clone());
+                                                }
                                                 card.cover_inside_back = pubgen_st.cover_include_inside_back;
                                             });
                                         } else if card.cover_tab == 1 {
@@ -6816,11 +6854,7 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
             }
         } else {
             let t = card.settings.get("theme").cloned().unwrap_or_default();
-            if t.starts_with('#') || t.starts_with("rgb") || t.starts_with("cmyk") {
-                t
-            } else {
-                String::new()
-            }
+            if t.starts_with('#') || t.starts_with("rgb") || t.starts_with("cmyk") { t } else { String::new() }
         };
         let chapter = card.settings.get("chapter").or_else(|| card.settings.get("chapter_title")).cloned().unwrap_or_else(|| {
             let ch_num = card.title.split_whitespace().find(|w| w.chars().any(|c| c.is_ascii_digit())).unwrap_or("");
@@ -7277,36 +7311,15 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
 }
 
 fn lighten_color(c: Color32, amount: u8) -> Color32 {
-    Color32::from_rgba_premultiplied(
-        c.r().saturating_add(amount),
-        c.g().saturating_add(amount),
-        c.b().saturating_add(amount),
-        c.a(),
-    )
+    Color32::from_rgba_premultiplied(c.r().saturating_add(amount), c.g().saturating_add(amount), c.b().saturating_add(amount), c.a())
 }
 
 fn darken_color(c: Color32, amount: u8) -> Color32 {
-    Color32::from_rgba_premultiplied(
-        c.r().saturating_sub(amount),
-        c.g().saturating_sub(amount),
-        c.b().saturating_sub(amount),
-        c.a(),
-    )
+    Color32::from_rgba_premultiplied(c.r().saturating_sub(amount), c.g().saturating_sub(amount), c.b().saturating_sub(amount), c.a())
 }
 
-fn custom_styled_button(
-    ui: &mut Ui,
-    size: [f32; 2],
-    label: &str,
-    base_color: Color32,
-    text_color: Color32,
-    enabled: bool,
-    t: &Tokens,
-) -> Response {
-    let (rect, resp) = ui.allocate_exact_size(
-        vec2(size[0], size[1]),
-        if enabled { Sense::click() } else { Sense::hover() },
-    );
+fn custom_styled_button(ui: &mut Ui, size: [f32; 2], label: &str, base_color: Color32, text_color: Color32, enabled: bool, t: &Tokens) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(size[0], size[1]), if enabled { Sense::click() } else { Sense::hover() });
     if ui.is_rect_visible(rect) {
         let (bg, fg, stroke) = if !enabled {
             (t.panel_darker, t.text_dim, Stroke::NONE)
@@ -7456,6 +7469,35 @@ mod tests {
         assert_eq!(dock_width(1440.0, true, 5000.0).0, 1440.0 * RIGHT_DOCK_MAX_SHARE);
         assert_eq!(dock_width(300.0, true, 5000.0).0, RIGHT_DOCK_MIN_W);
         assert_eq!(dock_width(1440.0, false, 320.0), (RIGHT_DOCK_COLLAPSED_W, 0.0));
+    }
+
+    /// The cover card's GeoJSON choice must reach `PubgenState` for generation
+    /// (`apply_cover_map_overlay` reads the state fields, not the card); before the fix
+    /// only `cover_add_map` was copied and every generated cover kept the default stock map.
+    #[test]
+    fn cover_card_map_selection_syncs_into_generation_state() {
+        let state = OrchestratorWorkspaceState::default();
+        let mut card = PublicationCard::default();
+        card.kind = CardKind::Cover;
+        card.cover_add_map = true;
+        card.cover_map_style = 2;
+        card.cover_map_stock_idx = 3;
+        let mut st = crate::dock::pubgen::PubgenState::default();
+        sync_card_to_pubgen_state(&card, &state, &mut st);
+        assert!(st.cover_add_map);
+        assert_eq!(st.cover_map_stock_idx, 3, "the picked stock map reaches the generation state");
+        assert_eq!(st.cover_map_style, 2, "the picked map style reaches the generation state");
+
+        // "Custom GeoJSON…" with no path is not a usable selection; fall back to stock.
+        card.cover_map_stock_idx = 999;
+        card.cover_map_custom_path = String::new();
+        sync_card_to_pubgen_state(&card, &state, &mut st);
+        assert_eq!(st.cover_map_stock_idx, 0, "custom without a path falls back to the stock picker");
+
+        card.cover_map_custom_path = "maps/karawang.geojson".into();
+        sync_card_to_pubgen_state(&card, &state, &mut st);
+        assert_eq!(st.cover_map_stock_idx, 999);
+        assert_eq!(st.cover_map_custom_path, "maps/karawang.geojson");
     }
 
     /// Three tabs share the dock at ~100 px each (the default 320 px dock), less than "Sources &
@@ -9279,11 +9321,8 @@ Plawad,8.83,7,103.18\n";
         let active = app.session.active().expect("active document");
         let all_text: Vec<&str> = active.doc.stories.values().map(|s| s.text.as_str()).collect();
 
-        let para_toc = all_text
-            .iter()
-            .find(|t| t.contains("Daftar Isi") || t.contains("Table of Contents"))
-            .copied()
-            .expect("TOC Paragraph story must exist");
+        let para_toc =
+            all_text.iter().find(|t| t.contains("Daftar Isi") || t.contains("Table of Contents")).copied().expect("TOC Paragraph story must exist");
 
         // Bab 03 and Bab 04 paragraph headings must pair with their English translations
         assert!(

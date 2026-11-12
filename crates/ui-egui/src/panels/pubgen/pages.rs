@@ -3335,11 +3335,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                 }
             }
 
-            let eff_id_title = if !clean_id_title.is_empty() {
-                clean_id_title
-            } else {
-                detected_map_title.as_deref().unwrap_or(clean_id_title)
-            };
+            let eff_id_title = if !clean_id_title.is_empty() { clean_id_title } else { detected_map_title.as_deref().unwrap_or(clean_id_title) };
             let eff_title_en_val = if !title_en_val.is_empty() {
                 title_en_val
             } else if let Some(ref dte) = detected_map_title_en {
@@ -3568,7 +3564,9 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                                         continue;
                                     }
                                 };
-                                let palette = if !theme_val.is_empty() && (theme_val.starts_with('#') || theme_val.starts_with("rgb") || theme_val.starts_with("cmyk")) {
+                                let palette = if !theme_val.is_empty()
+                                    && (theme_val.starts_with('#') || theme_val.starts_with("rgb") || theme_val.starts_with("cmyk"))
+                                {
                                     vec![theme_val.to_string()]
                                 } else if let Some(ref th) = st.card2_theme_override {
                                     vec![th.clone()]
@@ -3997,7 +3995,9 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                                 .or_else(|| st.translations.get(title_val.trim()))
                                 .map(String::as_str)
                                 .filter(|s| !s.is_empty())
-                                .map(|en| if is_table { super::toc::strip_tablepage_title_prefix(en, num_val, "Table").to_string() } else { en.to_string() }),
+                                .map(|en| {
+                                    if is_table { super::toc::strip_tablepage_title_prefix(en, num_val, "Table").to_string() } else { en.to_string() }
+                                }),
                             None => None,
                         };
 
@@ -4264,7 +4264,9 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                                 .or_else(|| st.translations.get(title_val.trim()))
                                 .map(String::as_str)
                                 .filter(|s| !s.is_empty())
-                                .map(|en| if is_table { super::toc::strip_tablepage_title_prefix(en, num_val, "Table").to_string() } else { en.to_string() }),
+                                .map(|en| {
+                                    if is_table { super::toc::strip_tablepage_title_prefix(en, num_val, "Table").to_string() } else { en.to_string() }
+                                }),
                             None => None,
                         };
 
@@ -5728,19 +5730,12 @@ pub(crate) mod tests {
 
         let mut translations = std::collections::HashMap::new();
         // TM harvested with full prefix
-        translations.insert(
-            "Tabel 04.04.01 Banyaknya Desa Bencana, 2025".to_string(),
-            "Table 04.04.01 Number of Disaster Villages, 2025".to_string(),
-        );
+        translations
+            .insert("Tabel 04.04.01 Banyaknya Desa Bencana, 2025".to_string(), "Table 04.04.01 Number of Disaster Villages, 2025".to_string());
 
         let st = PubgenState {
             card1_preset: 0,
-            card1_records: vec![vec![
-                "Tabel".into(),
-                "04.04.01".into(),
-                "Tabel 04.04.01 Banyaknya Desa Bencana, 2025".into(),
-                "04_04_01".into(),
-            ]],
+            card1_records: vec![vec!["Tabel".into(), "04.04.01".into(), "Tabel 04.04.01 Banyaknya Desa Bencana, 2025".into(), "04_04_01".into()]],
             card1_headers: vec!["type".into(), "number".into(), "title".into(), "file".into()],
             card1_type_col: 0,
             card1_num_col: 1,
@@ -5758,10 +5753,7 @@ pub(crate) mod tests {
         let active = app.session.active().unwrap();
         let stories: Vec<_> = active.doc.stories.values().collect();
 
-        let box3 = stories
-            .iter()
-            .find(|s| s.text.contains("Banyaknya Desa Bencana, 2025"))
-            .expect("Textbox 3 found");
+        let box3 = stories.iter().find(|s| s.text.contains("Banyaknya Desa Bencana, 2025")).expect("Textbox 3 found");
         let (t3_line1, t3_line2) = box3.text.split_once(designcraft_doc::story::FORCED_LINE_BREAK).expect("2 lines in textbox 3");
         assert_eq!(t3_line1, "Banyaknya Desa Bencana, 2025");
         assert_eq!(t3_line2, "Number of Disaster Villages, 2025");

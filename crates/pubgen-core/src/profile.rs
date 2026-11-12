@@ -109,13 +109,15 @@ impl ProfileService {
             ProfileId::BpsDda => PublicationProfile {
                 id: ProfileId::BpsDda,
                 geometry: LayoutGeometry {
-                    paper_size: "B5".to_string(),
-                    width_mm: 176.0,
-                    height_mm: 250.0,
-                    margin_top_mm: 20.0,
+                    // BPS DDA prints A4 with 20.2/20/19/15 mm margins (top/bottom/inside/outside),
+                    // matching `assets/pubgen/profiles/bps_dda.json` and the app profile manager.
+                    paper_size: "A4".to_string(),
+                    width_mm: 210.0,
+                    height_mm: 297.0,
+                    margin_top_mm: 20.2,
                     margin_bottom_mm: 20.0,
-                    margin_left_mm: 25.0,
-                    margin_right_mm: 20.0,
+                    margin_left_mm: 19.0,
+                    margin_right_mm: 15.0,
                     facing_pages: true,
                 },
                 bilingual: true,
@@ -161,5 +163,24 @@ impl ProfileService {
                 toc_show_leaders: false,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The DDA profile prints A4 with the BPS 20.2/20/19/15 mm margins — the same geometry
+    /// as `assets/pubgen/profiles/bps_dda.json`; it shipped B5 before the fix.
+    #[test]
+    fn dda_profile_is_a4_with_bps_margins() {
+        let p = ProfileService::for_id(ProfileId::BpsDda);
+        assert_eq!(p.geometry.paper_size, "A4");
+        assert_eq!((p.geometry.width_mm, p.geometry.height_mm), (210.0, 297.0));
+        assert_eq!(p.geometry.margin_top_mm, 20.2);
+        assert_eq!(p.geometry.margin_bottom_mm, 20.0);
+        assert_eq!(p.geometry.margin_left_mm, 19.0);
+        assert_eq!(p.geometry.margin_right_mm, 15.0);
+        assert!(p.geometry.facing_pages);
     }
 }

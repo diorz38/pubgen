@@ -93,10 +93,7 @@ pub fn rtf(doc: &Document, story: &Story) -> String {
     for (i, r) in ranges.iter().enumerate() {
         let pf = story.paras.get(i).cloned().unwrap_or_default();
         let (pp, base) = styles.resolve_para(&pf);
-        if !pf.style.is_empty()
-            && pf.style != designcraft_doc::story::BASIC_PARAGRAPH
-            && !style_names.contains(&pf.style)
-        {
+        if !pf.style.is_empty() && pf.style != designcraft_doc::story::BASIC_PARAGRAPH && !style_names.contains(&pf.style) {
             style_names.push(pf.style.clone());
         }
         let mut runs = Vec::new();
