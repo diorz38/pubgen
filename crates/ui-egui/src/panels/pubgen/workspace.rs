@@ -7056,14 +7056,18 @@ fn start_compile_job(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orche
         Ok(msg) => {
             state.execution_log.push(format!("[{now}] {msg}"));
             let total_doc_pages = app.session.doc().map(|d| d.doc.pages().count()).unwrap_or(0);
+            let cover_failed = msg.contains("cover failed");
             state.compile_progress = Some(CompileProgressState {
                 is_publish: publish,
                 total_pages: total_doc_pages,
                 current_page: 0,
                 status_text: crate::i18n::tr(lang, "Menyiapkan pratinjau halaman tata letak…").to_string(),
-                error_msg: None,
+                error_msg: if cover_failed { Some(msg.clone()) } else { None },
                 completed: total_doc_pages == 0,
             });
+            if cover_failed {
+                state.status_message = Some((msg.clone(), false));
+            }
             ctx.request_repaint();
         }
         Err(e) => {

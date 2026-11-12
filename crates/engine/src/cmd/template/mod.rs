@@ -339,7 +339,12 @@ fn apply_template_page(s: &mut Session, p: &Value) -> Result<Value> {
     let fit_mode = p.get("image_fitting").and_then(Value::as_str);
     for (fid, img_path, key) in inserted.image_tasks {
         if Path::new(&img_path).exists() {
-            let _ = s.execute("file.place", &json!({"frame": fid.0, "path": img_path}));
+            // A locked frame keeps its own artwork; placing into it is refused by
+            // `file.place`, so skip it instead of failing the whole template.
+            if s.doc()?.doc.item(fid).is_some_and(|it| it.locked) {
+                continue;
+            }
+            s.execute("file.place", &json!({"frame": fid.0, "path": img_path}))?;
             let mode = fit_mode.unwrap_or_else(|| default_image_fit(&key));
             let _ = s.execute("object.fit", &json!({"mode": mode, "ids": [fid.0]}));
             let _ = s.execute("object.fit", &json!({"mode": "centerContent", "ids": [fid.0]}));
@@ -348,7 +353,10 @@ fn apply_template_page(s: &mut Session, p: &Value) -> Result<Value> {
 
     for (fid, rtf_path) in inserted.story_tasks {
         if Path::new(&rtf_path).exists() {
-            let _ = s.execute("file.place", &json!({"frame": fid.0, "path": rtf_path}));
+            if s.doc()?.doc.item(fid).is_some_and(|it| it.locked) {
+                continue;
+            }
+            s.execute("file.place", &json!({"frame": fid.0, "path": rtf_path}))?;
         }
     }
 

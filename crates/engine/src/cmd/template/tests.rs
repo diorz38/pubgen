@@ -196,6 +196,64 @@ fn test_a_photograph_covers_the_frame_it_is_placed_in() {
 }
 
 #[test]
+fn test_template_page_apply_reports_invalid_image_placement() {
+    let mut tpl_doc = Document::new(&NewDocument { pages: 1, facing_pages: false, width: 420.0, height: 595.0, ..Default::default() });
+    let rect = Rect::new(36.0, 36.0, 384.0, 236.0);
+    let (item_id, _) = tpl_doc.add_text_frame(SpreadRef::Doc(0), rect, tpl_doc.default_layer(), "", ParaFormat::default()).unwrap();
+    if let Some(it) = tpl_doc.item_mut(item_id) {
+        it.label = "#slot:image:hero".to_string();
+    }
+    let tpl_bytes = designcraft_format::save(&tpl_doc).unwrap();
+
+    let image = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+    std::fs::write(image.path(), b"not a png").unwrap();
+
+    let mut s = Session::new();
+    s.execute("file.new", &json!({"pages": 1})).unwrap();
+    let err = s
+        .execute(
+            "template.page.apply",
+            &json!({
+                "bytes": tpl_bytes,
+                "slots": {"image": {"hero": image.path().to_string_lossy()}}
+            }),
+        )
+        .unwrap_err();
+
+    assert!(
+        matches!(&err, crate::EngineError::BadParams { cmd, msg } if cmd == "file.place" && msg == "unsupported or corrupt image"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn test_template_page_apply_skips_locked_image_slot() {
+    // A locked slot frame keeps its own artwork; the template must still apply.
+    let mut tpl_doc = Document::new(&NewDocument { pages: 1, facing_pages: false, width: 420.0, height: 595.0, ..Default::default() });
+    let rect = Rect::new(36.0, 36.0, 384.0, 236.0);
+    let (item_id, _) = tpl_doc.add_text_frame(SpreadRef::Doc(0), rect, tpl_doc.default_layer(), "", ParaFormat::default()).unwrap();
+    if let Some(it) = tpl_doc.item_mut(item_id) {
+        it.label = "#slot:image:hero".to_string();
+        it.locked = true;
+    }
+    let tpl_bytes = designcraft_format::save(&tpl_doc).unwrap();
+
+    let image = tempfile::Builder::new().suffix(".png").tempfile().unwrap();
+    std::fs::write(image.path(), b"not a png").unwrap();
+
+    let mut s = Session::new();
+    s.execute("file.new", &json!({"pages": 1})).unwrap();
+    s.execute(
+        "template.page.apply",
+        &json!({
+            "bytes": tpl_bytes,
+            "slots": {"image": {"hero": image.path().to_string_lossy()}}
+        }),
+    )
+    .expect("a locked slot frame does not fail the template");
+}
+
+#[test]
 fn test_parse_slot_tag_non_slot_or_invalid() {
     assert_eq!(parse_slot_tag("regular_frame_label"), None);
     assert_eq!(parse_slot_tag("#slot:"), None);

@@ -1518,7 +1518,7 @@ pub fn execute_generate_front_cover(app: &mut DesignApp, st: &PubgenState) -> Re
     }
 
     if st.cover_style >= 100 {
-        return apply_ai_cover_result(app, st, "");
+        return apply_ai_cover_front(app, st, "");
     }
 
     // 1. Automatically insert a new page before the first page (Page 1)
@@ -2211,6 +2211,22 @@ pub fn apply_cover_map_overlay(app: &mut DesignApp, st: &PubgenState) -> Result<
     Ok(())
 }
 
+/// Directory holding generated cover images.
+pub(crate) fn ai_cover_output_dir() -> std::path::PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    cwd.join("outputs").join("ai_covers")
+}
+
+/// Resolve generated cover output once so later placement never depends on process CWD.
+pub(crate) fn ai_cover_output_path(filename: &str) -> std::path::PathBuf {
+    ai_cover_output_dir().join(filename)
+}
+
+/// Aspect matching the portrait A4 `100_ai_base.designcraft` front cover.
+pub(crate) fn ai_cover_aspect() -> imagegen::Aspect {
+    super::ai_cover_job::aspect_for_dimensions(595.2755905511812, 841.8897637795277)
+}
+
 pub(crate) fn get_cover_page_dimensions(app: &DesignApp) -> (f64, f64) {
     let Some(s) = app.session.active() else { return (595.2755905511812, 841.8897637795277) };
     let Some(sp) = s.doc.spreads.first() else { return (595.2755905511812, 841.8897637795277) };
@@ -2220,6 +2236,22 @@ pub(crate) fn get_cover_page_dimensions(app: &DesignApp) -> (f64, f64) {
 
 /// Apply the AI Base cover template (`100_ai_base.designcraft`) with the generated background image.
 pub fn apply_ai_cover_result(app: &mut DesignApp, st: &PubgenState, bg_path: &str) -> Result<String, String> {
+    let preset = super::ai_cover::preset(st.cover_style).ok_or_else(|| format!("Unsupported AI cover style: {}", st.cover_style))?;
+    apply_ai_cover_front(app, st, bg_path)?;
+
+    let sname = format!("AI {}", preset.name);
+    if st.cover_include_inside_back {
+        execute_generate_inside_cover(app)?;
+        execute_generate_back_cover(app, st)?;
+        ensure_back_cover_at_end(app);
+        Ok(format!("Cover pages generated successfully: Front Cover, Inside Cover, Back Cover ({sname})"))
+    } else {
+        Ok(format!("Cover page generated successfully ({sname})"))
+    }
+}
+
+/// Apply only the AI Base front cover page (no inside/back pages).
+pub(crate) fn apply_ai_cover_front(app: &mut DesignApp, st: &PubgenState, bg_path: &str) -> Result<String, String> {
     let preset = super::ai_cover::preset(st.cover_style).ok_or_else(|| format!("Unsupported AI cover style: {}", st.cover_style))?;
     let palette = preset.palettes.get(st.cover_ai_palette).unwrap_or(&preset.palettes[0]);
 
@@ -2278,6 +2310,11 @@ pub fn apply_ai_cover_result(app: &mut DesignApp, st: &PubgenState, bg_path: &st
     if !st.doc_language.trim().is_empty() {
         apply_params["lang"] = json!(st.doc_language.trim());
     }
+
+    // The template apply inserts a page before the seeded blank page. Remember the
+    // seed so the leftover blank can be dropped after the apply.
+    let had_single_blank_page =
+        app.session.active().map(|s| s.doc.page_count() == 1 && s.doc.spreads.first().is_some_and(|sp| sp.items.is_empty())).unwrap_or(false);
 
     app.run("template.page.apply", apply_params).map_err(|e| format!("Failed to apply AI cover template: {e}"))?;
 
@@ -2339,15 +2376,12 @@ pub fn apply_ai_cover_result(app: &mut DesignApp, st: &PubgenState, bg_path: &st
         Ok(())
     });
 
-    let sname = format!("AI {}", preset.name);
-    if st.cover_include_inside_back {
-        execute_generate_inside_cover(app)?;
-        execute_generate_back_cover(app, st)?;
-        ensure_back_cover_at_end(app);
-        Ok(format!("Cover pages generated successfully: Front Cover, Inside Cover, Back Cover ({sname})"))
-    } else {
-        Ok(format!("Cover page generated successfully ({sname})"))
+    // Drop the seeded blank page left behind by the template apply.
+    if had_single_blank_page {
+        let _ = app.run("layout.pages.delete", json!({ "pages": [1] }));
     }
+
+    Ok(format!("Cover page generated successfully (AI {})", preset.name))
 }
 
 /// Trigger cover generation from the UI: style < 100 runs synchronously; style >= 100 spawns CoverJob.
@@ -2367,7 +2401,7 @@ pub fn trigger_generate_cover(app: &mut DesignApp, st: &mut PubgenState, ctx: eg
     };
 
     if !st.excel_batch_covers.is_empty() && st.excel_batch_covers.len() > 1 {
-        let aspect = imagegen::Aspect::Wrap; // Double A4 spread layout (1216 x 832)
+        let aspect = ai_cover_aspect();
         let items: Vec<super::ai_cover_job::CoverBatchItem> = st
             .excel_batch_covers
             .iter()
@@ -2387,7 +2421,7 @@ pub fn trigger_generate_cover(app: &mut DesignApp, st: &mut PubgenState, ctx: eg
                 let neg_prompt = imagegen::GenRequest::clean_cover_negative_prompt();
                 let req = imagegen::GenRequest::new(prompt, neg_prompt, aspect, 18).with_seed(seed);
                 let filename = format!("ai_cover_batch_{}_{}.png", style, seed);
-                let output_path = std::path::PathBuf::from("outputs").join("ai_covers").join(filename);
+                let output_path = ai_cover_output_path(&filename);
                 super::ai_cover_job::CoverBatchItem {
                     title,
                     title2: c.title2.clone(),
@@ -2422,7 +2456,8 @@ pub fn trigger_generate_cover(app: &mut DesignApp, st: &mut PubgenState, ctx: eg
     let palette = preset.palettes.get(st.cover_ai_palette).unwrap_or(&preset.palettes[0]);
     let prompt = super::ai_cover::build_prompt(preset, palette);
     let neg_prompt = imagegen::GenRequest::clean_cover_negative_prompt();
-    let aspect = imagegen::Aspect::Wrap; // Double A4 spread layout (1216 x 832)
+    // `100_ai_base.designcraft` is a portrait A4 front cover, not a landscape spread.
+    let aspect = ai_cover_aspect();
     let (title_text, _, _, _, _, _) = get_cover_text_vals(st);
     let seed = super::ai_cover_job::seed_from_title(title_text);
     let req = imagegen::GenRequest::new(prompt, neg_prompt, aspect, 18).with_seed(seed);
@@ -2431,7 +2466,7 @@ pub fn trigger_generate_cover(app: &mut DesignApp, st: &mut PubgenState, ctx: eg
 
     let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let filename = format!("ai_cover_{}_{}_{}.png", st.cover_style, st.cover_ai_palette, timestamp);
-    let output_path = std::path::PathBuf::from("outputs").join("ai_covers").join(filename);
+    let output_path = ai_cover_output_path(&filename);
 
     let job = super::ai_cover_job::CoverJob::spawn(&account_id, &token, req, output_path, ctx);
     st.cover_job = Some(job);
@@ -3364,6 +3399,9 @@ pub(crate) mod tests {
 
     #[test]
     fn test_ai_cover_branch_dispatch() {
+        // Ignore the developer's ambient `.env`/process env: this test needs a
+        // known "no credentials" state.
+        super::ai_cover::set_ambient_credentials_disabled(true);
         let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
         app.run("file.new", json!({})).unwrap();
 
@@ -3397,6 +3435,7 @@ pub(crate) mod tests {
             assert!(*ok);
             assert!(status_msg.contains("Generating AI cover"));
         }
+        super::ai_cover::set_ambient_credentials_disabled(false);
     }
 
     #[test]
@@ -3547,6 +3586,32 @@ pub(crate) mod tests {
         } else {
             panic!("Back bg is not a graphic");
         }
+    }
+
+    #[test]
+    fn test_ai_cover_front_only_keeps_single_page() {
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({})).unwrap();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let png_path = tmp.path().join("test_bg.png");
+        image::RgbaImage::from_pixel(10, 10, image::Rgba([10, 25, 49, 255])).save(&png_path).unwrap();
+
+        let st = PubgenState {
+            cover_style: super::ai_cover::AI_STYLE_BASE,
+            cover_ai_palette: 0,
+            cover_title: "FRONT ONLY".into(),
+            cover_include_inside_back: true, // must still not build inside/back here
+            ..Default::default()
+        };
+
+        let res = apply_ai_cover_front(&mut app, &st, &png_path.to_string_lossy());
+        assert!(res.is_ok(), "{res:?}");
+
+        let active = app.session.active().unwrap();
+        assert_eq!(active.doc.page_count(), 1, "front-only apply must leave exactly the cover page");
+        let sp0 = &active.doc.spreads[0];
+        assert!(sp0.items.iter().any(|it| it.label.contains("background")), "cover background must exist");
     }
 
     #[test]

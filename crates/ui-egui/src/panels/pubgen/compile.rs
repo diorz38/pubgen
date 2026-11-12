@@ -1716,7 +1716,7 @@ fn row_page_kind(kind: &str) -> &'static str {
     }
 }
 
-fn page_is_empty(doc: &designcraft_doc::Document, page: usize) -> bool {
+pub(crate) fn page_is_empty(doc: &designcraft_doc::Document, page: usize) -> bool {
     let Some((si, pi)) = doc.page_loc(page) else { return false };
     let Some(spread) = doc.spreads.get(si) else { return false };
     if spread.pages.len() == 1 {

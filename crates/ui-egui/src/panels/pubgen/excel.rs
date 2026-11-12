@@ -4103,6 +4103,7 @@ pub fn generate_publication_pages(app: &mut DesignApp, st: &mut PubgenState) -> 
     st.card2_row_conditions = true;
 
     let mut cover_res_msg = None;
+    let mut cover_error: Option<String> = None;
     if st.excel_had_cover {
         if is_brs {
             match execute_generate_brs_front_and_point(app, st) {
@@ -4124,16 +4125,19 @@ pub fn generate_publication_pages(app: &mut DesignApp, st: &mut PubgenState) -> 
                     if st.cover_include_inside_back
                         && let Err(e) = execute_generate_inside_cover(app)
                     {
-                        return Ok(format!("but inside cover failed: {e}"));
+                        st.cover_status = Some((format!("inside cover failed: {e}"), false));
+                        cover_error = Some(format!("inside cover failed: {e}"));
+                    } else {
+                        let cover_msg =
+                            if st.cover_include_inside_back { format!("Front Cover & Inside Cover ({sname})") } else { format!("Cover ({sname})") };
+                        st.cover_status = Some((cover_msg.clone(), true));
+                        cover_res_msg = Some(cover_msg);
                     }
-                    let cover_msg =
-                        if st.cover_include_inside_back { format!("Front Cover & Inside Cover ({sname})") } else { format!("Cover ({sname})") };
-                    st.cover_status = Some((cover_msg.clone(), true));
-                    cover_res_msg = Some(cover_msg);
                 }
                 Err(e) => {
+                    // A failed cover must not drop the body pages; report it and keep going.
                     st.cover_status = Some((e.clone(), false));
-                    return Ok(format!("but cover failed: {e}"));
+                    cover_error = Some(e);
                 }
             }
         }
@@ -4144,7 +4148,16 @@ pub fn generate_publication_pages(app: &mut DesignApp, st: &mut PubgenState) -> 
     match gen_res {
         Ok(gen_msg) => {
             st.card1_status = Some((gen_msg.clone(), true));
-            if st.excel_had_cover {
+            // The empty document starts with one seeded page. When the cover failed, that page
+            // stays blank in front of the body; drop it once body pages exist (deleting the last
+            // page is rejected by the engine).
+            if cover_error.is_some() {
+                let drop_seeded = app.session.active().is_some_and(|s| s.doc.page_count() > 1 && super::compile::page_is_empty(&s.doc, 0));
+                if drop_seeded {
+                    let _ = app.run("layout.pages.delete", json!({ "pages": [0] }));
+                }
+            }
+            if st.excel_had_cover && cover_error.is_none() {
                 if is_brs {
                     execute_generate_brs_back_cover(app, st)?;
                 } else if st.cover_include_inside_back {
@@ -4169,6 +4182,9 @@ pub fn generate_publication_pages(app: &mut DesignApp, st: &mut PubgenState) -> 
                     st.hf_color_text = "#000000".into();
                 }
                 super::header_footer::execute_apply_header_footer(app, st)?;
+            }
+            if let Some(err) = cover_error {
+                return Ok(format!("auto-generated pages ({gen_msg}) but cover failed: {err}"));
             }
             if let Some(cover_msg) = cover_res_msg {
                 return Ok(format!("auto-generated pages + cover ({gen_msg}; {cover_msg})!"));
@@ -4938,6 +4954,38 @@ pub(crate) mod flow_tests {
 
     fn pipeline_stories(app: &DesignApp) -> Vec<String> {
         app.session.active().map(|a| a.doc.stories.values().map(|s| s.text.clone()).collect()).unwrap_or_default()
+    }
+
+    /// A failing front cover must not swallow the body pages. Before the fix the cover error
+    /// returned early from `generate_publication_pages`, so a DDA compile with an unsupported
+    /// cover style produced only the blank seeded page and no catalogue pages at all.
+    #[test]
+    fn test_cover_failure_still_generates_body_pages() {
+        let mut st = PubgenState {
+            active_profile_id: "bps_dda".into(),
+            excel_had_cover: true,
+            excel_cover: Some(excel::ExcelCoverData::default()),
+            cover_style: 999,
+            card1_records: vec![vec!["TOC".into(), String::new(), "DAFTAR ISI".into()]],
+            card1_headers: vec!["type".into(), "number".into(), "title".into(), "file".into()],
+            card1_type_col: 0,
+            card1_num_col: 1,
+            card1_title_col: 2,
+            card1_file_col: 3,
+            card1_range_all: true,
+            ..Default::default()
+        };
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let res = generate_publication_pages(&mut app, &mut st);
+        let msg = res.expect("cover failure must not fail the whole compile");
+        assert!(msg.contains("cover failed"), "compile must report the cover failure: {msg}");
+        assert!(msg.contains("Unsupported AI cover style: 999"), "compile must name the cover error: {msg}");
+        assert!(matches!(st.cover_status, Some((_, false))), "cover status must be recorded as failed");
+
+        let doc = &app.session.active().expect("active document").doc;
+        let has_body = doc.spreads.iter().any(|sp| sp.items.iter().any(|it| it.label == "pubgen_toc_card"));
+        assert!(has_body, "the body page must survive a failed cover");
+        assert!(!super::compile::page_is_empty(doc, 0), "the seeded blank page must be dropped in front of the body");
     }
 
     /// A BRS document set to Indonesian-English must keep the English image caption through

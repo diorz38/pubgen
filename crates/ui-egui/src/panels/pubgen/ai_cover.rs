@@ -145,39 +145,87 @@ pub struct AiCoverSetupDialog {
     pub close_requested: bool,
 }
 
+/// Parse Cloudflare credentials from `.env` content.
+fn parse_env_credentials(content: &str, acct: &mut String, tok: &mut String) {
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+        if let Some((k, v)) = line.split_once('=') {
+            let k = k.trim();
+            let v = v.trim().trim_matches('"').trim_matches('\'').trim();
+            if acct.is_empty() && (k.eq_ignore_ascii_case("CLOUDFLARE_ACCOUNT_ID") || k.eq_ignore_ascii_case("CLAUFFLARE_ACCOUNT_ID")) {
+                acct.push_str(v);
+            } else if tok.is_empty() && (k.eq_ignore_ascii_case("CLOUDFLARE_API_TOKEN") || k.eq_ignore_ascii_case("CLAUFFLARE_API_TOKEN")) {
+                tok.push_str(v);
+            }
+        }
+    }
+}
+
+/// Find `.env` in `base` or any parent directory.
+fn find_dotenv(base: &std::path::Path) -> Option<std::path::PathBuf> {
+    base.ancestors().map(|dir| dir.join(".env")).find(|p| p.is_file())
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests must not depend on the developer's ambient `.env` or process env.
+    static AMBIENT_CREDENTIALS_DISABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Test seam: ignore process env and `.env` lookups on this thread.
+#[cfg(test)]
+pub(crate) fn set_ambient_credentials_disabled(disabled: bool) {
+    AMBIENT_CREDENTIALS_DISABLED.with(|c| c.set(disabled));
+}
+
+#[cfg(not(test))]
+fn ambient_credentials_allowed() -> bool {
+    true
+}
+
+#[cfg(test)]
+fn ambient_credentials_allowed() -> bool {
+    !AMBIENT_CREDENTIALS_DISABLED.with(|c| c.get())
+}
+
 /// Helper to read Cloudflare credentials from engine Prefs, falling back to process env
 /// or a local `.env` file.
 pub fn get_credentials(prefs: &designcraft_engine::Prefs) -> (String, String) {
     let mut acct = prefs.cover_ai_cloudflare_account_id.trim().to_string();
     let mut tok = prefs.cover_ai_cloudflare_api_token.trim().to_string();
 
-    if acct.is_empty()
-        && let Ok(v) = std::env::var("CLOUDFLARE_ACCOUNT_ID")
-    {
-        acct = v.trim().to_string();
-    }
-    if tok.is_empty()
-        && let Ok(v) = std::env::var("CLOUDFLARE_API_TOKEN")
-    {
-        tok = v.trim().to_string();
+    if ambient_credentials_allowed() {
+        if acct.is_empty()
+            && let Ok(v) = std::env::var("CLOUDFLARE_ACCOUNT_ID")
+        {
+            acct = v.trim().to_string();
+        }
+        if tok.is_empty()
+            && let Ok(v) = std::env::var("CLOUDFLARE_API_TOKEN")
+        {
+            tok = v.trim().to_string();
+        }
     }
 
-    if (acct.is_empty() || tok.is_empty())
-        && let Ok(content) = std::fs::read_to_string(".env")
-    {
-        for line in content.lines() {
-            let line = line.trim();
-            if line.starts_with('#') || line.is_empty() {
-                continue;
-            }
-            if let Some((k, v)) = line.split_once('=') {
-                let k = k.trim();
-                let v = v.trim().trim_matches('"').trim_matches('\'').trim();
-                if acct.is_empty() && (k.eq_ignore_ascii_case("CLOUDFLARE_ACCOUNT_ID") || k.eq_ignore_ascii_case("CLAUFFLARE_ACCOUNT_ID")) {
-                    acct = v.to_string();
-                } else if tok.is_empty() && (k.eq_ignore_ascii_case("CLOUDFLARE_API_TOKEN") || k.eq_ignore_ascii_case("CLAUFFLARE_API_TOKEN")) {
-                    tok = v.to_string();
-                }
+    if ambient_credentials_allowed() && (acct.is_empty() || tok.is_empty()) {
+        let mut roots = Vec::new();
+        if let Ok(cwd) = std::env::current_dir() {
+            roots.push(cwd);
+        }
+        if let Ok(exe) = std::env::current_exe()
+            && let Some(dir) = exe.parent()
+        {
+            roots.push(dir.to_path_buf());
+        }
+        for root in roots {
+            let Some(path) = find_dotenv(&root) else { continue };
+            let Ok(content) = std::fs::read_to_string(path) else { continue };
+            parse_env_credentials(&content, &mut acct, &mut tok);
+            if !acct.is_empty() && !tok.is_empty() {
+                break;
             }
         }
     }
@@ -335,29 +383,121 @@ fn palettes_of(cover_style: usize, palette_idx: usize) -> Option<&'static AiPale
     preset(cover_style).and_then(|p| p.palettes.get(palette_idx))
 }
 
+/// Newest cached AI cover image for a style/palette pair, if any.
+///
+/// Timestamped files (`ai_cover_{style}_{palette}_{ts}.png`) win over the legacy
+/// untimestamped name; among timestamps the newest modification time wins.
+pub(crate) fn find_cached_cover(dir: &std::path::Path, style: usize, palette: usize) -> Option<std::path::PathBuf> {
+    let prefix = format!("ai_cover_{style}_{palette}");
+    let legacy = format!("{prefix}.png");
+    let mut best: Option<(std::time::SystemTime, std::path::PathBuf)> = None;
+    let mut legacy_path: Option<std::path::PathBuf> = None;
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("png") {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        if name == legacy {
+            legacy_path = Some(path);
+            continue;
+        }
+        if !name.starts_with(&format!("{prefix}_")) {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        let Ok(modified) = meta.modified() else { continue };
+        if best.as_ref().is_none_or(|(best_time, _)| modified > *best_time) {
+            best = Some((modified, path));
+        }
+    }
+    best.map(|(_, path)| path).or(legacy_path)
+}
+
 /// The Generate Cover Page entry for AI styles.
 pub(crate) fn execute_generate_ai_cover(app: &mut DesignApp, st: &PubgenState) -> Result<String, String> {
-    match preset(st.cover_style) {
-        Some(p) => {
-            if !imagegen::compiled_in() {
-                return Err("AI Base covers need a build with --features ai-cover-online.".into());
-            }
-            if !AiCoverSetupDialog::key_configured(app) {
-                return Err("AI Base needs a Cloudflare account: pick AI Setup\u{2026} under Cover Images and verify your key.".into());
-            }
-            let candidate = format!("outputs/ai_covers/ai_cover_{}_{}.png", st.cover_style, st.cover_ai_palette);
-            if std::path::Path::new(&candidate).is_file() {
-                return super::covers::apply_ai_cover_result(app, st, &candidate);
-            }
-            Err(format!("AI Base style 'AI {}' generates in background via CoverJob.", p.name))
-        }
-        None => Err(format!("Unsupported cover style: {}", st.cover_style)),
+    let Some(p) = preset(st.cover_style) else {
+        return Err(format!("Unsupported cover style: {}", st.cover_style));
+    };
+    if !imagegen::compiled_in() {
+        return Err("AI Base covers need a build with --features ai-cover-online.".into());
     }
+    if !AiCoverSetupDialog::key_configured(app) {
+        return Err("AI Base needs a Cloudflare account: pick AI Setup\u{2026} under Cover Images and verify your key.".into());
+    }
+
+    let dir = super::covers::ai_cover_output_dir();
+    let cached = find_cached_cover(&dir, st.cover_style, st.cover_ai_palette);
+    let bg_path = match cached {
+        Some(path) => path,
+        None => {
+            let (account_id, token) = get_credentials(&app.session.prefs);
+            let palette = p.palettes.get(st.cover_ai_palette).unwrap_or(&p.palettes[0]);
+            let prompt = build_prompt(p, palette);
+            let neg = imagegen::GenRequest::clean_cover_negative_prompt();
+            let seed = super::ai_cover_job::seed_from_title(st.cover_title.trim());
+            let req = imagegen::GenRequest::new(prompt, neg, super::covers::ai_cover_aspect(), 18).with_seed(seed);
+            let client = imagegen::cloudflare::CloudflareClient::new(&account_id, &token);
+            let cancel = std::sync::atomic::AtomicBool::new(false);
+            // ponytail: generation runs on the UI thread (up to 120 s). Move to a
+            // background job when the compile flow can await completion.
+            let bytes = client.generate(&req, &cancel).map_err(|e| format!("AI cover generation failed: {e}"))?;
+            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let path = super::covers::ai_cover_output_path(&format!("ai_cover_{}_{}_{}.png", st.cover_style, st.cover_ai_palette, stamp));
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            std::fs::write(&path, bytes).map_err(|e| format!("Failed to save AI cover image: {e}"))?;
+            path
+        }
+    };
+
+    super::covers::apply_ai_cover_front(app, st, &bg_path.to_string_lossy())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dotenv_parser_reads_cloudflare_keys() {
+        let mut acct = String::new();
+        let mut tok = String::new();
+        parse_env_credentials("CLOUDFLARE_ACCOUNT_ID=acct-123\nCLOUDFLARE_API_TOKEN=\"tok-456\"\n", &mut acct, &mut tok);
+        assert_eq!(acct, "acct-123");
+        assert_eq!(tok, "tok-456");
+    }
+
+    #[test]
+    fn dotenv_search_walks_parent_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("a").join("b");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(dir.path().join(".env"), "CLOUDFLARE_ACCOUNT_ID=acct-123\n").unwrap();
+        assert_eq!(find_dotenv(&nested), Some(dir.path().join(".env")));
+    }
+
+    #[test]
+    fn cached_cover_lookup_picks_newest_timestamped_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("ai_cover_100_0.png"), b"old").unwrap();
+        std::fs::write(dir.path().join("ai_cover_100_0_100.png"), b"older").unwrap();
+        std::fs::write(dir.path().join("ai_cover_100_0_200.png"), b"newer").unwrap();
+        std::fs::write(dir.path().join("ai_cover_101_0_300.png"), b"other style").unwrap();
+        // Pin the modification times: filesystem timestamp resolution is not guaranteed.
+        let base = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        for (name, secs) in
+            [("ai_cover_100_0.png", 0), ("ai_cover_100_0_100.png", 100), ("ai_cover_100_0_200.png", 200), ("ai_cover_101_0_300.png", 300)]
+        {
+            let file = std::fs::File::options().write(true).open(dir.path().join(name)).unwrap();
+            file.set_modified(base + std::time::Duration::from_secs(secs)).unwrap();
+        }
+
+        let found = find_cached_cover(dir.path(), 100, 0).expect("cached cover");
+        assert_eq!(found.file_name().unwrap().to_string_lossy(), "ai_cover_100_0_200.png");
+        assert!(find_cached_cover(dir.path(), 102, 0).is_none());
+    }
 
     #[test]
     fn presets_have_unique_names_and_full_palettes() {
