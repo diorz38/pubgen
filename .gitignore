@@ -7,7 +7,8 @@
 .DS_Store
 /.claude/
 /.freebuff/
-/target-*/
+/target-*
+/.agents/
 /craft-fonts/
 /scratch/
 /plan/pubgen/samples/**/*.csv
