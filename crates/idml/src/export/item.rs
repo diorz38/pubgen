@@ -1,5 +1,7 @@
 use super::common::{affine_s, bool_s, p, pct, uid, with_props};
-use super::*;
+use super::{
+    Affine, ColumnsKind, Content, El, Ex, Item, Node, OBJECT_BUILTINS, PathData, Shape, TextFrameOptions, base64_encode, escape_id, names, num, pt,
+};
 
 impl<'a> Ex<'a> {
     pub(super) fn item_el(&mut self, it: &Item, xf: Affine) -> El {
@@ -85,8 +87,10 @@ impl<'a> Ex<'a> {
             el.set("GradientStrokeAngle", num(a));
         }
         self.stroke_attrs(&mut el, &it.stroke);
-        // Corner options: map path-order corners to the named corners by geometry.
-        if !it.corners.is_none() {
+        // Corner options: map path-order corners to the named corners by geometry. An item without
+        // corners whose object style chain sets some writes None, so an import does not give it
+        // the style's corners.
+        if !it.corners.is_none() || self.style_sets_corners(os) {
             let names_by_index = corner_names(&it.path);
             for (i, c) in it.corners.corners.iter().enumerate() {
                 let n = names_by_index[i];
@@ -99,54 +103,7 @@ impl<'a> Ex<'a> {
             props.push(path_geometry(&it.path));
         }
         let mut el = with_props(el, props);
-        // Transparency.
-        // An item whose style sets effects writes the effects it has turned off too, so that on
-        // import it doesn't take the style's.
-        let styled = self.d.styles.object_effects(os).is_some();
-        let ds = &it.effects.drop_shadow;
-        let (gf, df) = (&it.effects.gradient_feather, &it.effects.directional_feather);
-        if it.opacity < 1.0 || it.blend != designcraft_color::BlendMode::Normal || ds.on || it.effects.feather > 0.0 || gf.on || df.on || styled {
-            let mut t = El::new("TransparencySetting");
-            t.push(El::new("BlendingSetting").attr("BlendMode", names::blend_out(it.blend)).attr("Opacity", pct(it.opacity as f64)));
-            for c in self.effect_els(&it.effects, styled) {
-                t.push(c);
-            }
-            if df.on {
-                let [top, left, bottom, right] = df.widths;
-                t.push(
-                    El::new("DirectionalFeatherSetting")
-                        .attr("Applied", "true")
-                        .attr("LeftWidth", num(left))
-                        .attr("RightWidth", num(right))
-                        .attr("TopWidth", num(top))
-                        .attr("BottomWidth", num(bottom)),
-                );
-            }
-            if gf.on {
-                let mut g = El::new("GradientFeatherSetting").attr("Applied", "true").attr("Type", if gf.radial { "Radial" } else { "Linear" });
-                if let Some([x0, y0, x1, y1]) = gf.vector {
-                    // Gradient Feather tool vector: start, length and angle in the item's space.
-                    g.set("Angle", num((-(y1 - y0)).atan2(x1 - x0).to_degrees()));
-                    g.set("Length", num((x1 - x0).hypot(y1 - y0)));
-                    g.set("GradientStart", format!("{} {}", num(x0), num(y0)));
-                } else {
-                    g.set("Angle", num(gf.angle));
-                }
-                let id = uid(it.id.0);
-                for (i, (opacity, location)) in [(gf.start, 0.0), (gf.end, 100.0)].into_iter().enumerate() {
-                    let mut s = El::new("OpacityGradientStop")
-                        .attr("Self", format!("{id}TransparencySetting1GradientFeatherSetting1OpacityGradientStop{i}"))
-                        .attr("Opacity", pct(opacity as f64))
-                        .attr("Location", num(location));
-                    if i > 0 {
-                        s.set("Midpoint", "50");
-                    }
-                    g.push(s);
-                }
-                t.push(g);
-            }
-            el.push(t);
-        }
+        self.append_transparency(&mut el, it, os);
         if let Content::Text(t) = &it.content {
             el.push(text_frame_pref(&t.options, &self.sw(&t.options.column_rule_color)));
             if let Some(g) = t.options.baseline_grid {
@@ -196,6 +153,87 @@ impl<'a> Ex<'a> {
             _ => {}
         }
         el
+    }
+
+    /// Whether object style `name`, a style it is based on, or `[None]` (which an import reads
+    /// after every item's style chain) sets corners other than None. A built-in style the
+    /// document lacks counts as its default.
+    fn style_sets_corners(&mut self, name: &str) -> bool {
+        if let Some(&known) = self.style_corners.get(name) {
+            return known;
+        }
+        let defaults = designcraft_doc::Styles::default();
+        let style = |n: &str| self.d.styles.object_style(n).or_else(|| defaults.object_style(n));
+        let rounds = |os: &designcraft_doc::ObjectStyle| os.corners.is_some_and(|c| !c.is_none());
+        let mut seen: Vec<&str> = Vec::new();
+        let mut cur = Some(name);
+        let mut found = false;
+        while let Some(n) = cur.take() {
+            if seen.contains(&n) {
+                break;
+            }
+            let Some(os) = style(n) else { break };
+            if rounds(os) {
+                found = true;
+                break;
+            }
+            seen.push(n);
+            cur = os.based_on.as_deref();
+        }
+        let found = found || style(designcraft_doc::NO_OBJECT_STYLE).is_some_and(rounds);
+        self.style_corners.insert(name.to_string(), found);
+        found
+    }
+
+    fn append_transparency(&self, el: &mut El, it: &Item, os: &str) {
+        // Transparency.
+        // An item whose style sets effects writes the effects it has turned off too, so that on
+        // import it doesn't take the style's.
+        let styled = self.d.styles.object_effects(os).is_some();
+        let ds = &it.effects.drop_shadow;
+        let (gf, df) = (&it.effects.gradient_feather, &it.effects.directional_feather);
+        if it.opacity < 1.0 || it.blend != designcraft_color::BlendMode::Normal || ds.on || it.effects.feather > 0.0 || gf.on || df.on || styled {
+            let mut t = El::new("TransparencySetting");
+            t.push(El::new("BlendingSetting").attr("BlendMode", names::blend_out(it.blend)).attr("Opacity", pct(it.opacity as f64)));
+            for c in self.effect_els(&it.effects, styled) {
+                t.push(c);
+            }
+            if df.on {
+                let [top, left, bottom, right] = df.widths;
+                t.push(
+                    El::new("DirectionalFeatherSetting")
+                        .attr("Applied", "true")
+                        .attr("LeftWidth", num(left))
+                        .attr("RightWidth", num(right))
+                        .attr("TopWidth", num(top))
+                        .attr("BottomWidth", num(bottom)),
+                );
+            }
+            if gf.on {
+                let mut g = El::new("GradientFeatherSetting").attr("Applied", "true").attr("Type", if gf.radial { "Radial" } else { "Linear" });
+                if let Some([x0, y0, x1, y1]) = gf.vector {
+                    // Gradient Feather tool vector: start, length and angle in the item's space.
+                    g.set("Angle", num((-(y1 - y0)).atan2(x1 - x0).to_degrees()));
+                    g.set("Length", num((x1 - x0).hypot(y1 - y0)));
+                    g.set("GradientStart", format!("{} {}", num(x0), num(y0)));
+                } else {
+                    g.set("Angle", num(gf.angle));
+                }
+                let id = uid(it.id.0);
+                for (i, (opacity, location)) in [(gf.start, 0.0), (gf.end, 100.0)].into_iter().enumerate() {
+                    let mut s = El::new("OpacityGradientStop")
+                        .attr("Self", format!("{id}TransparencySetting1GradientFeatherSetting1OpacityGradientStop{i}"))
+                        .attr("Opacity", pct(opacity as f64))
+                        .attr("Location", num(location));
+                    if i > 0 {
+                        s.set("Midpoint", "50");
+                    }
+                    g.push(s);
+                }
+                t.push(g);
+            }
+            el.push(t);
+        }
     }
 
     /// The `TransparencySetting` children for `e`'s drop shadow and feather; `all` also writes the
@@ -261,9 +299,19 @@ impl<'a> Ex<'a> {
             el.set("FillColor", id.clone());
             el.set("FillTint", pct(g.fill.tint as f64));
         }
-        let embed = !asset.data.is_empty() && (self.opts.embed_images || asset.link.is_none());
+        let wanted = !asset.data.is_empty() && (self.opts.embed_images || asset.link.is_none());
+        // An image with no link of its own has nowhere else to live, so it is always embedded
+        // (dropping its data would lose it); only an image with a real link can fall back to it.
+        let embed = wanted && (asset.link.is_none() || self.embedded.saturating_add(asset.data.len()) <= self.embed_limit);
+        if wanted && !embed {
+            self.warnings.push(format!(
+                "image {} is written as a link, not embedded: the package already holds {} bytes of images (limit {})",
+                asset.name, self.embedded, self.embed_limit
+            ));
+        }
         let mut props = Vec::new();
         if embed {
+            self.embedded = self.embedded.saturating_add(asset.data.len());
             let mut c = El::new("Contents");
             c.children.push(Node::CData(base64_encode(&asset.data)));
             props.push(c);
@@ -317,6 +365,9 @@ impl<'a> Ex<'a> {
     }
 }
 
+/// Most nested style folders one style name can create.
+const MAX_STYLE_GROUP_DEPTH: usize = 32;
+
 /// Style folder tree (names `A/B/C` → groups A, B).
 #[derive(Default)]
 pub(super) struct Group {
@@ -330,7 +381,8 @@ impl Group {
         let mut segs: Vec<&str> = if builtin { vec![name] } else { name.split('/').collect() };
         let _leaf = segs.pop();
         let mut g = self;
-        for s in segs {
+        // Deeper folders than this are not made (the style lands in the deepest one), so the recursive `emit` is bounded.
+        for s in segs.into_iter().take(MAX_STYLE_GROUP_DEPTH) {
             let i = match g.groups.iter().position(|(n, _)| n == s) {
                 Some(i) => i,
                 None => {
@@ -376,7 +428,7 @@ fn text_wrap_pref(w: &designcraft_doc::TextWrap) -> El {
                 .attr("Right", num(w.offsets[3]))])
             .collect(),
     )
-    .child(El::new("ContourOption").attr("ContourType", names::contour_type_out(w.contour)).attr("IncludeInsideEdges", "false"))
+    .child(El::new("ContourOption").attr("ContourType", names::contour_type_out(w.contour)).attr("IncludeInsideEdges", bool_s(w.inside_edges)))
 }
 
 pub(super) fn text_frame_pref(o: &TextFrameOptions, rule_color: &str) -> El {
@@ -454,28 +506,7 @@ fn path_geometry(path: &PathData) -> El {
 
 /// IDML corner names for anchors 0..4 of a path (by position on its bounding box).
 pub(crate) fn corner_names(path: &PathData) -> [&'static str; 4] {
-    let default = ["TopLeft", "TopRight", "BottomRight", "BottomLeft"];
-    let Some(sp) = path.subpaths.first() else { return default };
-    if sp.anchors.len() != 4 {
-        return default;
-    }
-    let Some(b) = path.bounds() else { return default };
-    let c = b.center();
-    let mut out = default;
-    let mut seen = HashSet::new();
-    for (i, a) in sp.anchors.iter().enumerate() {
-        let n = match (a.p.y < c.y, a.p.x < c.x) {
-            (true, true) => "TopLeft",
-            (true, false) => "TopRight",
-            (false, false) => "BottomRight",
-            (false, true) => "BottomLeft",
-        };
-        if !seen.insert(n) {
-            return default;
-        }
-        out[i] = n;
-    }
-    out
+    designcraft_geom::corners::named_slots(path).map(|k| ["TopLeft", "TopRight", "BottomRight", "BottomLeft"][k])
 }
 
 fn format_name(mime: &str) -> &'static str {
@@ -506,4 +537,24 @@ pub(crate) fn path_to_uri(path: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod group_depth_tests {
+    use super::*;
+
+    #[test]
+    fn a_style_name_with_many_separators_makes_bounded_folders() {
+        let mut g = Group::default();
+        g.insert(&"a/".repeat(10_000), El::new("S"));
+        let (mut depth, mut cur) = (0, &g);
+        while let Some((_, next)) = cur.groups.first() {
+            depth += 1;
+            cur = next;
+        }
+        assert_eq!(depth, MAX_STYLE_GROUP_DEPTH);
+        assert_eq!(cur.styles.len(), 1);
+        let mut root = El::new("Root");
+        g.emit(&mut root, "K", "");
+    }
 }
