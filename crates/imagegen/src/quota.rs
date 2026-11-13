@@ -107,7 +107,7 @@ fn rpc(fn_name: &str, body: serde_json::Value) -> Option<String> {
 fn parse_consume_response(raw: &str) -> Option<f64> {
     let value = serde_json::from_str::<serde_json::Value>(raw.trim()).ok()?;
     let scalar = |v: &serde_json::Value| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()));
-    scalar(&value).or_else(|| value.pointer("/ai_cf_consume").and_then(|v| scalar(v)))
+    scalar(&value).or_else(|| value.pointer("/ai_cf_consume").and_then(scalar))
 }
 
 /// Resolve the final PostgREST base URL from an explicit URL or a bare project id.

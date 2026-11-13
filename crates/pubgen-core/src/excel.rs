@@ -73,13 +73,13 @@ fn find_chart_linked_sheet(kv: &BTreeMap<String, String>, sheet_names: &[String]
 
     // 3. Normalized alphanumeric only
     let clean_raw: String = raw_val.chars().filter(|c| c.is_alphanumeric()).collect();
-    if !clean_raw.is_empty() {
-        if let Some(matched) = sheet_names.iter().find(|name| {
+    if !clean_raw.is_empty()
+        && let Some(matched) = sheet_names.iter().find(|name| {
             let clean_name: String = name.chars().filter(|c| c.is_alphanumeric()).collect();
             clean_name.eq_ignore_ascii_case(&clean_raw)
-        }) {
-            return Some(matched.clone());
-        }
+        })
+    {
+        return Some(matched.clone());
     }
 
     // Fallback: sanitized raw value with spaces replaced by underscores

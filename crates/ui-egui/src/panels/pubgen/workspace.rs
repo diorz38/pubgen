@@ -16,6 +16,7 @@ use crate::DesignApp;
 use crate::theme::{Tokens, semibold};
 
 const WORKSPACE_STATE_ID: &str = "pubgen_orchestrator_workspace_state";
+const CARD_PAGE_ROWS: usize = 6;
 
 pub fn format_now() -> String {
     let now = chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now());
@@ -447,6 +448,9 @@ pub struct OrchestratorWorkspaceState {
     pub meta_agency: String,
     // Publication cards
     pub cards: Vec<PublicationCard>,
+    /// Current page in the center-panel card browser (zero-based).
+    #[serde(default)]
+    pub card_page: usize,
     // Slots
     pub slots: Vec<SlotItem>,
     // QA and output state
@@ -659,6 +663,7 @@ impl Default for OrchestratorWorkspaceState {
             meta_release_month: "Januari 2026".into(),
             meta_agency: "BADAN PUSAT STATISTIK PROVINSI JAWA BARAT".into(),
             cards,
+            card_page: 0,
             slots: Vec::new(),
             last_qa_clean: true,
             last_output_pdf: Some("outputs/BRS_NTP_Jabar_2026.pdf".into()),
@@ -3159,9 +3164,7 @@ fn render_center_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrato
             let content_list_label = crate::i18n::tr(lang, "Publication Content List ({count} items)").replace("{count}", &count_str);
             ui.label(RichText::new(content_list_label).font(semibold(11.5)).color(t.text_dim));
 
-            ScrollArea::vertical().id_salt("pubgen_center_cards_scroll").auto_shrink([false, false]).show(ui, |ui| {
-                render_card_grid(app, ui, state, t, lang);
-            });
+            render_card_grid(app, ui, state, t, lang);
         }
         OrchestratorTab::VisualLivePreview => {
             render_visual_live_preview(app, ui, state, t, lang);
@@ -3314,11 +3317,49 @@ fn paint_card_thumbnail(painter: &egui::Painter, rect: Rect, kind: CardKind, t: 
     }
 }
 
+fn card_grid_total_rows(card_count: usize, facing: bool, col_count: usize) -> usize {
+    if card_count == 0 {
+        return 0;
+    }
+    if facing { 1 + card_count.saturating_sub(1).div_ceil(2) } else { card_count.div_ceil(col_count.max(1)) }
+}
+
+fn card_grid_page_rows(total_rows: usize, page: usize) -> (usize, usize) {
+    let start = page.saturating_mul(CARD_PAGE_ROWS);
+    (start, (start + CARD_PAGE_ROWS).min(total_rows))
+}
+
+fn render_card_pagination(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, total_pages: usize, lang: &str) {
+    if total_pages <= 1 {
+        return;
+    }
+    let mut page_input = state.card_page + 1;
+    ui.horizontal(|ui| {
+        if ui.button(crate::i18n::tr(lang, "Previous")).clicked() {
+            state.card_page = state.card_page.saturating_sub(1);
+        }
+        ui.label(crate::i18n::tr(lang, "Page"));
+        let response = ui.add(egui::DragValue::new(&mut page_input).range(1..=total_pages));
+        if response.changed() {
+            state.card_page = page_input.saturating_sub(1).min(total_pages - 1);
+        }
+        ui.label(format!("of {total_pages}"));
+        if ui.button(crate::i18n::tr(lang, "Next")).clicked() {
+            state.card_page = (state.card_page + 1).min(total_pages - 1);
+        }
+    });
+}
+
 fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t: &Tokens, lang: &str) {
     let avail_w = ui.available_width();
     let gap = 8.0f32;
     let mut clicked_edit_idx = None;
     let visible_window = ui.clip_rect().expand2(vec2(0.0, 100.0));
+    let col_count = if state.page_layout_facing || avail_w > 520.0 { 2 } else { 1 };
+    let total_rows = card_grid_total_rows(state.cards.len(), state.page_layout_facing, col_count);
+    let total_pages = total_rows.div_ceil(CARD_PAGE_ROWS).max(1);
+    state.card_page = state.card_page.min(total_pages - 1);
+    let (start_row, end_row) = card_grid_page_rows(total_rows, state.card_page);
 
     if state.page_layout_facing {
         // FACING PAGES SPREADS LAYOUT (InDesign parity - Image #3)
@@ -3327,66 +3368,54 @@ fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
         let col_w = ((avail_w - gap) / 2.0).max(120.0);
         let det_w = card_details_width(col_w);
 
-        if let Some(cover_card) = state.cards.first() {
-            let row_h = card_row_height(ui.painter(), std::slice::from_ref(cover_card), det_w, lang);
+        for row_idx in start_row..end_row {
+            let pair = if row_idx == 0 {
+                state.cards.first().map(std::slice::from_ref).unwrap_or_default()
+            } else {
+                let body_idx = 1 + (row_idx - 1) * 2;
+                state.cards.get(body_idx..).map(|cards| &cards[..cards.len().min(2)]).unwrap_or_default()
+            };
+            if pair.is_empty() {
+                continue;
+            }
+            let row_h = card_row_height(ui.painter(), pair, det_w, lang);
             let row_rect = Rect::from_min_size(ui.cursor().min, vec2(avail_w, row_h));
             if !visible_window.intersects(row_rect) {
                 ui.allocate_exact_size(vec2(avail_w, row_h), Sense::hover());
                 ui.add_space(gap);
-            } else {
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing = vec2(gap, 0.0);
-                    if let Some(idx) = render_facing_card(ui, 0, cover_card, col_w, false, row_h, t, lang) {
-                        clicked_edit_idx = Some(idx);
-                    }
-                    // Empty right slot so cover card width is col_w and height matches the row
-                    ui.allocate_exact_size(vec2(col_w, row_h), Sense::hover());
-                });
-                ui.add_space(gap);
+                continue;
             }
-        }
-
-        // Remaining body cards starting from index 1 (Page 2 onwards)
-        if state.cards.len() > 1 {
-            let body_cards = &state.cards[1..];
-            for (chunk_idx, pair) in body_cards.chunks(2).enumerate() {
-                let row_h = card_row_height(ui.painter(), pair, det_w, lang);
-                let row_rect = Rect::from_min_size(ui.cursor().min, vec2(avail_w, row_h));
-                if !visible_window.intersects(row_rect) {
-                    ui.allocate_exact_size(vec2(avail_w, row_h), Sense::hover());
-                    ui.add_space(gap);
-                    continue;
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing = vec2(gap, 0.0);
+                let actual_idx_left = if row_idx == 0 { 0 } else { 1 + (row_idx - 1) * 2 };
+                let is_single_trailing = pair.len() == 1;
+                if let Some(idx) = render_facing_card(ui, actual_idx_left, &pair[0], col_w, !is_single_trailing, row_h, t, lang) {
+                    clicked_edit_idx = Some(idx);
                 }
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing = vec2(gap, 0.0);
-                    let actual_idx_left = 1 + chunk_idx * 2;
-                    // Left page (Verso: thumbnail on right facing spine, text right-aligned)
-                    let is_single_trailing = pair.len() == 1;
-                    if let Some(idx) = render_facing_card(ui, actual_idx_left, &pair[0], col_w, !is_single_trailing, row_h, t, lang) {
+
+                if pair.len() > 1 {
+                    let actual_idx_right = actual_idx_left + 1;
+                    // Right page (Recto: thumbnail on left facing spine, text left-aligned)
+                    if let Some(idx) = render_facing_card(ui, actual_idx_right, &pair[1], col_w, false, row_h, t, lang) {
                         clicked_edit_idx = Some(idx);
                     }
-
-                    if pair.len() > 1 {
-                        let actual_idx_right = actual_idx_left + 1;
-                        // Right page (Recto: thumbnail on left facing spine, text left-aligned)
-                        if let Some(idx) = render_facing_card(ui, actual_idx_right, &pair[1], col_w, false, row_h, t, lang) {
-                            clicked_edit_idx = Some(idx);
-                        }
-                    } else {
-                        // Empty slot on right for trailing single page
-                        ui.allocate_exact_size(vec2(col_w, row_h), Sense::hover());
-                    }
-                });
-                ui.add_space(gap);
-            }
+                } else {
+                    // Empty slot on right for trailing single page
+                    ui.allocate_exact_size(vec2(col_w, row_h), Sense::hover());
+                }
+            });
+            ui.add_space(gap);
         }
     } else {
         // SINGLE PAGE GRID LAYOUT (2 Columns standard)
-        let col_count = if avail_w > 520.0 { 2 } else { 1 };
         let card_w = ((avail_w - (col_count as f32 - 1.0) * gap) / (col_count as f32)).max(120.0);
         let det_w = card_details_width(card_w);
-        let chunk_size = col_count;
-        for (row_idx, chunk) in state.cards.chunks(chunk_size).enumerate() {
+        for row_idx in start_row..end_row {
+            let start_idx = row_idx * col_count;
+            let chunk = state.cards.get(start_idx..).map(|cards| &cards[..cards.len().min(col_count)]).unwrap_or_default();
+            if chunk.is_empty() {
+                continue;
+            }
             let row_h = card_row_height(ui.painter(), chunk, det_w, lang);
             let row_rect = Rect::from_min_size(ui.cursor().min, vec2(avail_w, row_h));
             if !visible_window.intersects(row_rect) {
@@ -3397,13 +3426,13 @@ fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing = vec2(gap, 0.0);
                 for (col_idx, card) in chunk.iter().enumerate() {
-                    let actual_idx = row_idx * chunk_size + col_idx;
+                    let actual_idx = start_idx + col_idx;
                     if let Some(idx) = render_facing_card(ui, actual_idx, card, card_w, false, row_h, t, lang) {
                         clicked_edit_idx = Some(idx);
                     }
                 }
-                if chunk.len() < chunk_size {
-                    for _ in chunk.len()..chunk_size {
+                if chunk.len() < col_count {
+                    for _ in chunk.len()..col_count {
                         ui.allocate_exact_size(vec2(card_w, row_h), Sense::hover());
                     }
                 }
@@ -3411,6 +3440,8 @@ fn render_card_grid(_app: &mut DesignApp, ui: &mut Ui, state: &mut OrchestratorW
             ui.add_space(gap);
         }
     }
+
+    render_card_pagination(ui, state, total_pages, lang);
 
     // Bottom Action Bar from Image #3:
     // Tambah Kartu: [Paragraf v] [+ Tambah Halaman Baru] [+ Tambah Objek Baru]
@@ -7473,6 +7504,17 @@ mod tests {
         assert_eq!(dock_width(1440.0, true, 5000.0).0, 1440.0 * RIGHT_DOCK_MAX_SHARE);
         assert_eq!(dock_width(300.0, true, 5000.0).0, RIGHT_DOCK_MIN_W);
         assert_eq!(dock_width(1440.0, false, 320.0), (RIGHT_DOCK_COLLAPSED_W, 0.0));
+    }
+
+    #[test]
+    fn card_grid_pagination_bounds_rows() {
+        assert_eq!(card_grid_total_rows(0, false, 2), 0);
+        assert_eq!(card_grid_total_rows(1, false, 2), 1);
+        assert_eq!(card_grid_total_rows(17, false, 2), 9);
+        assert_eq!(card_grid_total_rows(17, true, 2), 9);
+        assert_eq!(card_grid_page_rows(9, 0), (0, 6));
+        assert_eq!(card_grid_page_rows(9, 1), (6, 9));
+        assert_eq!(card_grid_page_rows(0, 3), (18, 0));
     }
 
     /// The cover card's GeoJSON choice must reach `PubgenState` for generation

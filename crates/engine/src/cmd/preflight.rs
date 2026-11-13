@@ -307,6 +307,7 @@ pub fn check(s: &Session, min_ppi: f64) -> Vec<Issue> {
 
 /// [`check`] of document `d` saved at `document` (relative links resolve against it), with the
 /// compositions in `cache`. It needs no session, so it can run on another thread.
+#[allow(clippy::cognitive_complexity)] // Preflight aggregates many independent document checks; splitting it would obscure audit categories.
 pub fn check_document(d: &Document, cache: &Cache, document: Option<&std::path::Path>, min_ppi: f64) -> Vec<Issue> {
     let mut out = Vec::new();
     // Stories: overset and fonts.
