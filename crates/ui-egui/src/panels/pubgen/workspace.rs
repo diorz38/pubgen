@@ -5102,8 +5102,8 @@ fn build_chart_sheet_csv(card: &PublicationCard) -> String {
         lines.push(format!("max_value{delim}{}", card.chart_max_value_override));
     }
     let base_header_count = lines.len() + 3;
-    let data_start = base_header_count + card.chart_data_start_row;
-    let data_end = base_header_count + card.chart_data_end_row;
+    let data_start = base_header_count + card.chart_data_start_row.saturating_sub(1);
+    let data_end = base_header_count + card.chart_data_end_row.saturating_sub(1);
     lines.push(format!("data_start_row{delim}{data_start}"));
     lines.push(format!("data_end_row{delim}{data_end}"));
     lines.push(String::new());

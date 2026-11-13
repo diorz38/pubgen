@@ -1,4 +1,4 @@
-﻿//! The panels: their ids, names, icons and contents, and the windows of the float-only panels.
+//! The panels: their ids, names, icons and contents, and the windows of the float-only panels.
 //! `panel_docking` places the others in the docking layout.
 
 use egui::{Sense, vec2};
@@ -22,6 +22,7 @@ pub const ICON_PANELS: &[(&str, &str, &str)] = &[
     ("effects", "Effects", "panel-effects"),
     ("paragraphStyles", "Paragraph Styles", "panel-pstyles"),
     ("characterStyles", "Character Styles", "panel-cstyles"),
+    ("objectStyles", "Object Styles", "frame-dashed"),
     ("character", "Character", "panel-character"),
     ("typography", "Typography", "panel-typography"),
     ("glyphs", "Glyphs", "panel-character"),
@@ -97,6 +98,7 @@ pub fn panel_body(app: &mut DesignApp, ui: &mut egui::Ui, id: &str) {
         "swatches" => panels::swatches::show(app, ui),
         "paragraphStyles" => panels::styles::paragraph(app, ui),
         "characterStyles" => panels::styles::character(app, ui),
+        "objectStyles" => panels::styles::object(app, ui),
         "stroke" => panels::properties::stroke_panel(app, ui),
         "character" => panels::properties::character_panel(app, ui),
         "typography" => panels::typography::show(app, ui),

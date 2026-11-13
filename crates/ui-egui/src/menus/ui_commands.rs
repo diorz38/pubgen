@@ -174,7 +174,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     #[cfg(feature = "pubgen")]
     ("pubgen.selectProfile", "Select Publication Profile", None, "{id: string} — set the active publication profile"),
     #[cfg(feature = "pubgen")]
-    ("pubgen.bpsMargins", "Standard BPS Margins", Some("Ctrl+Shift+M"), "{} — apply the standard BPS margins (20/20/19/15 mm)"),
+    ("pubgen.bpsMargins", "Standard BPS Margins", Some("Ctrl+Alt+Shift+M"), "{} — apply the standard BPS margins (20/20/19/15 mm)"),
     #[cfg(feature = "pubgen")]
     ("pubgen.marginsDialog", "Page Margins & Renumbering Options…", None, "{} — open the page utilities card"),
     #[cfg(feature = "pubgen")]

@@ -1167,12 +1167,9 @@ mod tests {
         assert!(imported.story.text.contains("EN "), "{:?}", imported.story.text);
         // The heading paragraph's own formatting travels with its translated text.
         assert_eq!(imported.story.paras[0].para.align, Some(designcraft_doc::Align::Center), "the heading stays centred");
-        // Guard, and the reason `pages.rs` heading detection needs no change: the rich exporter
-        // writes *resolved* formatting, not a `\stylesheet` table, so the reimported body keeps
-        // its layout but not its style names. Heading detection reads the Indonesian body
-        // (`pages.rs:1202`) and template pages tag by slot label, never by the English body's
-        // paragraph style.
-        assert_eq!(imported.story.paras[0].style, designcraft_doc::story::BASIC_PARAGRAPH, "export::rtf carries formatting, not style names");
+        // The heading style travels with the translated text, so the English body keeps its
+        // paragraph structure as well as its resolved character formatting.
+        assert_eq!(imported.story.paras[0].style, "Heading 1", "the heading style survives translation");
     }
 
     #[test]
