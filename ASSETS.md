@@ -171,7 +171,9 @@ backend keeps the same files; hashes and upstream licence notices are retained h
 | `plan/pubgen/samples/DUAL_LANG/images/city_skyline.jpg` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
 | `plan/pubgen/samples/DUAL_LANG/images/infografik_01.png` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
 | `plan/pubgen/samples/DUAL_LANG/images/infografik_02.png` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
+| `plan/pubgen/samples/DUAL_LANG/images/lanscape_kartim.jpg` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
 | `plan/pubgen/samples/DUAL_LANG/images/pembatas_bab.jpg` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
+| `plan/pubgen/samples/DUAL_LANG/images/pembangunan_kartim.jpg` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
 | `plan/pubgen/samples/DUAL_LANG/images/se2026.png` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
 | `plan/pubgen/samples/DUAL_LANG/images/visualisasi_keuangan_perdagangan_portrait.png` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
 | `plan/pubgen/samples/SINGLE_LANG/B01_pict1.jpg` | DesignCraft contributors | PubGen GIS/sample data | CC0-1.0 | PubGen asset |
