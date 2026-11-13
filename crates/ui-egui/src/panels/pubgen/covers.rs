@@ -302,6 +302,7 @@ fn convert_asset_id_to_grayscale_mode(
         name: format!("{}_{}.png", asset.name.trim_end_matches(".png").trim_end_matches(".jpg"), prefix),
         mime: "image/png".into(),
         link: None,
+        link_fingerprint: None,
         data: std::sync::Arc::new(out_bytes),
         pixels: Some((w, h)),
         page: 0,
