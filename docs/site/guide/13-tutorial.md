@@ -41,12 +41,12 @@ Nama sheet adalah kontrak antara Excel dan Orchestrator. Gunakan pola berikut:
 | `TCP`, `TCT`, `TCF` | **Daftar isi** | Paragraf, tabel, atau grafik; lihat langkah 7. |
 | `NOTE`, `CATATAN` | *(diabaikan)* | Lembar bantu/legenda; tidak menjadi kartu. |
 
-Pemetaan di atas berlaku untuk profil **BPS Daerah Dalam Angka** (profil bawaan). Profil lain merutekan sheet menurut aturannya sendiri (§12) — BRS mengenali lembar `POINT`, `U1…`, dan nama yang memuat `ringkasan` atau `utama`. Periksa profil aktif sebelum menamai sheet.
+Pemetaan di atas berlaku untuk profil **BPS Daerah Dalam Angka** (profil bawaan). Profil lain merutekan sheet menurut aturannya sendiri (§12); BRS dipilih dari nama sheet yang diawali `brs`, memuat `ringkasan`/`utama`, atau bernama `POINT`. Periksa profil aktif sebelum menamai sheet.
 
 Aturan penamaan yang perlu diikuti:
 
 - Gunakan angka dua digit dan huruf besar: `01_01`, `02_03`, `R01`. Nama seperti `Tabel 1` atau `Review01` tidak dibaca sebagai halaman yang dimaksud dan bisa jatuh menjadi kartu Tabel.
-- `03_01L` adalah **lanjutan** tabel `03_01`. PGS memperlakukannya sebagai bagian tabel yang sama — tidak muncul dua kali di Daftar Tabel — jadi tulis sendiri kata `Lanjutan` pada baris judulnya bila ingin tercetak.
+- `03_01L` adalah **lanjutan** tabel `03_01`. PGS mengenalinya sebagai lanjutan, sehingga tidak didaftarkan lagi di Daftar Tabel; tulis sendiri kata `Lanjutan` pada baris judulnya bila ingin tercetak.
 - Sheet `COVER` selalu menjadi kartu pertama; kartu lainnya mengikuti urutan sheet di workbook.
 
 #### 3. Isi sheet `COVER`
@@ -102,7 +102,7 @@ Susun satu tabel per sheet dengan urutan berikut:
 Beberapa hal yang menentukan hasil:
 
 - Baris kosong dilewati; kolom kosong di ujung kanan tidak dihitung.
-- Gaya garis, baris nomor kolom `(1), (2), …`, dan baris *footer* tabel mengikuti profil aktif (§12) — tidak perlu digambar manual.
+- Gaya garis, baris nomor kolom `(1), (2), …`, dan penanda baris total mengikuti profil aktif (§12) — tidak perlu digambar manual.
 - Untuk tabel yang terpotong, buat sheet lanjutan `03_01L` dengan header dan kolom yang sama.
 
 #### 6. Isi sheet grafik `CXX_XX` dan peta `MXX_XX`
@@ -121,7 +121,7 @@ show_value_labels true
 - Daftar arketipe (`bar_clustered`, `horizontal_bar`, `line`, `donut`, `population_pyramid`, `gauge`, …) dan kunci lain ada di §8. Tanpa `chart_type`, sheet ditempatkan sebagai gambar biasa.
 - Bila `data` menunjuk sheet tabel, kolom kategori dan seri dideteksi otomatis dari tabel itu; setel ulang di tab **Opsi Grafik** lewat **Click to edit** bila urutannya tidak sesuai. Bila grafik memuat datanya sendiri di sheet `CXX_XX` (tanpa `data`), tulis juga `category_col`, `series_1_col`, `data_start_row`, dan `data_end_row` seperti contoh di §8.
 
-Sheet peta menulis `type: choropleth` (atau `chart_type: map`), lalu memilih peta bawaan (`map: KARAWANG TIMUR`) atau berkas sendiri (`geojson: images/peta.geojson`), dan data nilai per wilayah (`data: maps/penduduk.csv`).
+Sheet peta menulis `type: choropleth` (atau `chart_type: map`) dan wajib menunjuk peta lewat `map` (peta bawaan, mis. `KARAWANG TIMUR`) atau `geojson` (berkas sendiri), ditambah `data` untuk nilai per wilayah (mis. `maps/penduduk.csv`).
 
 #### 7. Isi sheet daftar isi dan pembatas
 
