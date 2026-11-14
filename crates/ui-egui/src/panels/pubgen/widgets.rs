@@ -1298,8 +1298,11 @@ When there is no cover page yet, this behaves the same as unchecked.",
         (false, "Generating AI cover in background\u{2026}")
     } else if is_ai && !designcraft_imagegen::compiled_in() {
         (false, "This build has no online image generation (compile with --features ai-cover-online)")
-    } else if is_ai && !super::ai_cover::AiCoverSetupDialog::key_configured(app) {
-        (false, "AI Base needs a Cloudflare account: click AI Setup\u{2026} above to set up.")
+    } else if is_ai && !super::ai_cover::AiCoverSetupDialog::key_configured_in(app, super::ai_cover::source_project_dir(st).as_deref()) {
+        (
+            false,
+            "AI Base needs a Cloudflare account: click AI Setup\u{2026} above, or put CLOUDFLARE_ACCOUNT_ID/CLOUDFLARE_API_TOKEN in a .env beside the workbook or the app.",
+        )
     } else {
         (true, "")
     };

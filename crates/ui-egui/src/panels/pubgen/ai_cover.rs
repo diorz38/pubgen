@@ -191,9 +191,38 @@ fn ambient_credentials_allowed() -> bool {
     !AMBIENT_CREDENTIALS_DISABLED.with(|c| c.get())
 }
 
+/// Directory of the active Pubgen source (the imported Excel workbook), if any.
+/// `.env` lookups also start here so a project folder can carry its own keys.
+pub fn source_project_dir(st: &PubgenState) -> Option<std::path::PathBuf> {
+    let p = std::path::Path::new(st.excel_source_path.trim());
+    if p.as_os_str().is_empty() {
+        return None;
+    }
+    p.parent().map(std::path::Path::to_path_buf).filter(|d| !d.as_os_str().is_empty())
+}
+
+/// Roots whose ancestor chains are searched for a `.env`, in order: the project
+/// (workbook) directory first, then the process working directory, then the
+/// directory of the running executable (portable installs drop keys next to the app).
+fn dotenv_roots(project_dir: Option<&std::path::Path>) -> Vec<std::path::PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(dir) = project_dir {
+        roots.push(dir.to_path_buf());
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        roots.push(cwd);
+    }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        roots.push(dir.to_path_buf());
+    }
+    roots
+}
+
 /// Helper to read Cloudflare credentials from engine Prefs, falling back to process env
-/// or a local `.env` file.
-pub fn get_credentials(prefs: &designcraft_engine::Prefs) -> (String, String) {
+/// or a `.env` file found beside the project source, the working directory, or the app.
+pub fn get_credentials_for(prefs: &designcraft_engine::Prefs, project_dir: Option<&std::path::Path>) -> (String, String) {
     let mut acct = prefs.cover_ai_cloudflare_account_id.trim().to_string();
     let mut tok = prefs.cover_ai_cloudflare_api_token.trim().to_string();
 
@@ -211,16 +240,7 @@ pub fn get_credentials(prefs: &designcraft_engine::Prefs) -> (String, String) {
     }
 
     if ambient_credentials_allowed() && (acct.is_empty() || tok.is_empty()) {
-        let mut roots = Vec::new();
-        if let Ok(cwd) = std::env::current_dir() {
-            roots.push(cwd);
-        }
-        if let Ok(exe) = std::env::current_exe()
-            && let Some(dir) = exe.parent()
-        {
-            roots.push(dir.to_path_buf());
-        }
-        for root in roots {
+        for root in dotenv_roots(project_dir) {
             let Some(path) = find_dotenv(&root) else { continue };
             let Ok(content) = std::fs::read_to_string(path) else { continue };
             parse_env_credentials(&content, &mut acct, &mut tok);
@@ -233,6 +253,11 @@ pub fn get_credentials(prefs: &designcraft_engine::Prefs) -> (String, String) {
     (acct, tok)
 }
 
+/// Same lookup without a project directory (dialog prefill, quota probe).
+pub fn get_credentials(prefs: &designcraft_engine::Prefs) -> (String, String) {
+    get_credentials_for(prefs, None)
+}
+
 impl AiCoverSetupDialog {
     pub fn open(app: &DesignApp) -> Self {
         let (account_id, token) = get_credentials(&app.session.prefs);
@@ -240,10 +265,15 @@ impl AiCoverSetupDialog {
     }
 
     /// Is a usable-looking key configured? (Checked without the network; the real
-    /// proof is the Verify call.)
-    pub fn key_configured(app: &DesignApp) -> bool {
-        let (acct, tok) = get_credentials(&app.session.prefs);
+    /// proof is the Verify call.) The project directory's `.env` counts too.
+    pub fn key_configured_in(app: &DesignApp, project_dir: Option<&std::path::Path>) -> bool {
+        let (acct, tok) = get_credentials_for(&app.session.prefs, project_dir);
         !acct.is_empty() && !tok.is_empty()
+    }
+
+    /// Same check without a project directory.
+    pub fn key_configured(app: &DesignApp) -> bool {
+        Self::key_configured_in(app, None)
     }
 
     /// Prove the credentials with one tiny real generation (256 px, one step: a few
@@ -321,7 +351,7 @@ pub(crate) fn ai_cover_options_pane(app: &mut DesignApp, ui: &mut egui::Ui, st: 
     ui.add(egui::Label::new(RichText::new(&full_prompt).size(9.5).color(t.text_dim)).wrap());
 
     // Key setup: the button mirrors the AI Translator one; Verify runs one tiny generation.
-    let ready = AiCoverSetupDialog::key_configured(app);
+    let ready = AiCoverSetupDialog::key_configured_in(app, source_project_dir(st).as_deref());
     let (label, tip) = if !imagegen::compiled_in() {
         ("AI Offline", "This build has no online image generation (compile with --features ai-cover-online)")
     } else if ready {
@@ -423,8 +453,8 @@ pub(crate) fn execute_generate_ai_cover(app: &mut DesignApp, st: &PubgenState) -
     if !imagegen::compiled_in() {
         return Err("AI Base covers need a build with --features ai-cover-online.".into());
     }
-    if !AiCoverSetupDialog::key_configured(app) {
-        return Err("AI Base needs a Cloudflare account: pick AI Setup\u{2026} under Cover Images and verify your key.".into());
+    if !AiCoverSetupDialog::key_configured_in(app, source_project_dir(st).as_deref()) {
+        return Err("AI Base needs a Cloudflare account: pick AI Setup\u{2026} under Cover Images, or set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in a .env beside the workbook or the app.".into());
     }
 
     let dir = super::covers::ai_cover_output_dir();
@@ -432,7 +462,7 @@ pub(crate) fn execute_generate_ai_cover(app: &mut DesignApp, st: &PubgenState) -
     let bg_path = match cached {
         Some(path) => path,
         None => {
-            let (account_id, token) = get_credentials(&app.session.prefs);
+            let (account_id, token) = get_credentials_for(&app.session.prefs, source_project_dir(st).as_deref());
             let palette = p.palettes.get(st.cover_ai_palette).unwrap_or(&p.palettes[0]);
             let prompt = build_prompt(p, palette);
             let neg = imagegen::GenRequest::clean_cover_negative_prompt();
@@ -476,6 +506,25 @@ mod tests {
         std::fs::create_dir_all(&nested).unwrap();
         std::fs::write(dir.path().join(".env"), "CLOUDFLARE_ACCOUNT_ID=acct-123\n").unwrap();
         assert_eq!(find_dotenv(&nested), Some(dir.path().join(".env")));
+    }
+
+    #[test]
+    fn dotenv_roots_start_at_project_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("proj");
+        std::fs::create_dir_all(&project).unwrap();
+        let roots = dotenv_roots(Some(&project));
+        assert_eq!(roots.first(), Some(&project), "project .env must win over cwd/exe: {roots:?}");
+        let without = dotenv_roots(None);
+        assert!(without.iter().all(|r| r != &project));
+    }
+
+    #[test]
+    fn source_project_dir_follows_excel_workbook() {
+        let mut st = super::PubgenState::default();
+        assert_eq!(source_project_dir(&st), None);
+        st.excel_source_path = "C:/data/proj/KBDA2026.xlsx".into();
+        assert_eq!(source_project_dir(&st).as_deref(), Some(std::path::Path::new("C:/data/proj")));
     }
 
     #[test]

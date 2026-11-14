@@ -2449,8 +2449,8 @@ pub fn trigger_generate_cover(app: &mut DesignApp, st: &mut PubgenState, ctx: eg
         return;
     }
 
-    if !super::ai_cover::AiCoverSetupDialog::key_configured(app) {
-        st.cover_status = Some(("AI Base needs a Cloudflare account: click AI Setup\u{2026} above to set up.".into(), false));
+    if !super::ai_cover::AiCoverSetupDialog::key_configured_in(app, super::ai_cover::source_project_dir(st).as_deref()) {
+        st.cover_status = Some(("AI Base needs a Cloudflare account: click AI Setup\u{2026} above, or set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in a .env beside the workbook or the app.".into(), false));
         return;
     }
 
@@ -2463,7 +2463,7 @@ pub fn trigger_generate_cover(app: &mut DesignApp, st: &mut PubgenState, ctx: eg
     let seed = super::ai_cover_job::seed_from_title(title_text);
     let req = imagegen::GenRequest::new(prompt, neg_prompt, aspect, 18).with_seed(seed);
 
-    let (account_id, token) = super::ai_cover::get_credentials(&app.session.prefs);
+    let (account_id, token) = super::ai_cover::get_credentials_for(&app.session.prefs, super::ai_cover::source_project_dir(st).as_deref());
 
     let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let filename = format!("ai_cover_{}_{}_{}.png", st.cover_style, st.cover_ai_palette, timestamp);
@@ -2552,8 +2552,8 @@ pub fn trigger_generate_cover_batch(app: &mut DesignApp, st: &mut PubgenState, i
         st.cover_status = Some(("AI Base covers need a build with --features ai-cover-online.".into(), false));
         return;
     }
-    if !super::ai_cover::AiCoverSetupDialog::key_configured(app) {
-        st.cover_status = Some(("AI Base needs a Cloudflare account: click AI Setup\u{2026} above to set up.".into(), false));
+    if !super::ai_cover::AiCoverSetupDialog::key_configured_in(app, super::ai_cover::source_project_dir(st).as_deref()) {
+        st.cover_status = Some(("AI Base needs a Cloudflare account: click AI Setup\u{2026} above, or set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in a .env beside the workbook or the app.".into(), false));
         return;
     }
 
@@ -2600,7 +2600,7 @@ pub fn trigger_generate_cover_batch_confirmed(
     items: Vec<super::ai_cover_job::CoverBatchItem>,
     ctx: egui::Context,
 ) {
-    let (account_id, token) = super::ai_cover::get_credentials(&app.session.prefs);
+    let (account_id, token) = super::ai_cover::get_credentials_for(&app.session.prefs, super::ai_cover::source_project_dir(st).as_deref());
     let job = super::ai_cover_job::CoverJob::spawn_batch(&account_id, &token, items, ctx);
     st.cover_job = Some(job);
     st.cover_status = Some(("Generating AI covers\u{2026}".into(), true));
