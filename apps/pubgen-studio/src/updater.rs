@@ -112,6 +112,24 @@ pub fn run_helper(args: &[OsString]) -> Option<Result<(), String>> {
 }
 
 fn run_helper_request(request: &HelperRequest) -> Result<(), String> {
+    let result = run_helper_steps(request);
+    // The helper is a detached GUI-subsystem process: its only diagnostic channel is a
+    // log beside the staging archive, so failures are never silently invisible.
+    let log = request.staging.with_extension("log");
+    let outcome = match &result {
+        Ok(()) => "ok".to_string(),
+        Err(error) => format!("error: {error}"),
+    };
+    let line = format!(
+        "{} pubgen portable update {}\n",
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+        outcome
+    );
+    let _ = std::fs::write(&log, line);
+    result
+}
+
+fn run_helper_steps(request: &HelperRequest) -> Result<(), String> {
     wait_for_parent(request.parent_pid)?;
     validate_paths(&request.install_dir, &request.zip, &request.staging)?;
     verify_archive(&request.zip, &request.sha256)?;

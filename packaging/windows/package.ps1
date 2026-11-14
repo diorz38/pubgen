@@ -238,7 +238,38 @@ if (Test-Path $PortableMapsZip) {
 
 $Zip = Join-Path $Dist "designcraft-$Version-windows-$Arch-portable.zip"
 Remove-Item -Force $Zip -ErrorAction SilentlyContinue
-Compress-Archive -Path "$Portable\*" -DestinationPath $Zip
+# ZipArchive entry names are written by hand: Windows PowerShell 5.1's Compress-Archive writes
+# backslash separators, which the in-app updater's extractor rejects as unsafe paths.
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$ZipStream = [System.IO.File]::Open($Zip, [System.IO.FileMode]::CreateNew)
+$Archive = New-Object System.IO.Compression.ZipArchive($ZipStream, [System.IO.Compression.ZipArchiveMode]::Create)
+try {
+  Get-ChildItem -LiteralPath $Portable -Recurse -File | ForEach-Object {
+    $Relative = $_.FullName.Substring($Portable.Length + 1).Replace('\', '/')
+    # Extension methods are not callable on instances in Windows PowerShell 5.1.
+    [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($Archive, $_.FullName, $Relative, [System.IO.Compression.CompressionLevel]::Optimal)
+  }
+} finally {
+  $Archive.Dispose()
+  $ZipStream.Dispose()
+}
+
+# Guard: the in-app updater rejects entry names containing '\' or ':' (they look like unsafe
+# paths to its extractor) and cannot install from an empty archive, so fail the build instead
+# of shipping an uninstallable update.
+$Check = [System.IO.Compression.ZipFile]::OpenRead($Zip)
+try {
+  $Unsafe = @($Check.Entries | Where-Object { $_.FullName -match '[\\:]' })
+  if ($Unsafe.Count -gt 0) {
+    throw "portable zip has $($Unsafe.Count) entries with backslash or colon in their names; the in-app updater would reject them (first: $($Unsafe[0].FullName))"
+  }
+  if ($Check.Entries.Count -eq 0) {
+    throw 'portable zip is empty; the in-app updater cannot install it'
+  }
+} finally {
+  $Check.Dispose()
+}
 
 # Publish the portable archive checksum beside the ZIP. The in-app updater requires this value.
 $Sha256 = (Get-FileHash -Algorithm SHA256 -Path $Zip).Hash.ToLowerInvariant()
