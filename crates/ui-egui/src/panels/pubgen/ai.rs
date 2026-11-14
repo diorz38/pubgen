@@ -17,6 +17,7 @@ use super::{
     file_en_same_as_file, parse_csv_content_with_delim, resolve_catalog_related_file, set_en_frame_label,
 };
 use crate::DesignApp;
+use designcraft_imagegen as imagegen;
 use designcraft_translate as translate;
 
 pub const PROVIDER_OFFLINE: usize = 0;
@@ -59,6 +60,11 @@ pub struct AiSetupDialog {
     pub local_model: String,
     pub local_models: Vec<String>,
     pub local_models_error: Option<String>,
+    /// Cover-image AI (Cloudflare) credentials, independent of the translation
+    /// provider: prefill mirrors `ai_cover::get_credentials_for` (prefs → env → .env).
+    pub cf_account_id: String,
+    pub cf_token: String,
+    pub cf_status: Option<(String, bool)>,
     pub mem: Option<translate::system::MemoryInfo>,
     pub cores: usize,
     pub error: Option<String>,
@@ -81,6 +87,7 @@ impl AiSetupDialog {
         let (env_groq_key, env_groq_model) = get_groq_credentials(prefs);
         let groq_key = if prefs.translation_groq_api_key.trim().is_empty() { env_groq_key } else { prefs.translation_groq_api_key.clone() };
         let groq_model = if prefs.translation_groq_model.trim().is_empty() { env_groq_model } else { prefs.translation_groq_model.clone() };
+        let (cf_account_id, cf_token) = super::ai_cover::get_credentials_for(prefs, super::ai_cover::source_project_dir(st).as_deref());
         let provider = match prefs.translation_provider.as_str() {
             "groq" => PROVIDER_GROQ,
             "custom" => PROVIDER_CUSTOM,
@@ -112,6 +119,9 @@ impl AiSetupDialog {
             local_model: prefs.translation_local_model.clone(),
             local_models: Vec::new(),
             local_models_error: None,
+            cf_account_id,
+            cf_token,
+            cf_status: None,
             mem: translate::system::memory_info(),
             cores: translate::system::cpu_cores(),
             error: None,
@@ -234,6 +244,55 @@ impl AiSetupDialog {
             }),
             "fix the base URL or model (is the server running?)",
         )
+    }
+
+    /// Verify the Cloudflare cover credentials with one tiny real generation (mirrors
+    /// `AiCoverSetupDialog::verify_and_accept`), then persist through prefs.set.
+    /// Independent of the translation provider, so this never closes the dialog —
+    /// only the status line reports the outcome.
+    pub fn verify_and_save_cloudflare(&mut self, app: &mut DesignApp) {
+        self.cf_status = None;
+        if !imagegen::compiled_in() {
+            self.cf_status = Some(("This build has no online image generation (compile with --features ai-cover-online).".into(), false));
+            return;
+        }
+        let client = imagegen::cloudflare::CloudflareClient::new(self.cf_account_id.trim(), self.cf_token.trim());
+        let req = imagegen::GenRequest::new("flat grey rectangle", "", imagegen::Aspect::Iso, 1);
+        let cancel = AtomicBool::new(false);
+        match client.generate(&req, &cancel) {
+            Ok(_) => {
+                let _ = app.run(
+                    "prefs.set",
+                    json!({
+                        "coverAiCloudflareAccountId": self.cf_account_id.trim(),
+                        "coverAiCloudflareApiToken": self.cf_token.trim(),
+                    }),
+                );
+                self.cf_status = Some(("Cloudflare account verified and saved.".into(), true));
+            }
+            Err(imagegen::ImageGenError::Auth) => {
+                self.cf_status =
+                    Some(("Cloudflare rejected the credentials — check the account id and the token's Workers AI Edit permission.".into(), false));
+            }
+            Err(e) => {
+                self.cf_status = Some((format!("Setup check failed: {e} — fix the account id or token and try again."), false));
+            }
+        }
+    }
+
+    /// Drop the saved Cloudflare credentials (empty strings fall through to the
+    /// shared default from a `.env` beside the workbook or the app).
+    pub fn clear_cloudflare(&mut self, app: &mut DesignApp) {
+        self.cf_account_id.clear();
+        self.cf_token.clear();
+        let _ = app.run(
+            "prefs.set",
+            json!({
+                "coverAiCloudflareAccountId": "",
+                "coverAiCloudflareApiToken": "",
+            }),
+        );
+        self.cf_status = Some(("Cleared — cover images use the default account from .env again.".into(), true));
     }
 
     /// The shared accept path of every online provider: one tiny live request, then the
@@ -642,6 +701,53 @@ fn terminology_pane(app: &mut DesignApp, st: &mut PubgenState, dialog: &mut AiSe
     }
 }
 
+/// The Cloudflare account for AI cover images — shown for every provider because
+/// cover generation is independent of the translation backend. Saved credentials
+/// override the shared default resolved from a `.env` beside the workbook or app.
+fn cover_ai_section(app: &mut DesignApp, dialog: &mut AiSetupDialog, ui: &mut egui::Ui) {
+    ui.label(RichText::new("Cover images — your Cloudflare account").strong());
+    ui.label(RichText::new("Optional: replaces the shared default account for AI cover images.").size(10.0));
+    ui.horizontal(|ui| {
+        ui.label("Account ID:");
+        ui.add(egui::TextEdit::singleline(&mut dialog.cf_account_id).hint_text("32-character Cloudflare account id").desired_width(290.0))
+            .accessible_name("Cloudflare account id");
+    });
+    ui.horizontal(|ui| {
+        ui.label("API token:");
+        ui.add(
+            egui::TextEdit::singleline(&mut dialog.cf_token).password(true).hint_text("Cloudflare API token (Workers AI Edit)").desired_width(290.0),
+        )
+        .accessible_name("Cloudflare API token");
+    });
+    ui.horizontal(|ui| {
+        let complete = !dialog.cf_account_id.trim().is_empty() && !dialog.cf_token.trim().is_empty();
+        if ui.add_enabled(complete, egui::Button::new("Verify & Save")).clicked() {
+            dialog.verify_and_save_cloudflare(app);
+        }
+        if ui.button("Clear (use default .env)").clicked() {
+            dialog.clear_cloudflare(app);
+        }
+    });
+    if let Some((msg, ok)) = &dialog.cf_status {
+        let color = if *ok { Color32::from_rgb(120, 200, 120) } else { Color32::from_rgb(220, 80, 80) };
+        ui.label(RichText::new(msg).size(10.0).color(color));
+    }
+    ui.label(
+        RichText::new(
+            "Peringatan: kapasitas token akun dan key default (Cloudflare & Groq) sangat terbatas \
+             karena dipakai bersama banyak pengguna — bisa jadi Anda tidak bisa lagi memakai \
+             akun/key default. Sebaiknya daftar akun sendiri:",
+        )
+        .size(10.0)
+        .color(Color32::from_rgb(220, 120, 60)),
+    );
+    ui.horizontal(|ui| {
+        ui.hyperlink_to("Daftar Cloudflare (gratis)", "https://dash.cloudflare.com/profile/api-tokens");
+        ui.separator();
+        ui.hyperlink_to("Daftar Groq (gratis)", "https://console.groq.com/keys");
+    });
+}
+
 /// The glossary terms sorted for the editor: most-seen first, then alphabetical.
 fn sorted_terms(g: &BpsGlossary) -> Vec<GlossaryTerm> {
     let mut terms = g.terms.clone();
@@ -721,6 +827,11 @@ pub fn dialog_ui(app: &mut DesignApp, st: &mut PubgenState, ui: &mut egui::Ui) {
             PROVIDER_LOCAL => local_pane(app, st, &mut dialog, ui),
             _ => offline_pane(app, st, &mut dialog, ui),
         }
+
+        // Cover-image AI account — same dialog, saved independently of the provider.
+        ui.add_space(6.0);
+        ui.separator();
+        cover_ai_section(app, &mut dialog, ui);
 
         ui.separator();
         ui.horizontal(|ui| {
