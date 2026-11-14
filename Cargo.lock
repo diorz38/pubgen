@@ -1490,7 +1490,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "arboard",
  "craft-update",
@@ -1515,7 +1515,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-cli"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "designcraft-color",
  "designcraft-compose",
@@ -1532,7 +1532,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-color"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "craft-cms",
  "kurbo",
@@ -1544,7 +1544,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-compose"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "designcraft-color",
  "designcraft-doc",
@@ -1564,7 +1564,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-doc"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "chrono",
  "designcraft-color",
@@ -1577,7 +1577,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-engine"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "caseless",
  "craft-atomic",
@@ -1617,7 +1617,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-epub"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "chrono",
  "designcraft-color",
@@ -1627,7 +1627,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-fonts"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "core-text",
  "harfrust 0.13.3",
@@ -1640,7 +1640,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-format"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "designcraft-doc",
  "designcraft-images",
@@ -1652,7 +1652,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-geom"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "flo_curves",
  "kurbo",
@@ -1665,7 +1665,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-idml"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "designcraft-color",
  "designcraft-compose",
@@ -1680,7 +1680,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-imagegen"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "base64 0.22.1",
  "image",
@@ -1692,7 +1692,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-images"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "craft-cms",
  "designcraft-color",
@@ -1711,7 +1711,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-mcp"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "designcraft-engine",
  "designcraft-geom",
@@ -1724,7 +1724,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-pdf"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "chrono",
  "craft-cms",
@@ -1750,7 +1750,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-pptx"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "chrono",
  "designcraft-color",
@@ -1768,7 +1768,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-render"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "bytemuck",
  "craft-pdf",
@@ -1788,7 +1788,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-textimport"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "designcraft-doc",
  "quick-xml 0.41.0",
@@ -1797,7 +1797,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-tools"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "designcraft-color",
  "designcraft-compose",
@@ -1809,7 +1809,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-translate"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "ort",
  "serde_json",
@@ -1822,7 +1822,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-ui-egui"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "chrono",
  "craft-dialogs",
@@ -1864,7 +1864,7 @@ dependencies = [
 
 [[package]]
 name = "designcraft-web"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "designcraft-engine",
  "designcraft-format",
@@ -4663,7 +4663,7 @@ dependencies = [
 
 [[package]]
 name = "pgs"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "arboard",
  "chrono",
@@ -5035,7 +5035,7 @@ dependencies = [
 
 [[package]]
 name = "pubgen-cli"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "designcraft-translate",
  "pubgen-core",
@@ -5046,7 +5046,7 @@ dependencies = [
 
 [[package]]
 name = "pubgen-core"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "calamine",
  "chrono",
@@ -8409,7 +8409,7 @@ checksum = "9440ea3e5aeabb0ac63af70daf835274065238cdd0cec83418f417eae38bacee"
 
 [[package]]
 name = "xtask"
-version = "0.20.1-pgs.0.9.4"
+version = "0.20.1-pgs.0.9.5"
 dependencies = [
  "serde_json",
 ]
