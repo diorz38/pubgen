@@ -126,7 +126,7 @@ layout, typography and export improvements arrive in PGS as the engine is synchr
 
 The latest build is the Windows x64 portable release:
 
-**[PGS v0.20.1-pgs.0.9.5 — Windows x64 Portable](https://github.com/diorz38/pubgen/releases/tag/v0.20.1-pgs.0.9.5)**
+**[PGS v0.20.1-pgs.0.9.6 — Windows x64 Portable](https://github.com/diorz38/pubgen/releases/tag/v0.20.1-pgs.0.9.6)**
 ([latest release page](https://github.com/diorz38/pubgen/releases/latest))
 
 Download the portable `.zip`, extract it anywhere and run `pgs.exe`. The archive is
