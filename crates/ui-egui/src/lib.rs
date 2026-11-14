@@ -29,6 +29,10 @@ pub const UPDATE_APP: craft_update::app::App = craft_update::app::App {
     ..craft_update::suite::DESIGNCRAFT
 };
 
+/// Pubgen releases live in the fork, not in upstream DesignCraft.
+#[cfg(all(feature = "pubgen", not(target_arch = "wasm32")))]
+pub const PUBGEN_UPDATE_APP: craft_update::app::App = craft_update::app::App { repo: "diorz38/pubgen", ..craft_update::suite::DESIGNCRAFT };
+
 pub mod about;
 pub mod canvas;
 pub mod chrome;
@@ -60,6 +64,8 @@ mod panel_docking;
 pub mod panels;
 mod preflight_worker;
 mod prefs;
+#[cfg(all(feature = "pubgen", not(target_arch = "wasm32")))]
+mod pubgen_updates;
 pub mod render_worker;
 mod rtl;
 mod section_options;
@@ -83,6 +89,8 @@ use serde_json::{Value, json};
 
 pub use control::{ControlRequest, ControlResponse};
 pub use prefs::ReadPreferences;
+#[cfg(all(feature = "pubgen", not(target_arch = "wasm32")))]
+pub use pubgen_updates::PendingPortableUpdate;
 
 mod app;
 mod clock;

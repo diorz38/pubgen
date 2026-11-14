@@ -42,6 +42,14 @@ impl PubgenStudioApp {
 }
 
 impl eframe::App for PubgenStudioApp {
+    fn on_exit(&mut self) {
+        if let Some(update) = self.app.take_pending_portable_update()
+            && let Err(error) = crate::updater::start_portable_update(&update.zip, &update.staging, &update.sha256)
+        {
+            log::error!("portable update could not start: {error}");
+        }
+    }
+
     fn logic(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         // Run background ticks and logic for DesignApp
         self.app.logic(ctx);

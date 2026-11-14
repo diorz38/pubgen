@@ -120,6 +120,8 @@ impl DesignApp {
     }
 
     fn cancel_quit(&mut self) {
+        #[cfg(all(feature = "pubgen", not(target_arch = "wasm32")))]
+        self.updates_rt.pubgen.cancel_install();
         let Some(q) = self.quitting.take() else { return };
         if let Some(i) = q.original_active.and_then(|uid| self.session.documents().iter().position(|d| d.uid == uid)) {
             let _ = self.run("file.activate", json!({"index": i}));

@@ -4667,6 +4667,7 @@ version = "0.20.1-pgs.0.9.4"
 dependencies = [
  "arboard",
  "chrono",
+ "craft-update",
  "designcraft-engine",
  "designcraft-ui-egui",
  "eframe",
@@ -4676,6 +4677,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "tempfile",
  "winreg",
  "winresource",
  "winsafe",

@@ -27,9 +27,13 @@ rfd = { workspace = true }
 arboard = { workspace = true }
 zip = { workspace = true }
 chrono = { workspace = true }
+craft-update = { workspace = true }
 
 [build-dependencies]
 winresource = "0.1"
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 winsafe = { version = "0.0.29", default-features = false, features = ["user"] }

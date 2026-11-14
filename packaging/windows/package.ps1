@@ -240,6 +240,11 @@ $Zip = Join-Path $Dist "designcraft-$Version-windows-$Arch-portable.zip"
 Remove-Item -Force $Zip -ErrorAction SilentlyContinue
 Compress-Archive -Path "$Portable\*" -DestinationPath $Zip
 
+# Publish the portable archive checksum beside the ZIP. The in-app updater requires this value.
+$Sha256 = (Get-FileHash -Algorithm SHA256 -Path $Zip).Hash.ToLowerInvariant()
+$Sums = Join-Path $Dist 'SHA256SUMS.txt'
+"$Sha256  $([System.IO.Path]::GetFileName($Zip))" | Set-Content -Encoding ascii $Sums
+
 # Smoke-test the CLI when this machine can run it. An ARM64 build made on an x64 runner can't run
 # here; .github/workflows/windows-arm64.yml installs and runs it on ARM64 instead.
 $HostArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()

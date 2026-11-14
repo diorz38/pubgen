@@ -48,6 +48,10 @@ const ALLOWED: &[(&str, &str)] = &[
     ),
     ("ui-egui/src/panels/pubgen/widgets.rs", "Pubgen panel chrome loads the optional PubGen logo image next to the app on first paint"),
     (
+        "ui-egui/src/pubgen_updates.rs",
+        "Pubgen's in-app updater writes only its fixed per-user cache under the system temporary directory; it never reads or writes a document path",
+    ),
+    (
         "ui-egui/src/panels/pubgen/charts/stock_maps.rs",
         "Pubgen stock charts read the GeoJSON map and cover-map files the user picks next to the workbook; a missing map leaves the chart's own outline",
     ),

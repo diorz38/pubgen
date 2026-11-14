@@ -4,20 +4,22 @@ use serde_json::Value;
 
 use crate::DesignApp;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "pubgen")))]
 use craft_update::updater::Status;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "pubgen")))]
 use craft_update::updater::{Action, Updater};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "pubgen")))]
 use craft_update::{CheckResultDialog, CheckResultResponse};
 
 pub(crate) struct Runtime {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), not(feature = "pubgen")))]
     updater: Updater,
+    #[cfg(all(not(target_arch = "wasm32"), feature = "pubgen"))]
+    pub(crate) pubgen: crate::pubgen_updates::Runtime,
     /// The desktop app turns the check at start on; tests and the web build leave it off.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), not(feature = "pubgen")))]
     startup_check: bool,
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), not(feature = "pubgen")))]
     check_requested: bool,
     /// The context of the last frame, to wake the UI when a check is queued from a menu callback.
     #[cfg(not(target_arch = "wasm32"))]
@@ -30,11 +32,13 @@ pub(crate) struct Runtime {
 impl Default for Runtime {
     fn default() -> Self {
         Self {
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(all(not(target_arch = "wasm32"), not(feature = "pubgen")))]
             updater: Updater::new(&crate::UPDATE_APP, env!("CARGO_PKG_VERSION")),
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(all(not(target_arch = "wasm32"), feature = "pubgen"))]
+            pubgen: crate::pubgen_updates::Runtime::default(),
+            #[cfg(all(not(target_arch = "wasm32"), not(feature = "pubgen")))]
             startup_check: false,
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(all(not(target_arch = "wasm32"), not(feature = "pubgen")))]
             check_requested: false,
             #[cfg(not(target_arch = "wasm32"))]
             repaint: None,
@@ -48,14 +52,34 @@ impl DesignApp {
     /// Whether the app asks for a newer release when it starts (off until the desktop app turns it on).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn set_startup_update_check(&mut self, on: bool) {
-        self.updates_rt.startup_check = on;
+        #[cfg(feature = "pubgen")]
+        {
+            self.updates_rt.pubgen.set_startup_check(on);
+        }
+        #[cfg(not(feature = "pubgen"))]
+        {
+            self.updates_rt.startup_check = on;
+        }
+    }
+
+    /// Take the verified portable archive waiting for the app layer to install after exit.
+    #[cfg(all(feature = "pubgen", not(target_arch = "wasm32")))]
+    pub fn take_pending_portable_update(&mut self) -> Option<crate::PendingPortableUpdate> {
+        self.updates_rt.pubgen.take_pending()
     }
 }
 
 pub(crate) fn check(app: &mut DesignApp) -> Result<Value, String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        app.updates_rt.check_requested = true;
+        #[cfg(feature = "pubgen")]
+        {
+            app.updates_rt.pubgen.request_check();
+        }
+        #[cfg(not(feature = "pubgen"))]
+        {
+            app.updates_rt.check_requested = true;
+        }
         if let Some(ctx) = &app.updates_rt.repaint {
             ctx.request_repaint();
         }
@@ -73,12 +97,19 @@ pub(crate) fn tick(app: &mut DesignApp, ctx: &egui::Context) {
     {
         let rt = &mut app.updates_rt;
         rt.repaint = Some(ctx.clone());
-        if std::mem::take(&mut rt.check_requested) {
-            rt.updater.check_now(ctx);
-        } else if rt.startup_check {
-            rt.updater.check_at_start(ctx);
+        #[cfg(feature = "pubgen")]
+        {
+            rt.pubgen.tick(ctx);
         }
-        rt.updater.tick(ctx);
+        #[cfg(not(feature = "pubgen"))]
+        {
+            if std::mem::take(&mut rt.check_requested) {
+                rt.updater.check_now(ctx);
+            } else if rt.startup_check {
+                rt.updater.check_at_start(ctx);
+            }
+            rt.updater.tick(ctx);
+        }
     }
     #[cfg(target_arch = "wasm32")]
     let _ = (app, ctx);
@@ -87,13 +118,13 @@ pub(crate) fn tick(app: &mut DesignApp, ctx: &egui::Context) {
 /// Whether the check result window shows: for every status but idle (a requested check, and the
 /// first start after an update, which reports that it installed or why it failed), and never over
 /// the startup prompt.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "pubgen")))]
 fn result_window_shows(status: &Status, prompt_open: bool) -> bool {
     !prompt_open && !matches!(status, Status::Idle)
 }
 
 pub(crate) fn show(app: &mut DesignApp, ctx: &egui::Context) {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), not(feature = "pubgen")))]
     {
         // The updater asks to close only when no document has unsaved changes; the install starts when the app exits.
         let clean = !app.session.documents().iter().any(|d| d.is_dirty());
@@ -113,6 +144,49 @@ pub(crate) fn show(app: &mut DesignApp, ctx: &egui::Context) {
                 CheckResultResponse::RestartToUpdate => app.updates_rt.updater.restart_to_update(),
             }
         }
+    }
+
+    #[cfg(all(not(target_arch = "wasm32"), feature = "pubgen"))]
+    if !matches!(app.updates_rt.pubgen.status(), crate::pubgen_updates::Status::Idle) {
+        egui::Window::new("Pubgen Studio Update")
+            .collapsible(false)
+            .resizable(false)
+            .pivot(egui::Align2::CENTER_CENTER)
+            .default_pos(ctx.content_rect().center())
+            .show(ctx, |ui| {
+                match app.updates_rt.pubgen.status() {
+                    crate::pubgen_updates::Status::Idle => {}
+                    crate::pubgen_updates::Status::Checking => {
+                        ui.label("Checking for updates…");
+                    }
+                    crate::pubgen_updates::Status::Downloading { .. } => {
+                        let (done, total) = app.updates_rt.pubgen.progress();
+                        let fraction = if total > 0 { done as f32 / total as f32 } else { 0.0 };
+                        ui.add(egui::ProgressBar::new(fraction.clamp(0.0, 1.0)).show_percentage());
+                    }
+                    crate::pubgen_updates::Status::UpToDate => {
+                        ui.label("Pubgen Studio is up to date.");
+                    }
+                    crate::pubgen_updates::Status::Ready { version } => {
+                        ui.label(format!("Pubgen Studio {version} is ready to install."));
+                        ui.label("Close Pubgen Studio to install the update.");
+                        if ui.button("Close and install update").clicked() {
+                            app.updates_rt.pubgen.request_install();
+                            app.request_quit();
+                        }
+                    }
+                    crate::pubgen_updates::Status::Failed(error) => {
+                        ui.label(format!("Update failed: {error}"));
+                        if ui.button("Try again").clicked() {
+                            app.updates_rt.pubgen.request_check();
+                        }
+                    }
+                }
+                ui.add_space(6.0);
+                if ui.button("Close").clicked() {
+                    app.updates_rt.pubgen.dismiss();
+                }
+            });
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -141,15 +215,18 @@ pub(crate) fn show(app: &mut DesignApp, ctx: &egui::Context) {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(all(not(target_arch = "wasm32"), not(feature = "pubgen")))]
     use super::*;
+    #[cfg(all(not(target_arch = "wasm32"), not(feature = "pubgen")))]
     use designcraft_engine::Session;
 
     #[test]
     fn default_runtime_is_idle() {
+        #[cfg(all(not(target_arch = "wasm32"), not(feature = "pubgen")))]
         let rt = Runtime::default();
         #[cfg(target_arch = "wasm32")]
         assert!(!rt.manual_window_open);
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(feature = "pubgen")))]
         {
             assert!(!rt.startup_check);
             assert!(!rt.updater.prompt_open());
@@ -158,7 +235,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), not(feature = "pubgen")))]
     fn startup_prompt_shows_and_closes() {
         let mut app = DesignApp::new(Session::new(), Default::default());
         let ctx = egui::Context::default();
@@ -179,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), not(feature = "pubgen")))]
     fn result_window_shows_every_status_but_idle() {
         let shown = [
             Status::Checking,

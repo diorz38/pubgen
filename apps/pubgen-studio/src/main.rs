@@ -14,6 +14,7 @@ mod file_assoc;
 mod mode;
 mod project;
 mod settings;
+mod updater;
 mod window_frame;
 mod workspaces;
 
@@ -43,10 +44,21 @@ fn app_icon() -> Option<egui::IconData> {
 }
 
 fn main() -> eframe::Result<()> {
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    if let Some(result) = updater::run_helper(&args) {
+        match result {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                log::error!("portable update failed: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     // Automatically associate .pubgen files with PGS in Windows Registry (per-user)
     file_assoc::register_pubgen_file_association();
 
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<String> = args.into_iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
     let initial_file = args.first().map(PathBuf::from);
 
     let (initial_mode, project_path, container) = match &initial_file {
@@ -85,6 +97,7 @@ fn main() -> eframe::Result<()> {
         Box::new(move |cc| {
             let session = Session::new();
             let mut app = DesignApp::new(session, services());
+            app.set_startup_update_check(true);
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.custom_titlebar = cfg!(target_os = "windows");
             app.services.window_frame = window_frame::service(cc, app.custom_titlebar);
