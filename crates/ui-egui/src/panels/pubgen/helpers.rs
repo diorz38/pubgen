@@ -283,10 +283,30 @@ pub(crate) fn harmonize_signatory_block(app: &mut DesignApp, fid: u64, margin: d
         return;
     };
     let mw = (margin.x1 - margin.x0).max(100.0);
-    // Position the signatory block in the right-hand portion of the page with breathing room
-    // from the right margin (at least 36pt buffer from the page right margin).
-    let sig_left_indent = (mw * 0.44).round();
-    let sig_right_indent = 36.0_f64;
+    let mh = (margin.y1 - margin.y0).max(100.0);
+
+    // Detect if this page has a left graphic obstacle with text wrap (e.g. officer photo)
+    // that already displaces text lines to the right half. When present, adding a large left indent
+    // causes compound indentation that starves available width and forces single-word wrapping.
+    let has_left_wrap = app.session.active().is_some_and(|active| {
+        let fid_item = designcraft_doc::ItemId(fid);
+        let fid_spread = active.doc.find(fid_item).map(|l| l.spread);
+        let page_of_fid = active.doc.page_of_item(fid_item);
+        active.doc.spreads.iter().enumerate().any(|(si, sp)| {
+            let sp_ref = designcraft_doc::SpreadRef::Doc(si);
+            fid_spread == Some(sp_ref)
+                && sp.items.iter().any(|it| {
+                    it.id.0 != fid
+                        && it.wrap.mode != designcraft_doc::WrapMode::None
+                        && it.graphic().is_some()
+                        && (page_of_fid.is_none() || active.doc.page_of_item(it.id) == page_of_fid)
+                        && it.bounds().x0 <= margin.x0 + mw * 0.45
+                        && it.bounds().y1 >= margin.y0 + mh * 0.40
+                })
+        })
+    });
+
+    let (sig_left_indent, sig_right_indent) = if has_left_wrap { (10.0_f64, 20.0_f64) } else { ((mw * 0.44).round(), 36.0_f64) };
 
     let _ = app.session.edit(|doc, _| {
         let Some(story) = doc.story_mut(sid) else {
@@ -349,6 +369,8 @@ pub(crate) fn harmonize_signatory_block(app: &mut DesignApp, fid: u64, margin: d
             }
         }
 
+        let has_empty_gap = (start_pi..last_pi).any(|i| story.text[ranges[i].clone()].trim().is_empty());
+
         for (pi, p) in story.paras.iter_mut().enumerate() {
             if pi >= start_pi && pi <= last_pi {
                 p.para.align = Some(designcraft_doc::Align::Center);
@@ -363,7 +385,8 @@ pub(crate) fn harmonize_signatory_block(app: &mut DesignApp, fid: u64, margin: d
                 }
                 if pi == last_pi {
                     let cur_sb = p.para.space_before.unwrap_or(0.0);
-                    p.para.space_before = Some(cur_sb.max(42.0));
+                    let target_sb = if has_empty_gap { cur_sb.max(8.0) } else { cur_sb.max(42.0) };
+                    p.para.space_before = Some(target_sb);
                 }
             }
         }

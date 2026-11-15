@@ -2893,7 +2893,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                 // Images of a front-matter sheet: `image1` (official photo) wraps tight around the text (Word "Tight")
                 // placed before RTF placement; `image2` (signature) is anchored dynamically to the signatory block.
                 if !has_chapter_prefix {
-                    let img1_rect = [margin.x0, margin.y0 + mh * 0.44, margin.x0 + mw * 0.35, margin.y0 + mh * 0.82];
+                    let img1_rect = [margin.x0, margin.y0 + mh * 0.35, margin.x0 + mw * 0.35, margin.y0 + mh * 0.85];
                     if place_catalog_image(app, st, row, "image1", spread_idx, img1_rect, "boundingBox").is_some() {
                         inserted_images_count = inserted_images_count.saturating_add(1);
                     }
@@ -3033,7 +3033,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
 
                     let (mw, mh) = (en_margin.x1 - en_margin.x0, en_margin.y1 - en_margin.y0);
                     // Place image1 before English RTF text so textWrap: "boundingBox" wraps body text around it.
-                    let img1_rect = [en_margin.x0, en_margin.y0 + mh * 0.44, en_margin.x0 + mw * 0.35, en_margin.y0 + mh * 0.82];
+                    let img1_rect = [en_margin.x0, en_margin.y0 + mh * 0.35, en_margin.x0 + mw * 0.35, en_margin.y0 + mh * 0.85];
                     if place_catalog_image(app, st, row, "image1", en_spread_idx, img1_rect, "boundingBox").is_some() {
                         inserted_images_count = inserted_images_count.saturating_add(1);
                     }
@@ -4812,7 +4812,7 @@ pub(crate) mod tests {
             app.run("file.new", json!({})).unwrap();
 
             // Place image1 with boundingBox wrap before placing RTF, matching execute_generate_pages
-            let img1_rect = [margin.x0, margin.y0 + mh * 0.22, margin.x0 + mw * 0.24, margin.y0 + mh * 0.43];
+            let img1_rect = [margin.x0, margin.y0 + mh * 0.35, margin.x0 + mw * 0.35, margin.y0 + mh * 0.85];
             let res_img = app.run("frame.create", json!({"spread": 0, "rect": img1_rect, "content": "graphic"})).unwrap();
             let img_fid = res_img.get("id").and_then(Value::as_u64).unwrap();
             let _ = app.run("object.textWrap", json!({"mode": "boundingBox", "offset": 6.0, "ids": [img_fid]}));
