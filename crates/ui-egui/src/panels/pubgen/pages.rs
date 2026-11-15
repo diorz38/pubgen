@@ -1715,39 +1715,6 @@ pub(crate) fn extract_catalog_chapter_id(num_val: &str, type_val: &str, file_val
     super::excel::extract_first_two_digit_number(title_val)
 }
 
-fn ensure_even_start_page_before_row(app: &mut DesignApp) -> Result<(), String> {
-    let (next_page_1based, has_back_cover) = {
-        let active = app.session.active().ok_or("No active document")?;
-        let total = active.doc.page_count();
-        let bc = super::covers::find_back_cover_page(&active.doc);
-        let next_p = if let Some(bc_idx) = bc { bc_idx + 1 } else { total + 1 };
-        (next_p, bc)
-    };
-
-    if next_page_1based % 2 != 0 {
-        if let Some(bc_idx) = has_back_cover {
-            app.run("layout.pages.insert", json!({ "before": bc_idx, "count": 1 }))?;
-        } else {
-            let active_pc = app.session.active().map(|s| s.doc.page_count()).unwrap_or(0);
-            app.run("layout.pages.insert", json!({ "after": active_pc.saturating_sub(1), "count": 1 }))?;
-        }
-        let _ = app.session.edit(|doc, _| {
-            let blank_idx = if let Some(bc_idx) = super::covers::find_back_cover_page(doc) {
-                bc_idx.saturating_sub(1)
-            } else {
-                doc.page_count().saturating_sub(1)
-            };
-            if let Some((si, pi)) = doc.page_loc(blank_idx) {
-                let sp = std::sync::Arc::make_mut(&mut doc.spreads[si]);
-                sp.pages[pi].parent = None;
-                sp.pages[pi].margins = designcraft_doc::Margins::uniform(0.0);
-            }
-            Ok(serde_json::Value::Null)
-        });
-    }
-    Ok(())
-}
-
 fn is_front_matter_type(type_val: &str, title_val: &str) -> bool {
     let t = type_val.trim();
     if t.eq_ignore_ascii_case("toc") || t.to_uppercase().starts_with("TOC") {
@@ -1946,19 +1913,6 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
         let section_val = row.get(section_col).map(String::as_str).unwrap_or("").trim();
         let section_en_val = row.get(section_en_col).map(String::as_str).unwrap_or("").trim();
 
-        let is_div_row = is_divider_type(type_val)
-            || type_val.eq_ignore_ascii_case("div")
-            || type_val.to_uppercase().starts_with("DIV")
-            || file_val.to_uppercase().starts_with("DIV");
-
-        let is_rxx_row = is_ulasan_type(type_val)
-            || (type_val.to_uppercase().starts_with('R') && type_val[1..].chars().next().is_some_and(|c| c.is_ascii_digit()))
-            || (file_val.to_uppercase().starts_with('R') && file_val[1..].chars().next().is_some_and(|c| c.is_ascii_digit()));
-
-        if is_dda && (is_div_row || is_rxx_row) {
-            let _ = ensure_even_start_page_before_row(app);
-        }
-
         let page_before = app.session.active().map(|s| s.doc.page_count()).unwrap_or(0);
 
         let is_toc_row = type_val.eq_ignore_ascii_case("TOC") || type_val.eq_ignore_ascii_case("Daftar");
@@ -2027,6 +1981,11 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
         let has_chapter_prefix = clean_id_title.split_whitespace().next().is_some_and(|w| w.eq_ignore_ascii_case("bab"));
         // The preface stays single-language: it is not processed in Dual Lang Mode.
         let is_preface = title_val.eq_ignore_ascii_case("preface") || clean_id_title.eq_ignore_ascii_case("preface");
+        let is_preface_card = is_preface
+            || title_val.to_lowercase().contains("pengantar")
+            || clean_id_title.to_lowercase().contains("pengantar")
+            || title_en_val.eq_ignore_ascii_case("preface")
+            || clean_en_title.eq_ignore_ascii_case("preface");
         let is_div = is_divider_type(type_val);
         let is_cover_or_div = is_div || type_val.eq_ignore_ascii_case("COVER");
         // The narrative sheets: `GXX` (the front matter) and `RXX` (the chapter reviews). Their
@@ -2039,6 +1998,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
 
         let is_cover = type_val.eq_ignore_ascii_case("COVER") || type_val.eq_ignore_ascii_case("SAMPUL");
         let is_preface_row = is_preface
+            || is_preface_card
             || type_val.eq_ignore_ascii_case("G")
             || type_val.eq_ignore_ascii_case("PREFACE")
             || type_val.eq_ignore_ascii_case("Paragraph");
@@ -2069,7 +2029,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
             explicit_tpl_path
         };
 
-        if explicit_tpl_path.is_some() || st.card1_preset == 6 || is_div {
+        if (explicit_tpl_path.is_some() || st.card1_preset == 6 || is_div) && (!is_preface_card || explicit_tpl_path.is_some()) {
             // Modular Template Mode: delegate to template engine
             let raw_tpl = if let Some(ref ep) = explicit_tpl_path {
                 ep.clone()
@@ -2507,7 +2467,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
             if !line.is_empty() {
                 frame_with_style(app, spread_idx, [margin.x0, margin.y0, margin.x1, margin.y0 + 40.0], &line, &st.toc_style);
             }
-        } else if type_val.eq_ignore_ascii_case("Ulasan") {
+        } else if is_ulasan_type(type_val) || is_narrative_row || is_preface_card {
             // Ulasan / Editorial Chapter layout:
             // Split title "BAB 01 Pemerintahan" into "BAB 01" and "Pemerintahan"
             let (ch_line, title_line) = split_chapter_title(clean_id_title, num_val);
@@ -2933,7 +2893,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                 // Images of a front-matter sheet: `image1` (official photo) wraps tight around the text (Word "Tight")
                 // placed before RTF placement; `image2` (signature) is anchored dynamically to the signatory block.
                 if !has_chapter_prefix {
-                    let img1_rect = [margin.x0, margin.y0 + mh * 0.22, margin.x0 + mw * 0.24, margin.y0 + mh * 0.43];
+                    let img1_rect = [margin.x0, margin.y0 + mh * 0.44, margin.x0 + mw * 0.35, margin.y0 + mh * 0.82];
                     if place_catalog_image(app, st, row, "image1", spread_idx, img1_rect, "boundingBox").is_some() {
                         inserted_images_count = inserted_images_count.saturating_add(1);
                     }
@@ -2979,7 +2939,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
 
                 // Dynamically anchor image2 (signature) around the signatory name line in the RTF
                 if !has_chapter_prefix {
-                    let default_img2_rect = [margin.x1 - mw * 0.244, margin.y0 + mh * 0.354, margin.x1 - mw * 0.044, margin.y0 + mh * 0.464];
+                    let default_img2_rect = [margin.x1 - mw * 0.35, margin.y0 + mh * 0.72, margin.x1 - mw * 0.05, margin.y0 + mh * 0.82];
                     let (target_spread, img2_rect) = placed_rtf_fid
                         .map(|fid| compute_signature_placement(app, fid, default_img2_rect, spread_idx, margin))
                         .unwrap_or((spread_idx, default_img2_rect));
@@ -2989,11 +2949,6 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                 }
 
                 // Sequential EN spread for front-matter Ulasan in procedural mode
-                let is_preface_card = is_preface
-                    || title_val.to_lowercase().contains("pengantar")
-                    || clean_id_title.to_lowercase().contains("pengantar")
-                    || title_en_val.eq_ignore_ascii_case("preface");
-
                 let mut resolved_en_spread_rtf = if !file_en_val.is_empty() && !file_en_same_as_file(file_val, file_en_val) {
                     resolve_catalog_related_file(&st.card1_path, file_en_val, "rtf")
                 } else {
@@ -3018,7 +2973,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                     }
                 }
 
-                if st.bilingual_output
+                if (st.bilingual_output || is_preface_card)
                     && !has_chapter_prefix
                     && let Some(en_rtf_file) = resolved_en_spread_rtf
                 {
@@ -3078,7 +3033,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
 
                     let (mw, mh) = (en_margin.x1 - en_margin.x0, en_margin.y1 - en_margin.y0);
                     // Place image1 before English RTF text so textWrap: "boundingBox" wraps body text around it.
-                    let img1_rect = [en_margin.x0, en_margin.y0 + mh * 0.22, en_margin.x0 + mw * 0.24, en_margin.y0 + mh * 0.43];
+                    let img1_rect = [en_margin.x0, en_margin.y0 + mh * 0.44, en_margin.x0 + mw * 0.35, en_margin.y0 + mh * 0.82];
                     if place_catalog_image(app, st, row, "image1", en_spread_idx, img1_rect, "boundingBox").is_some() {
                         inserted_images_count = inserted_images_count.saturating_add(1);
                     }
@@ -3114,8 +3069,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                     italicize_page_stories(app, en_page_idx, end_page);
 
                     // Dynamically anchor image2 (signature) around the signatory name line in the English Preface
-                    let default_img2_rect =
-                        [en_margin.x1 - mw * 0.244, en_margin.y0 + mh * 0.354, en_margin.x1 - mw * 0.044, en_margin.y0 + mh * 0.464];
+                    let default_img2_rect = [en_margin.x1 - mw * 0.35, en_margin.y0 + mh * 0.72, en_margin.x1 - mw * 0.05, en_margin.y0 + mh * 0.82];
                     let (target_spread, img2_rect) = placed_en_rtf_fid
                         .map(|fid| compute_signature_placement(app, fid, default_img2_rect, en_spread_idx, en_margin))
                         .unwrap_or((en_spread_idx, default_img2_rect));
@@ -7613,6 +7567,9 @@ Narrative;3;Catatan Akhir;narrative3.rtf\n";
         // Exactly 3 sections in total: initial page 1 section, Chapter 1, and Chapter 2.
         assert_eq!(doc.sections.len(), 3, "Sections in doc: {:?}", doc.sections);
 
+        // Content generation should not insert blank padding pages (1 initial + 10 content records = 11 pages)
+        assert_eq!(doc.page_count(), 11, "Expected exactly 11 pages without blank padding pages");
+
         // Header & footer should be automatically applied for DDA
         let hf = doc.header_footer.as_ref().expect("header_footer must be applied");
         assert_eq!(hf.preset, "hf-dda");
@@ -7798,8 +7755,11 @@ Narrative;3;Catatan Akhir;narrative3.rtf\n";
         std::fs::write(&id_rtf, br#"{\rtf1\ansi\deff0 {\fonttbl {\f0 Arial;}}\f0\fs24 Kata Pengantar publikasi resmi.}"#).unwrap();
         std::fs::write(&en_rtf, br#"{\rtf1\ansi\deff0 {\fonttbl {\f0 Arial;}}\f0\fs24 Official publication preface note.}"#).unwrap();
 
+        let img1 = sample_image_path();
+        let img2 = sample_image_path();
+
         let st = PubgenState {
-            bilingual_output: true,
+            bilingual_output: false,
             card1_preset: 0,
             card1_range_all: true,
             card1_headers: vec![
@@ -7810,6 +7770,8 @@ Narrative;3;Catatan Akhir;narrative3.rtf\n";
                 "template".into(),
                 "title_en".into(),
                 "file_en".into(),
+                "pict1".into(),
+                "pict2".into(),
             ],
             card1_records: vec![vec![
                 "Note".into(),
@@ -7819,6 +7781,8 @@ Narrative;3;Catatan Akhir;narrative3.rtf\n";
                 "".into(),
                 "Preface".into(),
                 en_rtf.to_string_lossy().to_string(),
+                img1,
+                img2,
             ]],
             card1_type_col: 0,
             card1_num_col: 1,
@@ -7842,10 +7806,24 @@ Narrative;3;Catatan Akhir;narrative3.rtf\n";
         assert!(doc.page_count() >= 3, "Both Kata Pengantar and Preface pages must be generated: total {}", doc.page_count());
 
         let texts: Vec<String> = doc.stories.values().map(|s| s.text.clone()).collect();
-        assert!(texts.iter().any(|t| t.contains("Kata Pengantar")), "Must contain Indonesian title 'Kata Pengantar'");
+        assert!(texts.iter().any(|t| t.to_uppercase().contains("KATA PENGANTAR")), "Must contain Indonesian title 'Kata Pengantar'");
         assert!(texts.iter().any(|t| t.contains("Kata Pengantar publikasi resmi")), "Must contain Indonesian RTF content");
-        assert!(texts.iter().any(|t| t.contains("Preface")), "Must contain English title 'Preface'");
+        assert!(texts.iter().any(|t| t.to_uppercase().contains("PREFACE")), "Must contain English title 'Preface'");
         assert!(texts.iter().any(|t| t.contains("Official publication preface note")), "Must contain English RTF content");
+
+        // Verify Kata Pengantar has 2 graphic frames: pict1 with boundingBox and pict2 floating with wrap None
+        let (id_si, _) = doc.page_loc(1).unwrap();
+        let id_graphics: Vec<_> = doc.spreads[id_si].items.iter().filter(|it| doc.page_of_item(it.id) == Some(1) && it.graphic().is_some()).collect();
+        assert_eq!(id_graphics.len(), 2, "Indonesian page must contain officer photo and signature graphic frames");
+        assert_eq!(id_graphics[0].wrap.mode, designcraft_doc::WrapMode::BoundingBox, "officer photo must have text wrap boundingBox");
+        assert_eq!(id_graphics[1].wrap.mode, designcraft_doc::WrapMode::None, "signature must float above text with wrap None");
+
+        // Verify Preface has 2 graphic frames: pict1 with boundingBox and pict2 floating with wrap None
+        let (en_si, _) = doc.page_loc(2).unwrap();
+        let en_graphics: Vec<_> = doc.spreads[en_si].items.iter().filter(|it| doc.page_of_item(it.id) == Some(2) && it.graphic().is_some()).collect();
+        assert_eq!(en_graphics.len(), 2, "English Preface page must contain officer photo and signature graphic frames");
+        assert_eq!(en_graphics[0].wrap.mode, designcraft_doc::WrapMode::BoundingBox, "officer photo must have text wrap boundingBox");
+        assert_eq!(en_graphics[1].wrap.mode, designcraft_doc::WrapMode::None, "signature must float above text with wrap None");
     }
 
     #[test]

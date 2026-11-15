@@ -6911,8 +6911,29 @@ fn generate_from_workspace(app: &mut DesignApp, state: &OrchestratorWorkspaceSta
         // a separate English RTF, so it must export blank: otherwise a re-import reads the Indonesian
         // file back as "English" instead of translating it.
         let file_en = if super::file_en_same_as_file(&file, &raw_file_en) { String::new() } else { raw_file_en };
-        let image1 = card.settings.get("image1").and_then(|im| staged(im)).unwrap_or_default();
-        let image2 = card.settings.get("image2").and_then(|im| staged(im)).unwrap_or_default();
+        let image1 = card
+            .settings
+            .get("image1")
+            .or_else(|| card.settings.get("image_1"))
+            .or_else(|| card.settings.get("pict1"))
+            .or_else(|| card.settings.get("pict_1"))
+            .or_else(|| card.settings.get("picture1"))
+            .or_else(|| card.settings.get("photo"))
+            .or_else(|| card.settings.get("foto"))
+            .and_then(|im| staged(im))
+            .unwrap_or_default();
+        let image2 = card
+            .settings
+            .get("image2")
+            .or_else(|| card.settings.get("image_2"))
+            .or_else(|| card.settings.get("pict2"))
+            .or_else(|| card.settings.get("pict_2"))
+            .or_else(|| card.settings.get("picture2"))
+            .or_else(|| card.settings.get("signature"))
+            .or_else(|| card.settings.get("ttd"))
+            .or_else(|| card.settings.get("paraf"))
+            .and_then(|im| staged(im))
+            .unwrap_or_default();
         let theme = if card.kind == CardKind::Table {
             if !card.table_theme.trim().is_empty() {
                 card.table_theme.clone()

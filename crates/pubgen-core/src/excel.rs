@@ -175,7 +175,7 @@ pub fn ingest_workbook(path: &Path) -> Result<IngestReport, IngestError> {
             card_title = t;
             card_source = s;
         } else if kind == CardKind::Narrative {
-            let (t, s) = process_narrative_sheet(base_dir, name, &file_name, &rows, &kv, card_title, &mut card_settings, &mut texts);
+            let (t, s) = process_narrative_sheet(base_dir, name, &file_name, &rows, &kv, card_title, &mut card_settings, &mut texts, &mut assets);
             card_title = t;
             card_source = s;
 
@@ -392,6 +392,7 @@ fn process_narrative_sheet(
     mut card_title: String,
     card_settings: &mut BTreeMap<String, serde_json::Value>,
     texts: &mut Vec<(String, Vec<u8>)>,
+    assets: &mut Vec<(String, Vec<u8>)>,
 ) -> (String, Option<String>) {
     let explicit_file = kv.get("file").or_else(|| kv.get("berkas")).cloned();
     let candidate_name = explicit_file
@@ -477,6 +478,52 @@ fn process_narrative_sheet(
         card_settings.insert("file_en".to_string(), serde_json::Value::String(fen));
     } else {
         card_settings.remove("file_en");
+    }
+
+    let img1_val = kv
+        .get("image1")
+        .or_else(|| kv.get("image_1"))
+        .or_else(|| kv.get("pict1"))
+        .or_else(|| kv.get("pict_1"))
+        .or_else(|| kv.get("picture1"))
+        .or_else(|| kv.get("photo"))
+        .or_else(|| kv.get("foto"))
+        .or_else(|| kv.get("image"));
+
+    if let Some(img1) = img1_val {
+        let just_name = Path::new(img1).file_name().and_then(|s| s.to_str()).unwrap_or(img1).to_string();
+        if let Some(bytes) = resolve_file(base_dir, img1).and_then(|p| std::fs::read(&p).ok()) {
+            let asset_path = format!("assets/{just_name}");
+            if !assets.iter().any(|(p, _)| p == &asset_path) {
+                assets.push((asset_path.clone(), bytes));
+            }
+            card_settings.insert("image1".to_string(), serde_json::Value::String(asset_path));
+        } else {
+            card_settings.insert("image1".to_string(), serde_json::Value::String(img1.clone()));
+        }
+    }
+
+    let img2_val = kv
+        .get("image2")
+        .or_else(|| kv.get("image_2"))
+        .or_else(|| kv.get("pict2"))
+        .or_else(|| kv.get("pict_2"))
+        .or_else(|| kv.get("picture2"))
+        .or_else(|| kv.get("signature"))
+        .or_else(|| kv.get("ttd"))
+        .or_else(|| kv.get("paraf"));
+
+    if let Some(img2) = img2_val {
+        let just_name = Path::new(img2).file_name().and_then(|s| s.to_str()).unwrap_or(img2).to_string();
+        if let Some(bytes) = resolve_file(base_dir, img2).and_then(|p| std::fs::read(&p).ok()) {
+            let asset_path = format!("assets/{just_name}");
+            if !assets.iter().any(|(p, _)| p == &asset_path) {
+                assets.push((asset_path.clone(), bytes));
+            }
+            card_settings.insert("image2".to_string(), serde_json::Value::String(asset_path));
+        } else {
+            card_settings.insert("image2".to_string(), serde_json::Value::String(img2.clone()));
+        }
     }
 
     if name == "U1" {
@@ -1941,7 +1988,8 @@ mod tests {
         kv.insert("file".to_string(), "U3.rtf".to_string());
         let mut texts: Vec<(String, Vec<u8>)> = Vec::new();
         let mut settings = BTreeMap::new();
-        let (title, source) = process_narrative_sheet(dir.path(), "U3", "U3", &[], &kv, "Ulasan".to_string(), &mut settings, &mut texts);
+        let mut assets: Vec<(String, Vec<u8>)> = Vec::new();
+        let (title, source) = process_narrative_sheet(dir.path(), "U3", "U3", &[], &kv, "Ulasan".to_string(), &mut settings, &mut texts, &mut assets);
         assert_eq!(source.as_deref(), Some("rtf/U3.rtf"));
         assert!(title.contains("U3.rtf"), "{title}");
         assert_eq!(texts.len(), 1);
@@ -1962,7 +2010,9 @@ mod tests {
         kv.insert("file".to_string(), "U5.docx".to_string());
         let mut texts: Vec<(String, Vec<u8>)> = Vec::new();
         let mut settings = BTreeMap::new();
-        let (_title, source) = process_narrative_sheet(dir.path(), "U5", "U5", &[], &kv, "Ulasan".to_string(), &mut settings, &mut texts);
+        let mut assets: Vec<(String, Vec<u8>)> = Vec::new();
+        let (_title, source) =
+            process_narrative_sheet(dir.path(), "U5", "U5", &[], &kv, "Ulasan".to_string(), &mut settings, &mut texts, &mut assets);
         assert_eq!(source.as_deref(), Some("rtf/U5.rtf"));
         let out = String::from_utf8_lossy(&texts[0].1).into_owned();
         assert!(out.starts_with("{\\rtf"), "{out}");

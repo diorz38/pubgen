@@ -1027,21 +1027,19 @@ pub fn parse_rtf_review_sheet_with_template(sheet: &ExcelSheetData) -> Option<(S
 /// The `image1` / `image2` picture paths of a front-matter (`BXX`) sheet, read leniently from any
 /// row that names them (`image1;path`, `image1 | path`, …). Empty when the sheet has neither.
 pub fn parse_sheet_images(sheet: &ExcelSheetData) -> (Option<String>, Option<String>) {
-    // Strict key match, unlike `extract_field_lenient`: its fallback would turn any other cell
-    // into a picture path.
-    let find = |key: &str| -> Option<String> {
+    let find = |keys: &[&str]| -> Option<String> {
         for row in &sheet.grid {
             for (i, cell) in row.iter().enumerate() {
                 let t = cell.trim();
                 for sep in [';', ':', '='] {
                     if let Some((k, v)) = t.split_once(sep)
-                        && k.trim().eq_ignore_ascii_case(key)
+                        && keys.iter().any(|key| k.trim().eq_ignore_ascii_case(key))
                         && !v.trim().is_empty()
                     {
                         return Some(v.trim().trim_matches('"').trim().to_string());
                     }
                 }
-                if t.eq_ignore_ascii_case(key)
+                if keys.iter().any(|key| t.eq_ignore_ascii_case(key))
                     && let Some(v) = row.get(i + 1).map(|s| s.trim().trim_matches('"').trim()).filter(|s| !s.is_empty())
                 {
                     return Some(v.to_string());
@@ -1050,7 +1048,10 @@ pub fn parse_sheet_images(sheet: &ExcelSheetData) -> (Option<String>, Option<Str
         }
         None
     };
-    (find("image1"), find("image2"))
+    (
+        find(&["image1", "image_1", "pict1", "pict_1", "picture1", "photo", "foto", "image"]),
+        find(&["image2", "image_2", "pict2", "pict_2", "picture2", "signature", "ttd", "paraf"]),
+    )
 }
 
 /// Backward-compatible wrapper for `parse_rtf_review_sheet_with_template` returning 4-tuple.
@@ -1896,7 +1897,7 @@ pub fn convert_excel_to_csv_data_with_profile(
         if (is_rtf_review_sheet(sheet_name) || is_b_sheet(sheet_name) || active_prof.sheet_routing.matches_narrative(sheet_name))
             && let Some((t_val, n_val, title_val, f_val, tpl_val, ten_val, fen_val)) = parse_rtf_review_sheet_bilingual(sheet)
         {
-            let (image1, image2) = if is_b_sheet(sheet_name) { parse_sheet_images(sheet) } else { (None, None) };
+            let (image1, image2) = parse_sheet_images(sheet);
             let rtf_theme = extract_theme_from_sheet(sheet);
 
             if is_rtf_review_sheet(sheet_name) {

@@ -241,7 +241,12 @@ pub(crate) fn place_catalog_image(
     wrap: &str,
 ) -> Option<u64> {
     let col = |key: &str| -> Option<String> {
-        let idx = st.card1_headers.iter().position(|h| h.trim().eq_ignore_ascii_case(key))?;
+        let aliases: &[&str] = match key {
+            "image1" => &["image1", "image_1", "pict1", "pict_1", "picture1", "photo", "foto", "gambar1", "image"],
+            "image2" => &["image2", "image_2", "pict2", "pict_2", "picture2", "signature", "ttd", "paraf", "gambar2"],
+            _ => &[key],
+        };
+        let idx = st.card1_headers.iter().position(|h| aliases.iter().any(|a| h.trim().eq_ignore_ascii_case(a)))?;
         let v = row.get(idx).map(|s| s.trim()).filter(|s| !s.is_empty())?;
         Some(v.to_string())
     };
@@ -574,19 +579,33 @@ fn catalog_file_name(file_str: &str) -> Option<&str> {
 /// (so paths copied from another machine still resolve).
 pub(crate) fn resolve_catalog_related_file(catalog_path: &str, file_str: &str, extension: &str) -> Option<std::path::PathBuf> {
     let dir = std::path::Path::new(catalog_path).parent().unwrap_or_else(|| std::path::Path::new("."));
+    let norm = file_str.replace('\\', "/");
     let mut candidates = vec![
         dir.join(file_str),
+        dir.join(&norm),
         std::path::PathBuf::from(file_str),
+        std::path::PathBuf::from(&norm),
         dir.join(format!("{file_str}.{extension}")),
+        dir.join(format!("{norm}.{extension}")),
         dir.join("rtf").join(file_str),
-        dir.join("rtf").join(format!("{file_str}.{extension}")),
+        dir.join("rtf").join(&norm),
+        dir.join("rtf").join(format!("{norm}.{extension}")),
+        dir.join("pages").join(file_str),
+        dir.join("pages").join(&norm),
+        dir.join("pages").join(format!("{norm}.{extension}")),
         dir.join("images").join(file_str),
-        dir.join("images").join(format!("{file_str}.{extension}")),
+        dir.join("images").join(&norm),
+        dir.join("images").join(format!("{norm}.{extension}")),
+        dir.join("assets").join(file_str),
+        dir.join("assets").join(&norm),
+        dir.join("assets").join(format!("{norm}.{extension}")),
     ];
     if let Some(name) = catalog_file_name(file_str) {
         candidates.push(dir.join(name));
         candidates.push(dir.join("rtf").join(name));
+        candidates.push(dir.join("pages").join(name));
         candidates.push(dir.join("images").join(name));
+        candidates.push(dir.join("assets").join(name));
     }
     candidates.into_iter().find(|p| p.is_file())
 }
