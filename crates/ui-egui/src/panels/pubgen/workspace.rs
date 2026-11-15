@@ -4579,16 +4579,34 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
     // The job itself is polled once per frame in `show`, whichever tab is open.
 
     // Generate Button (Deep Cyan)
-    if ui
-        .add_sized(
-            [ui.available_width(), btn_h],
-            egui::Button::new(RichText::new(crate::i18n::tr(lang, "Generate Publication")).font(semibold(12.0)).color(Color32::WHITE))
-                .fill(t.accent_strong)
-                .corner_radius(CornerRadius::same(t.radius)),
-        )
-        .on_hover_text(crate::i18n::tr(lang, "Generate Publication"))
-        .clicked()
-    {
+    let is_generating = state.compile_progress.is_some() || state.show_guard_dialog;
+    let generate_enabled = !is_generating && !state.cards.is_empty();
+
+    let gen_label = if is_generating {
+        format!("⏳ {}", crate::i18n::tr(lang, "Generating..."))
+    } else {
+        crate::i18n::tr(lang, "Generate Publication").to_string()
+    };
+    let gen_color = Color32::from_rgb(14, 116, 144);
+    let gen_tip = if is_generating {
+        crate::i18n::tr(lang, "Penyusunan halaman sedang berjalan...")
+    } else if state.cards.is_empty() {
+        crate::i18n::tr(lang, "Tambahkan minimal satu kartu konten untuk mengompilasi")
+    } else {
+        crate::i18n::tr(lang, "Generate Publication")
+    };
+    let gen_resp = custom_styled_button(
+        ui,
+        [ui.available_width(), btn_h],
+        &gen_label,
+        12.0,
+        gen_color,
+        Color32::WHITE,
+        generate_enabled,
+        t,
+    )
+    .on_hover_text(gen_tip);
+    if gen_resp.clicked() {
         let doc_has_pages = app.session.doc().map(|d| d.doc.pages().next().is_some()).unwrap_or(false);
         if doc_has_pages {
             state.show_guard_dialog = true;
@@ -4599,16 +4617,31 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
     }
 
     // Generate & Publish Button (Emerald Green)
-    if ui
-        .add_sized(
-            [ui.available_width(), btn_h],
-            egui::Button::new(RichText::new(crate::i18n::tr(lang, "Generate & Publish PDF")).font(semibold(12.0)).color(Color32::WHITE))
-                .fill(t.accent_strong)
-                .corner_radius(CornerRadius::same(t.radius)),
-        )
-        .on_hover_text(crate::i18n::tr(lang, "Generate & Publish PDF"))
-        .clicked()
-    {
+    let pub_label = if is_generating {
+        format!("⏳ {}", crate::i18n::tr(lang, "Publishing..."))
+    } else {
+        crate::i18n::tr(lang, "Generate & Publish PDF").to_string()
+    };
+    let pub_color = Color32::from_rgb(16, 149, 93);
+    let pub_tip = if is_generating {
+        crate::i18n::tr(lang, "Penyusunan dan penerbitan PDF sedang berjalan...")
+    } else if state.cards.is_empty() {
+        crate::i18n::tr(lang, "Tambahkan minimal satu kartu konten untuk mengompilasi")
+    } else {
+        crate::i18n::tr(lang, "Generate & Publish PDF")
+    };
+    let pub_resp = custom_styled_button(
+        ui,
+        [ui.available_width(), btn_h],
+        &pub_label,
+        12.0,
+        pub_color,
+        Color32::WHITE,
+        generate_enabled,
+        t,
+    )
+    .on_hover_text(pub_tip);
+    if pub_resp.clicked() {
         let doc_has_pages = app.session.doc().map(|d| d.doc.pages().next().is_some()).unwrap_or(false);
         if doc_has_pages {
             state.show_guard_dialog = true;
@@ -7428,21 +7461,42 @@ fn darken_color(c: Color32, amount: u8) -> Color32 {
     Color32::from_rgba_premultiplied(c.r().saturating_sub(amount), c.g().saturating_sub(amount), c.b().saturating_sub(amount), c.a())
 }
 
-fn custom_styled_button(ui: &mut Ui, size: [f32; 2], label: &str, base_color: Color32, text_color: Color32, enabled: bool, t: &Tokens) -> Response {
+fn custom_styled_button(
+    ui: &mut Ui,
+    size: [f32; 2],
+    label: &str,
+    font_size: f32,
+    base_color: Color32,
+    text_color: Color32,
+    enabled: bool,
+    t: &Tokens,
+) -> Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(size[0], size[1]), if enabled { Sense::click() } else { Sense::hover() });
     if ui.is_rect_visible(rect) {
+        let is_pressed = enabled && resp.is_pointer_button_down_on();
+        let is_hovered = enabled && resp.hovered();
         let (bg, fg, stroke) = if !enabled {
-            (t.panel_darker, t.text_dim, Stroke::NONE)
-        } else if resp.is_pointer_button_down_on() {
-            (darken_color(base_color, 35), text_color, Stroke::new(1.5, t.accent_strong))
-        } else if resp.hovered() {
-            (lighten_color(base_color, 30), text_color, Stroke::new(1.2, Color32::WHITE))
+            (t.panel_darker, t.text_dim, Stroke::new(1.0, t.field_border))
+        } else if is_pressed {
+            (darken_color(base_color, 40), text_color, Stroke::new(1.5, darken_color(base_color, 65)))
+        } else if is_hovered {
+            (lighten_color(base_color, 25), text_color, Stroke::new(1.2, Color32::from_rgba_premultiplied(255, 255, 255, 180)))
         } else {
             (base_color, text_color, Stroke::NONE)
         };
         ui.painter().rect(rect, CornerRadius::same(t.radius), bg, stroke, StrokeKind::Inside);
-        crate::rtl::paint(ui.painter(), rect.center(), Align2::CENTER_CENTER, label, semibold(11.0), fg);
+        let text_center = if is_pressed {
+            pos2(rect.center().x, rect.center().y + 1.0)
+        } else {
+            rect.center()
+        };
+        crate::rtl::paint(ui.painter(), text_center, Align2::CENTER_CENTER, label, semibold(font_size), fg);
     }
+    let resp = if enabled {
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        resp.on_hover_cursor(egui::CursorIcon::NotAllowed)
+    };
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
     resp
 }
@@ -7510,6 +7564,7 @@ fn render_translate_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state
                     ui,
                     [185.0, 26.0],
                     &btn1_label,
+                    11.0,
                     t.accent_strong,
                     Color32::WHITE,
                     !is_translating,
@@ -7526,6 +7581,7 @@ fn render_translate_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state
                     ui,
                     [165.0, 26.0],
                     &btn2_label,
+                    11.0,
                     t.caption_close,
                     t.caption_close_text,
                     !is_translating,
