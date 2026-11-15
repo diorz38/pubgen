@@ -974,6 +974,93 @@ pub fn emit_chart(
     Ok(frame_ids.len())
 }
 
+/// Emits raw drawing primitives (`Prim`) produced by the chart engine onto the document spread.
+///
+/// Automatically creates and styles native frames for rectangles, polylines, polygons, circles,
+/// and texts, and groups them into an `object.group`.
+pub fn emit_prims(app: &mut DesignApp, spread_idx: usize, prims: &[super::engine::Prim], font: &str) -> Result<usize, String> {
+    let mut frame_ids: Vec<u64> = Vec::new();
+
+    let hex_color = |c: super::engine::Rgba| format!("#{:02X}{:02X}{:02X}", c[0], c[1], c[2]);
+
+    for prim in prims {
+        match prim {
+            super::engine::Prim::Rect { x, y, w, h, fill, stroke, .. } => {
+                let rect = [*x as f64, *y as f64, (*x + *w) as f64, (*y + *h) as f64];
+                let fill_str = fill.map_or_else(|| "[None]".to_string(), hex_color);
+                let (stroke_str, stroke_w) = stroke.map_or_else(|| ("[None]".to_string(), 0.0), |(c, w)| (hex_color(c), w as f64));
+                if let Ok(fid) = emit_rect(app, spread_idx, rect, &fill_str, &stroke_str, stroke_w) {
+                    frame_ids.push(fid);
+                }
+            }
+            super::engine::Prim::Line { pts, color, width, .. } => {
+                let color_str = hex_color(*color);
+                for pair in pts.windows(2) {
+                    if let Ok(fid) = emit_line(
+                        app,
+                        spread_idx,
+                        (pair[0][0] as f64, pair[0][1] as f64),
+                        (pair[1][0] as f64, pair[1][1] as f64),
+                        &color_str,
+                        *width as f64,
+                    ) {
+                        frame_ids.push(fid);
+                    }
+                }
+            }
+            super::engine::Prim::Polygon { pts, fill, stroke } => {
+                let poly_pts: Vec<(f64, f64)> = pts.iter().map(|p| (p[0] as f64, p[1] as f64)).collect();
+                let fill_str = hex_color(*fill);
+                let (stroke_str, stroke_w) = stroke.map_or_else(|| ("[None]".to_string(), 0.0), |(c, w)| (hex_color(c), w as f64));
+                if let Ok(fid) = emit_polygon(app, spread_idx, &poly_pts, &fill_str, &stroke_str, stroke_w) {
+                    frame_ids.push(fid);
+                }
+            }
+            super::engine::Prim::Circle { cx, cy, r, fill, stroke } => {
+                let rect = [(*cx - *r) as f64, (*cy - *r) as f64, (*cx + *r) as f64, (*cy + *r) as f64];
+                let fill_str = fill.map_or_else(|| "[None]".to_string(), hex_color);
+                let (stroke_str, stroke_w) = stroke.map_or_else(|| ("[None]".to_string(), 0.0), |(c, w)| (hex_color(c), w as f64));
+                if let Ok(fid) = emit_ellipse(app, spread_idx, rect, &fill_str, &stroke_str, stroke_w) {
+                    frame_ids.push(fid);
+                }
+            }
+            super::engine::Prim::Text { x, y, text, size, color, bold, align, valign, .. } => {
+                let color_str = hex_color(*color);
+                let align_str = match align {
+                    super::engine::HAlign::Left => "left",
+                    super::engine::HAlign::Center => "center",
+                    super::engine::HAlign::Right => "right",
+                };
+                let est_w = (text.chars().count() as f64 * *size as f64 * 0.7).max(20.0);
+                let est_h = (*size as f64 * 1.5).max(12.0);
+
+                let x0 = match align {
+                    super::engine::HAlign::Left => *x as f64,
+                    super::engine::HAlign::Center => *x as f64 - est_w / 2.0,
+                    super::engine::HAlign::Right => *x as f64 - est_w,
+                };
+                let y0 = match valign {
+                    super::engine::VAlign::Top => *y as f64,
+                    super::engine::VAlign::Middle => *y as f64 - est_h / 2.0,
+                    super::engine::VAlign::Bottom => *y as f64 - est_h,
+                };
+                let rect = [x0, y0, x0 + est_w, y0 + est_h];
+
+                if let Ok(fid) = emit_text_with_font(app, spread_idx, rect, text, *size as f64, *bold, align_str, Some(&color_str), Some(font)) {
+                    frame_ids.push(fid);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if frame_ids.len() > 1 {
+        let _ = app.run("object.group", json!({"ids": frame_ids}));
+    }
+
+    Ok(frame_ids.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::layout::compute_layout;
@@ -1210,5 +1297,35 @@ mod tests {
         let count = emit_chart(&mut app, 0, &spec, &layout, &[], false, "Lato").unwrap();
 
         assert!(count >= 7, "Gauge chart must emit track, value, needle, pivot, readout and subtitle");
+    }
+
+    #[test]
+    fn emit_prims_renders_grouped_vector_chart() {
+        use super::super::engine::*;
+        let mut app = test_app();
+        let measure = ApproxMeasure;
+
+        let mut data = ChartData::default();
+        data.categories = vec!["Padi".into(), "Jagung".into(), "Kedelai".into()];
+        data.series.push(SeriesData {
+            name: "Panen".into(),
+            values: vec![Some(100.0), Some(80.0), Some(45.0)],
+            color: [0x15, 0x60, 0x82, 0xFF],
+            kind: ChartKind::ColumnClustered,
+            ..Default::default()
+        });
+
+        let config = ChartConfig { title: Some("Statistik Panen".into()), kind: ChartKind::ColumnClustered, ..Default::default() };
+        let style = ChartStyle::default();
+
+        let prims = render_cartesian(&config, &data, &style, [36.0, 36.0, 400.0, 250.0], &measure);
+        assert!(!prims.is_empty());
+
+        let frame_count = emit_prims(&mut app, 0, &prims, "Arial").expect("emit_prims must succeed");
+        assert!(frame_count > 5, "must emit multiple frames (got {frame_count})");
+
+        let active = app.session.active().unwrap();
+        let has_group = active.doc.spreads[0].items.iter().any(|it| matches!(it.content, designcraft_doc::Content::Group { .. }));
+        assert!(has_group, "Emitted primitives must be wrapped into an object.group");
     }
 }

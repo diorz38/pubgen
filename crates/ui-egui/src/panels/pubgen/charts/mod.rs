@@ -45,7 +45,7 @@ pub mod spec;
 pub mod stock_maps;
 
 pub use dialog::ChartDialog;
-pub use emitter::emit_chart;
+pub use emitter::{emit_chart, emit_prims};
 pub use geojson::{GeoFeature, GeoMap, ProjectedFeature};
 pub use layout::{
     AXIS_LABEL_H, AXIS_LABEL_W, BAR_GROUP_GAP, BAR_SERIES_GAP, BarRect, ChartLayout, DonutSlice, GridLine, LegendItem, XTickLabel, compute_layout,
