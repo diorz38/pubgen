@@ -5046,6 +5046,7 @@ fn build_chart_sheet_csv(card: &PublicationCard) -> String {
         "vertical stacked bar" | "stacked bar" => "bar_stacked",
         "horizontal bar (ranked)" | "horizontal bar" | "hbar" => "horizontal_bar",
         "line chart (markers)" | "line" => "line",
+        "smooth line chart (spline)" | "spline line" | "spline" => "linespline",
         "area chart (filled)" | "area" => "area",
         "donut / ring chart" | "donut" | "pie" => "donut",
         "population pyramid (piramida penduduk)" | "population pyramid" | "pyramid" => "population_pyramid",
@@ -5138,6 +5139,7 @@ fn render_chart_options_form(
                 craft_ui::ComboBox::from_id_salt("chart_archetype_select").selected_text(&card.chart_type).width(260.0).show_ui(ui, |ui| {
                     for (ct_val, ct_display) in [
                         ("Line Chart (Markers)", "Line Chart (Markers)"),
+                        ("Smooth Line Chart (Spline)", "Smooth Line Chart (Spline)"),
                         ("Vertical Clustered Bar", "Vertical Clustered Bar"),
                         ("Vertical Stacked Bar", "Vertical Stacked Bar"),
                         ("Horizontal Bar (Ranked)", "Horizontal Bar (Ranked)"),

@@ -477,7 +477,7 @@ pub fn compute_layout(
         ChartType::HorizontalBar => {
             layout_horizontal_bar(spec, categories, series_values, plot_rect, ceiling, bilingual, grid_lines, legend_items, axis_baseline, axis_left)
         }
-        ChartType::Line | ChartType::Area => layout_line_and_area(
+        ChartType::Line | ChartType::LineSpline | ChartType::Area => layout_line_and_area(
             spec,
             categories,
             series_values,
@@ -895,10 +895,12 @@ fn layout_line_and_area(
             // 5x5 pt marker rect
             markers.push([cx - 2.5, cy - 2.5, cx + 2.5, cy + 2.5]);
 
-            if let Some((px, py)) = prev_pt {
-                segments.push([px, py, cx, cy]);
+            if spec.chart_type != ChartType::LineSpline {
+                if let Some((px, py)) = prev_pt {
+                    segments.push([px, py, cx, cy]);
+                }
+                prev_pt = Some((cx, cy));
             }
-            prev_pt = Some((cx, cy));
 
             if has_data_table {
                 if c_idx == cat_count - 1 {
@@ -909,6 +911,21 @@ fn layout_line_and_area(
             } else if spec.show_value_labels {
                 let label_str = spec.value_format.format(val, bilingual);
                 value_labels.push((s_idx, [cx - 16.0, cy - 14.0, cx + 16.0, cy - 2.0], label_str));
+            }
+        }
+
+        if spec.chart_type == ChartType::LineSpline && s_vals.len() >= 3 {
+            let pts_f32: Vec<[f32; 2]> =
+                s_vals.iter().enumerate().take(cat_count).map(|(c_idx, &val)| [pt_cx(c_idx) as f32, pt_cy(val) as f32]).collect();
+            let plot_bx = super::engine::lines::Bx {
+                x: plot_rect[0] as f32,
+                y: plot_rect[1] as f32,
+                w: (plot_rect[2] - plot_rect[0]) as f32,
+                h: (plot_rect[3] - plot_rect[1]) as f32,
+            };
+            let smoothed = super::engine::lines::smooth_run(pts_f32, plot_bx, 500);
+            for pair in smoothed.windows(2) {
+                segments.push([pair[0][0] as f64, pair[0][1] as f64, pair[1][0] as f64, pair[1][1] as f64]);
             }
         }
 
@@ -1961,5 +1978,21 @@ mod tests {
         let res = compute_layout(&spec, &["A".into()], &[vec![1.0]], sample_margin(), false);
 
         assert!(res.is_err(), "a Map chart without a GeoJSON source must fail");
+    }
+
+    #[test]
+    fn line_spline_generates_catmull_rom_smooth_segments() {
+        let spec = sample_spec(ChartType::LineSpline);
+        let categories = vec!["2020".into(), "2021".into(), "2022".into(), "2023".into()];
+        let series = vec![vec![10.0, 50.0, 30.0, 80.0], vec![20.0, 40.0, 60.0, 70.0]];
+        let margin = Rect::new(0.0, 0.0, 500.0, 400.0);
+
+        let layout = compute_layout(&spec, &categories, &series, margin, false).unwrap();
+        assert_eq!(layout.line_segments.len(), 2);
+
+        // A standard line chart with 4 categories produces 3 line segments (4-1=3).
+        // The Catmull-Rom spline curve with smooth_run produces dozens of interpolated segments.
+        assert!(layout.line_segments[0].len() > 10, "Spline must generate interpolated subsegments: got {}", layout.line_segments[0].len());
+        assert!(layout.line_segments[1].len() > 10, "Spline must generate interpolated subsegments: got {}", layout.line_segments[1].len());
     }
 }

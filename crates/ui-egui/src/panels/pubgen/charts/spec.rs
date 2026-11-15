@@ -46,6 +46,8 @@ pub enum ChartType {
     HorizontalBar,
     /// Line chart with markers; one polyline per series.
     Line,
+    /// Smooth line chart (Catmull-Rom spline curves).
+    LineSpline,
     /// Area chart (filled region under a line).
     Area,
     /// Donut / ring chart for part-to-whole breakdowns.
@@ -66,6 +68,7 @@ impl ChartType {
             "barstacked" | "stacked" | "stackedbar" | "stackedcolumn" => Some(Self::BarStacked),
             "horizontalbar" | "hbar" | "bar_h" | "batanghorizontal" | "ranked" => Some(Self::HorizontalBar),
             "line" | "garis" | "trend" | "linentp" => Some(Self::Line),
+            "linespline" | "spline" | "smoothline" | "kurva" | "garishalus" => Some(Self::LineSpline),
             "area" | "filled" | "arealine" => Some(Self::Area),
             "donut" | "doughnut" | "pie" | "donat" | "lingkaran" => Some(Self::Donut),
             "populationpyramid" | "pyramid" | "piramidapenduduk" | "piramida" | "piramid" => Some(Self::PopulationPyramid),
@@ -500,7 +503,7 @@ pub fn parse_chart_spec(sheet: &ExcelSheetData) -> Option<ChartSpec> {
     let max_value_override = lookup(&kv, MAX_VALUE_KEYS).and_then(|s| s.trim().parse::<f64>().ok()).filter(|&v| v > 0.0);
     let geojson_path = lookup(&kv, GEOJSON_KEYS);
 
-    let include_data_table = if chart_type == ChartType::Line {
+    let include_data_table = if chart_type == ChartType::Line || chart_type == ChartType::LineSpline {
         lookup(&kv, &["data_table", "table", "show_table", "tabel"]).map(|s| parse_bool(Some(&s), true)).unwrap_or(true)
     } else {
         lookup(&kv, &["data_table", "table", "show_table", "tabel"]).map(|s| parse_bool(Some(&s), false)).unwrap_or(false)
@@ -808,6 +811,9 @@ mod tests {
         assert_eq!(ChartType::parse("hbar"), Some(ChartType::HorizontalBar));
         assert_eq!(ChartType::parse("line"), Some(ChartType::Line));
         assert_eq!(ChartType::parse("garis"), Some(ChartType::Line));
+        assert_eq!(ChartType::parse("line_spline"), Some(ChartType::LineSpline));
+        assert_eq!(ChartType::parse("spline"), Some(ChartType::LineSpline));
+        assert_eq!(ChartType::parse("kurva"), Some(ChartType::LineSpline));
         assert_eq!(ChartType::parse("area"), Some(ChartType::Area));
         assert_eq!(ChartType::parse("donut"), Some(ChartType::Donut));
         assert_eq!(ChartType::parse("pie"), Some(ChartType::Donut));
