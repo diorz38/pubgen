@@ -35,6 +35,7 @@
 
 pub mod dialog;
 pub mod emitter;
+pub mod engine;
 pub mod geojson;
 pub mod layout;
 #[cfg(test)]
