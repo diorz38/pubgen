@@ -2176,22 +2176,11 @@ mod tests {
         let mut spec = sample_spec(ChartType::LineSpline);
         spec.include_data_table = true;
         spec.series = vec![
-            SeriesSpec {
-                col: "B".into(),
-                label_id: "Ekspor".into(),
-                label_en: "Export".into(),
-            },
-            SeriesSpec {
-                col: "C".into(),
-                label_id: "Impor".into(),
-                label_en: "Import".into(),
-            },
+            SeriesSpec { col: "B".into(), label_id: "Ekspor".into(), label_en: "Export".into() },
+            SeriesSpec { col: "C".into(), label_id: "Impor".into(), label_en: "Import".into() },
         ];
         let categories = vec!["2021".into(), "2022".into(), "2023".into()];
-        let series = vec![
-            vec![10.0, 20.0, 15.0],
-            vec![8.0, 14.0, 19.0],
-        ];
+        let series = vec![vec![10.0, 20.0, 15.0], vec![8.0, 14.0, 19.0]];
         let margin = Rect::new(0.0, 0.0, 500.0, 400.0);
 
         let layout = compute_layout(&spec, &categories, &series, margin, true).unwrap();

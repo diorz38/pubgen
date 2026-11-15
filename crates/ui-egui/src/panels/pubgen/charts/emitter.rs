@@ -402,13 +402,7 @@ pub fn emit_text(
 }
 
 /// Helper to italicize text appearing after a separator (e.g. " / ") in a text frame.
-fn italicize_after_separator(
-    app: &mut DesignApp,
-    spread_idx: usize,
-    item_id: u64,
-    text: &str,
-    separator: &str,
-) {
+fn italicize_after_separator(app: &mut DesignApp, spread_idx: usize, item_id: u64, text: &str, separator: &str) {
     if let Some(sep_idx) = text.find(separator) {
         let b_start = sep_idx + separator.len();
         if let Some(active) = app.session.active()
