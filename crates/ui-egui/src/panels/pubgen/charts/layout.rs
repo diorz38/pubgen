@@ -371,6 +371,8 @@ pub fn compute_layout(
 
     let ceiling = if let Some(override_max) = spec.max_value_override {
         override_max.max(raw_max).max(1.0)
+    } else if matches!(spec.chart_type, ChartType::BarStacked100) {
+        100.0
     } else if matches!(spec.chart_type, ChartType::Gauge) {
         if matches!(spec.value_format, super::spec::ValueFormat::Percent) { 100.0 } else { compute_nice_ceiling(raw_max.max(1.0)) }
     } else if matches!(spec.chart_type, ChartType::PopulationPyramid) {
@@ -403,7 +405,8 @@ pub fn compute_layout(
                 let frac = step as f64 / GRID_LINES as f64;
                 let y = plot_y1 - frac * plot_h;
                 let val = frac * ceiling;
-                let label = spec.value_format.format(val, bilingual);
+                let label =
+                    if spec.chart_type == ChartType::BarStacked100 { format!("{:.0}%", val) } else { spec.value_format.format(val, bilingual) };
                 grid_lines.push(GridLine { rect: [plot_x0, y, plot_x1, y + 0.5], value: val, label });
             }
         }
@@ -471,8 +474,11 @@ pub fn compute_layout(
         ChartType::BarClustered => {
             layout_bar_clustered(spec, categories, series_values, plot_rect, ceiling, bilingual, grid_lines, legend_items, axis_baseline, axis_left)
         }
-        ChartType::BarStacked => {
+        ChartType::BarStacked | ChartType::BarStacked100 => {
             layout_bar_stacked(spec, categories, series_values, plot_rect, ceiling, bilingual, grid_lines, legend_items, axis_baseline, axis_left)
+        }
+        ChartType::ComboDualAxis => {
+            layout_combo_dual_axis(spec, categories, series_values, plot_rect, ceiling, bilingual, grid_lines, legend_items, axis_baseline, axis_left)
         }
         ChartType::HorizontalBar => {
             layout_horizontal_bar(spec, categories, series_values, plot_rect, ceiling, bilingual, grid_lines, legend_items, axis_baseline, axis_left)
@@ -647,22 +653,26 @@ fn layout_bar_stacked(
     let group_gap = group_w * BAR_GROUP_GAP;
     let bar_w = (group_w - group_gap).max(1.0);
 
+    let is_100 = spec.chart_type == ChartType::BarStacked100;
     for (c_idx, cat) in categories.iter().enumerate() {
         let x0 = plot_rect[0] + c_idx as f64 * group_w + group_gap / 2.0;
         let x1 = x0 + bar_w;
         let mut cur_y = plot_rect[3];
 
+        let cat_total: f64 = if is_100 { series_values.iter().filter_map(|s| s.get(c_idx).copied()).filter(|v| *v > 0.0).sum() } else { 1.0 };
+
         for (s_idx, s_vals) in series_values.iter().enumerate() {
             let val = s_vals.get(c_idx).copied().unwrap_or(0.0);
-            let bar_h = if ceiling > 0.0 { ((val / ceiling) * plot_h).max(0.0) } else { 0.0 };
+            let effective_val = if is_100 { if cat_total > 0.0 { (val / cat_total) * 100.0 } else { 0.0 } } else { val };
+            let bar_h = if ceiling > 0.0 { ((effective_val / ceiling) * plot_h).max(0.0) } else { 0.0 };
 
             let y1 = cur_y;
             let y0 = (cur_y - bar_h).max(plot_rect[1]);
             cur_y = y0;
 
-            let label_str = spec.value_format.format(val, bilingual);
+            let label_str = if is_100 { format!("{:.1}%", effective_val) } else { spec.value_format.format(val, bilingual) };
             let color_idx = if spec.series.len() <= 1 { c_idx } else { s_idx };
-            bars.push(BarRect { rect: [x0, y0, x1, y1], value: val, series_idx: color_idx, category_idx: c_idx, label: label_str.clone() });
+            bars.push(BarRect { rect: [x0, y0, x1, y1], value: effective_val, series_idx: color_idx, category_idx: c_idx, label: label_str.clone() });
 
             if spec.show_value_labels && bar_h > 12.0 {
                 let lbl_y = (y0 + y1) / 2.0 - 5.0;
@@ -771,6 +781,125 @@ fn layout_horizontal_bar(
         axis_left,
         plot_rect,
         ceiling,
+        map_regions: Vec::new(),
+        map_legend: Vec::new(),
+        data_table: None,
+        bottom_title: None,
+        y_min: 0.0,
+    }
+}
+
+fn layout_combo_dual_axis(
+    spec: &ChartSpec,
+    categories: &[String],
+    series_values: &[Vec<f64>],
+    plot_rect: [f64; 4],
+    ceiling: f64,
+    bilingual: bool,
+    grid_lines: Vec<GridLine>,
+    legend_items: Vec<LegendItem>,
+    axis_baseline: [f64; 4],
+    axis_left: [f64; 4],
+) -> ChartLayout {
+    let mut bars = Vec::new();
+    let mut x_tick_labels = Vec::new();
+    let mut value_labels = Vec::new();
+    let mut line_segments = Vec::new();
+    let mut line_markers = Vec::new();
+
+    let plot_w = plot_rect[2] - plot_rect[0];
+    let plot_h = plot_rect[3] - plot_rect[1];
+    let cat_count = categories.len().max(1);
+    let group_w = plot_w / cat_count as f64;
+    let group_gap = group_w * BAR_GROUP_GAP;
+    let bar_area_w = (group_w - group_gap).max(1.0);
+
+    let num_series = series_values.len();
+    let num_bar_series = if num_series > 1 { num_series - 1 } else { 1 };
+    let bar_w = (bar_area_w / num_bar_series as f64).max(1.0);
+
+    // Primary axis ceiling for bars
+    let bar_ceiling = ceiling;
+
+    // Secondary axis ceiling for the line series
+    let line_series_idx = num_series.saturating_sub(1);
+    let line_raw_max = series_values.get(line_series_idx).and_then(|s| s.iter().copied().reduce(f64::max)).unwrap_or(10.0);
+    let line_ceiling = compute_nice_ceiling(line_raw_max.max(1.0));
+
+    // 1. Generate Bars for series 0..(num_series - 1)
+    for (c_idx, cat) in categories.iter().enumerate() {
+        let grp_x0 = plot_rect[0] + c_idx as f64 * group_w + group_gap / 2.0;
+
+        for s_idx in 0..num_bar_series {
+            let val = series_values.get(s_idx).and_then(|s| s.get(c_idx)).copied().unwrap_or(0.0);
+            let bar_h = if bar_ceiling > 0.0 { ((val / bar_ceiling) * plot_h).max(0.0) } else { 0.0 };
+
+            let x0 = grp_x0 + s_idx as f64 * bar_w;
+            let x1 = x0 + bar_w;
+            let y1 = plot_rect[3];
+            let y0 = (plot_rect[3] - bar_h).max(plot_rect[1]);
+
+            let label_str = spec.value_format.format(val, bilingual);
+            bars.push(BarRect { rect: [x0, y0, x1, y1], value: val, series_idx: s_idx, category_idx: c_idx, label: label_str.clone() });
+
+            if spec.show_value_labels && bar_h > 12.0 {
+                value_labels.push((s_idx, [x0, y0 - 12.0, x1, y0], label_str));
+            }
+        }
+
+        let center_x = grp_x0 + bar_area_w / 2.0;
+        let rotated = cat.chars().count() > MAX_LABEL_CHARS;
+        let lbl_w = group_w.max(40.0);
+        let lbl_rect = [center_x - lbl_w / 2.0, plot_rect[3] + 4.0, center_x + lbl_w / 2.0, plot_rect[3] + AXIS_LABEL_H];
+        x_tick_labels.push(XTickLabel { rect: lbl_rect, text: cat.clone(), rotated });
+    }
+
+    // 2. Generate Line segments & markers for the secondary series
+    if let Some(line_vals) = series_values.get(line_series_idx) {
+        let mut segments = Vec::new();
+        let mut markers = Vec::new();
+        let mut prev_pt: Option<(f64, f64)> = None;
+
+        for (c_idx, &val) in line_vals.iter().enumerate().take(cat_count) {
+            let cx = plot_rect[0] + c_idx as f64 * group_w + group_w / 2.0;
+            let cy = if line_ceiling > 0.0 { plot_rect[3] - (val / line_ceiling) * plot_h } else { plot_rect[3] };
+
+            markers.push([cx - 2.5, cy - 2.5, cx + 2.5, cy + 2.5]);
+            if let Some((px, py)) = prev_pt {
+                segments.push([px, py, cx, cy]);
+            }
+            prev_pt = Some((cx, cy));
+
+            if spec.show_value_labels {
+                let lbl = format!("{:.1}%", val);
+                value_labels.push((line_series_idx, [cx - 16.0, cy - 14.0, cx + 16.0, cy - 2.0], lbl));
+            }
+        }
+
+        // Fill line_segments & line_markers with empty entries for bar series so indexing matches series_idx!
+        for _ in 0..line_series_idx {
+            line_segments.push(Vec::new());
+            line_markers.push(Vec::new());
+        }
+        line_segments.push(segments);
+        line_markers.push(markers);
+    }
+
+    ChartLayout {
+        bars,
+        line_markers,
+        line_segments,
+        donut_slices: Vec::new(),
+        gauge: None,
+        pyramid_summary: None,
+        grid_lines,
+        x_tick_labels,
+        value_labels,
+        legend_items,
+        axis_baseline,
+        axis_left,
+        plot_rect,
+        ceiling: bar_ceiling,
         map_regions: Vec::new(),
         map_legend: Vec::new(),
         data_table: None,
@@ -1994,5 +2123,51 @@ mod tests {
         // The Catmull-Rom spline curve with smooth_run produces dozens of interpolated segments.
         assert!(layout.line_segments[0].len() > 10, "Spline must generate interpolated subsegments: got {}", layout.line_segments[0].len());
         assert!(layout.line_segments[1].len() > 10, "Spline must generate interpolated subsegments: got {}", layout.line_segments[1].len());
+    }
+
+    #[test]
+    fn bar_stacked_100_sums_categories_to_100_percent() {
+        let spec = sample_spec(ChartType::BarStacked100);
+        let categories = vec!["Pertanian".into(), "Industri".into()];
+        let series = vec![
+            vec![25.0, 60.0], // Series 0
+            vec![75.0, 40.0], // Series 1
+        ];
+        let margin = Rect::new(0.0, 0.0, 500.0, 400.0);
+
+        let layout = compute_layout(&spec, &categories, &series, margin, false).unwrap();
+        assert_eq!(layout.ceiling, 100.0);
+        assert_eq!(layout.bars.len(), 4);
+
+        // Cat 0: 25 / (25+75) = 25%, 75 / (25+75) = 75%
+        assert_eq!(layout.bars[0].label, "25.0%");
+        assert_eq!(layout.bars[1].label, "75.0%");
+
+        // Cat 1: 60 / (60+40) = 60%, 40 / (60+40) = 40%
+        assert_eq!(layout.bars[2].label, "60.0%");
+        assert_eq!(layout.bars[3].label, "40.0%");
+    }
+
+    #[test]
+    fn combo_dual_axis_generates_both_bars_and_line_segments() {
+        let spec = sample_spec(ChartType::ComboDualAxis);
+        let categories = vec!["Q1".into(), "Q2".into(), "Q3".into()];
+        let series = vec![
+            vec![100.0, 150.0, 200.0], // Primary Bar Series
+            vec![5.5, 7.2, 4.8],       // Secondary Line Series (%)
+        ];
+        let margin = Rect::new(0.0, 0.0, 500.0, 400.0);
+
+        let layout = compute_layout(&spec, &categories, &series, margin, false).unwrap();
+
+        // Must produce 3 bars for Series 0
+        assert_eq!(layout.bars.len(), 3);
+        assert_eq!(layout.bars[0].series_idx, 0);
+
+        // Must produce line segments and markers for Series 1 (index 1)
+        assert_eq!(layout.line_segments.len(), 2);
+        assert!(layout.line_segments[0].is_empty());
+        assert_eq!(layout.line_segments[1].len(), 2, "3 categories produce 2 line segments");
+        assert_eq!(layout.line_markers[1].len(), 3, "3 categories produce 3 line markers");
     }
 }

@@ -42,12 +42,16 @@ pub enum ChartType {
     BarClustered,
     /// Vertical stacked bars — series stacked on top of each other.
     BarStacked,
+    /// 100% stacked vertical bars — each category sums to 100%.
+    BarStacked100,
     /// Horizontal bars ranked by value — axes swapped.
     HorizontalBar,
     /// Line chart with markers; one polyline per series.
     Line,
     /// Smooth line chart (Catmull-Rom spline curves).
     LineSpline,
+    /// Dual-axis combination chart (Columns on Primary Y-axis, Line on Secondary Y-axis).
+    ComboDualAxis,
     /// Area chart (filled region under a line).
     Area,
     /// Donut / ring chart for part-to-whole breakdowns.
@@ -66,9 +70,11 @@ impl ChartType {
         match s.trim().to_lowercase().replace(['-', '_', ' '], "").as_str() {
             "barclustered" | "bar" | "column" | "batang" => Some(Self::BarClustered),
             "barstacked" | "stacked" | "stackedbar" | "stackedcolumn" => Some(Self::BarStacked),
+            "barstacked100" | "stacked100" | "100stacked" | "stacked100bar" | "100persen" => Some(Self::BarStacked100),
             "horizontalbar" | "hbar" | "bar_h" | "batanghorizontal" | "ranked" => Some(Self::HorizontalBar),
             "line" | "garis" | "trend" | "linentp" => Some(Self::Line),
             "linespline" | "spline" | "smoothline" | "kurva" | "garishalus" => Some(Self::LineSpline),
+            "combodualaxis" | "combo" | "kombinasi" | "dualaxis" | "barline" => Some(Self::ComboDualAxis),
             "area" | "filled" | "arealine" => Some(Self::Area),
             "donut" | "doughnut" | "pie" | "donat" | "lingkaran" => Some(Self::Donut),
             "populationpyramid" | "pyramid" | "piramidapenduduk" | "piramida" | "piramid" => Some(Self::PopulationPyramid),

@@ -1252,9 +1252,11 @@ pub fn chart_dialog_ui(app: &mut DesignApp, ctx: &egui::Context, st: &mut Pubgen
                 let cur_type_name = match dialog.chart_type {
                     ChartType::BarClustered => "Vertical Clustered Bar",
                     ChartType::BarStacked => "Vertical Stacked Bar",
+                    ChartType::BarStacked100 => "100% Stacked Bar / Column",
                     ChartType::HorizontalBar => "Horizontal Bar (Ranked)",
                     ChartType::Line => "Line Chart (Markers)",
                     ChartType::LineSpline => "Smooth Line Chart (Spline)",
+                    ChartType::ComboDualAxis => "Dual-Axis Combo (Bar + Line)",
                     ChartType::Area => "Area Chart (Filled)",
                     ChartType::Donut => "Donut / Ring Chart",
                     ChartType::PopulationPyramid => "Population Pyramid (Piramida Penduduk)",
@@ -1265,9 +1267,11 @@ pub fn chart_dialog_ui(app: &mut DesignApp, ctx: &egui::Context, st: &mut Pubgen
                     for (ct, name) in [
                         (ChartType::BarClustered, "Vertical Clustered Bar"),
                         (ChartType::BarStacked, "Vertical Stacked Bar"),
+                        (ChartType::BarStacked100, "100% Stacked Bar / Column"),
                         (ChartType::HorizontalBar, "Horizontal Bar (Ranked)"),
                         (ChartType::Line, "Line Chart (Markers)"),
                         (ChartType::LineSpline, "Smooth Line Chart (Spline)"),
+                        (ChartType::ComboDualAxis, "Dual-Axis Combo (Bar + Line)"),
                         (ChartType::Area, "Area Chart (Filled)"),
                         (ChartType::Donut, "Donut / Ring Chart"),
                         (ChartType::PopulationPyramid, "Population Pyramid (Piramida Penduduk)"),
