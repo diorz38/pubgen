@@ -401,6 +401,38 @@ pub fn emit_text(
     emit_text_with_font(app, spread_idx, rect, text, size, bold, align, color, None)
 }
 
+/// Helper to italicize text appearing after a separator (e.g. " / ") in a text frame.
+fn italicize_after_separator(
+    app: &mut DesignApp,
+    spread_idx: usize,
+    item_id: u64,
+    text: &str,
+    separator: &str,
+) {
+    if let Some(sep_idx) = text.find(separator) {
+        let b_start = sep_idx + separator.len();
+        if let Some(active) = app.session.active()
+            && let Some(it) = active.doc.spreads[spread_idx].items.iter().find(|i| i.id.0 == item_id)
+            && let designcraft_doc::Content::Text(tf) = &it.content
+        {
+            let sid = tf.story;
+            let _ = app.session.edit(|doc, _| {
+                if let Some(story) = doc.story_mut(sid) {
+                    let mut offset = 0;
+                    for r in &mut story.chars {
+                        let run_end = offset + r.len;
+                        offset = run_end;
+                        if run_end > b_start {
+                            r.format.over.font_style = Some("Italic".into());
+                        }
+                    }
+                }
+                Ok(Value::Null)
+            });
+        }
+    }
+}
+
 /// Emits the complete chart layout onto the document spread.
 ///
 /// Returns the number of frames created, or an `Err` message on failure.
@@ -863,29 +895,7 @@ pub fn emit_chart(
                 Ok(Value::Null)
             });
             if bilingual && leg.label.contains(" / ") {
-                // Italicize the English portion of the legend label
-                let slash_idx = leg.label.find(" / ").unwrap_or(0);
-                let b_start = slash_idx + 3;
-                let _b_end = leg.label.len();
-                if let Some(active) = app.session.active()
-                    && let Some(it) = active.doc.spreads[spread_idx].items.iter().find(|i| i.id.0 == lfid)
-                    && let designcraft_doc::Content::Text(tf) = &it.content
-                {
-                    let sid = tf.story;
-                    let _ = app.session.edit(|doc, _| {
-                        if let Some(story) = doc.story_mut(sid) {
-                            let mut offset = 0;
-                            for r in &mut story.chars {
-                                let run_end = offset + r.len;
-                                offset = run_end;
-                                if run_end > b_start {
-                                    r.format.over.font_style = Some("Italic".into());
-                                }
-                            }
-                        }
-                        Ok(Value::Null)
-                    });
-                }
+                italicize_after_separator(app, spread_idx, lfid, &leg.label, " / ");
             }
             frame_ids.push(lfid);
         }
@@ -908,6 +918,9 @@ pub fn emit_chart(
                 6.5
             };
             if let Ok(tfid) = emit_text_with_font(app, spread_idx, cell.rect, &cell.text, size, cell.is_bold, cell.align, color, Some(font)) {
+                if bilingual && cell.text.contains(" / ") {
+                    italicize_after_separator(app, spread_idx, tfid, &cell.text, " / ");
+                }
                 frame_ids.push(tfid);
             }
         }

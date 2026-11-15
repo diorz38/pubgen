@@ -306,7 +306,7 @@ pub fn compute_layout(
 
     let plot_x0 = margin.x0 + left_reserve;
     let plot_x1 = if is_pyramid { margin.x1 } else { (margin.x1 - 12.0).max(plot_x0 + 10.0) };
-    let is_line_table = matches!(spec.chart_type, ChartType::Line) && spec.include_data_table;
+    let is_line_table = matches!(spec.chart_type, ChartType::Line | ChartType::LineSpline) && spec.include_data_table;
     let (plot_y0, plot_y1) = if is_line_table {
         let title_h = 32.0;
         let table_rows = series_values.len() + 1;
@@ -1120,10 +1120,10 @@ fn layout_line_and_area(
             let marker_rect = [table_x0 + 7.0, mid_y - 2.0, table_x0 + 11.0, mid_y + 2.0];
             series_keys.push((s_idx, marker_rect, icon_line));
 
-            let s_name = spec.series.get(s_idx).map(|s| s.label_id.as_str()).unwrap_or("Series");
+            let s_name = spec.series.get(s_idx).map(|s| s.display_label(bilingual)).unwrap_or_else(|| "Series".into());
             tbl_cells.push(ChartDataTableCell {
                 rect: [table_x0 + 17.0, ry0 + 1.0, plot_rect[0] - 2.0, ry1 - 1.0],
-                text: s_name.to_string(),
+                text: s_name,
                 is_header: false,
                 is_bold: true,
                 align: "left",
@@ -2169,5 +2169,41 @@ mod tests {
         assert!(layout.line_segments[0].is_empty());
         assert_eq!(layout.line_segments[1].len(), 2, "3 categories produce 2 line segments");
         assert_eq!(layout.line_markers[1].len(), 3, "3 categories produce 3 line markers");
+    }
+
+    #[test]
+    fn line_spline_with_data_table_bilingual() {
+        let mut spec = sample_spec(ChartType::LineSpline);
+        spec.include_data_table = true;
+        spec.series = vec![
+            SeriesSpec {
+                col: "B".into(),
+                label_id: "Ekspor".into(),
+                label_en: "Export".into(),
+            },
+            SeriesSpec {
+                col: "C".into(),
+                label_id: "Impor".into(),
+                label_en: "Import".into(),
+            },
+        ];
+        let categories = vec!["2021".into(), "2022".into(), "2023".into()];
+        let series = vec![
+            vec![10.0, 20.0, 15.0],
+            vec![8.0, 14.0, 19.0],
+        ];
+        let margin = Rect::new(0.0, 0.0, 500.0, 400.0);
+
+        let layout = compute_layout(&spec, &categories, &series, margin, true).unwrap();
+        assert!(layout.data_table.is_some(), "Data table should be present");
+        let dt = layout.data_table.unwrap();
+        assert!(!dt.grid_lines.is_empty());
+        assert!(!dt.cells.is_empty());
+
+        // Check bilingual series label in data table
+        let series_label_cells: Vec<_> = dt.cells.iter().filter(|c| c.text.contains(" / ")).collect();
+        assert_eq!(series_label_cells.len(), 2);
+        assert_eq!(series_label_cells[0].text, "Ekspor / Export");
+        assert_eq!(series_label_cells[1].text, "Impor / Import");
     }
 }
