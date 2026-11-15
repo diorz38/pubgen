@@ -28,8 +28,8 @@ impl DesignApp {
                 return;
             }
             #[cfg(feature = "pubgen")]
-            let orchestrator_has_workspace =
-                crate::menus::pubgen_bar::is_orchestrator_mode(ctx) && crate::dock::pubgen::workspace::get_state(ctx).has_active_workspace();
+            let orchestrator_has_workspace = crate::menus::pubgen_bar::is_orchestrator_mode(ctx)
+                && crate::dock::pubgen::workspace::with_state_read(ctx, |ws| ws.has_active_workspace());
             #[cfg(not(feature = "pubgen"))]
             let orchestrator_has_workspace = false;
 
@@ -178,7 +178,8 @@ impl DesignApp {
     /// Show the next unapproved document, or request a final close that revalidates all approvals.
     fn ask_next_unsaved(&mut self, ctx: &egui::Context) {
         #[cfg(feature = "pubgen")]
-        if crate::menus::pubgen_bar::is_orchestrator_mode(ctx) && crate::dock::pubgen::workspace::get_state(ctx).has_active_workspace() {
+        if crate::menus::pubgen_bar::is_orchestrator_mode(ctx) && crate::dock::pubgen::workspace::with_state_read(ctx, |ws| ws.has_active_workspace())
+        {
             if self.ui.dialog.is_none() {
                 self.ui.dialog = Some(crate::dialogs::Dialog::new("closeWorkspace", json!({"quitting": true, "discard": false})));
             }

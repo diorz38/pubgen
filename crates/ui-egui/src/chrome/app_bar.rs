@@ -267,7 +267,9 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
                         let is_home = if is_orchestrator {
                             #[cfg(feature = "pubgen")]
                             {
-                                crate::dock::pubgen::workspace::get_state(ui.ctx()).view == crate::dock::pubgen::workspace::OrchestratorView::Home
+                                crate::dock::pubgen::workspace::with_state_read(ui.ctx(), |ws| {
+                                    ws.view == crate::dock::pubgen::workspace::OrchestratorView::Home
+                                })
                             }
                             #[cfg(not(feature = "pubgen"))]
                             false
@@ -435,11 +437,10 @@ pub fn app_bar(app: &mut DesignApp, ui: &mut egui::Ui) {
             // Centred title. The Orchestrator names the publication workspace, not the layout document.
             #[cfg(feature = "pubgen")]
             let title = if crate::menus::pubgen_bar::is_orchestrator_mode(ui.ctx()) {
-                let ws = crate::dock::pubgen::workspace::get_state(ui.ctx());
-                match ws.meta_title.trim() {
+                crate::dock::pubgen::workspace::with_state_read(ui.ctx(), |ws| match ws.meta_title.trim() {
                     "" => "PubGen Studio".to_string(),
                     t => format!("PubGen Studio — {t}"),
-                }
+                })
             } else {
                 match app.session.active() {
                     Some(d) => format!("DesignCraft — {}", crate::rtl::isolate(&d.title())),

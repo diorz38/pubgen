@@ -954,6 +954,14 @@ pub fn get_state(ctx: &egui::Context) -> OrchestratorWorkspaceState {
     ctx.data(|d| d.get_temp(workspace_state_id())).unwrap_or_default()
 }
 
+/// Read-only inspection of Orchestrator state without cloning the entire workspace state (cards, TM, logs).
+pub fn with_state_read<R>(ctx: &egui::Context, f: impl FnOnce(&OrchestratorWorkspaceState) -> R) -> R {
+    ctx.data_mut(|d| {
+        let state = d.get_temp_mut_or_default::<OrchestratorWorkspaceState>(workspace_state_id());
+        f(state)
+    })
+}
+
 pub fn set_state(ctx: &egui::Context, state: OrchestratorWorkspaceState) {
     ctx.data_mut(|d| d.insert_temp(workspace_state_id(), state));
 }
@@ -2300,7 +2308,7 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
     if let Some(action) = render_host_tabs(ui, &t, &lang) {
         ui.ctx().data_mut(|d| d.insert_temp(host_tab_action_id(), action));
     }
-    let mut state = get_state(ui.ctx());
+    let mut state = ui.ctx().data_mut(|d| d.remove_temp::<OrchestratorWorkspaceState>(workspace_state_id())).unwrap_or_default();
 
     // Poll the in-flight worksheet translation job every frame (T7). The button lives in
     // the Studio view, so a job can only exist there.
@@ -3467,7 +3475,7 @@ fn card_details_width(card_w: f32) -> f32 {
 /// `interact_size.y` (18 px by default), so the same minimum applies here —
 /// assuming text height alone under-measured and clipped card footers.
 fn measured_card_height(painter: &egui::Painter, card: &PublicationCard, details_w: f32, lang: &str) -> f32 {
-    let cache_id = egui::Id::unique(("card_h", card.page, &card.title, &card.source, lang, details_w.to_bits()));
+    let cache_id = egui::Id::unique(("card_h", card.page, &card.title, &card.source, lang, details_w.round() as i32));
     if let Some(h) = painter.ctx().data(|d| d.get_temp::<f32>(cache_id)) {
         return h;
     }
@@ -3654,6 +3662,11 @@ fn render_card_action_bar(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t
                 next_page,
                 true,
             ));
+            let col_count = if state.page_layout_facing || ui.available_width() > 520.0 { 2 } else { 1 };
+            let total_rows = card_grid_total_rows(state.cards.len(), state.page_layout_facing, col_count);
+            let total_pages = total_rows.div_ceil(CARD_PAGE_ROWS).max(1);
+            state.card_page = total_pages.saturating_sub(1);
+            state.is_dirty = true;
             let now = format_now();
             state.execution_log.push(format!("[{now}] Kartu halaman baru ditambahkan (Hal {next_page})."));
         }
@@ -3686,6 +3699,11 @@ fn render_card_action_bar(ui: &mut Ui, state: &mut OrchestratorWorkspaceState, t
                 curr_page,
                 false,
             ));
+            let col_count = if state.page_layout_facing || ui.available_width() > 520.0 { 2 } else { 1 };
+            let total_rows = card_grid_total_rows(state.cards.len(), state.page_layout_facing, col_count);
+            let total_pages = total_rows.div_ceil(CARD_PAGE_ROWS).max(1);
+            state.card_page = total_pages.saturating_sub(1);
+            state.is_dirty = true;
             let now = format_now();
             state.execution_log.push(format!("[{now}] Objek baru ditambahkan pada Hal {curr_page}."));
         }
@@ -7912,7 +7930,7 @@ mod tests {
         assert_eq!(card.chart_value_format, "Number (1.234,5)");
         assert!(card.chart_show_value_labels);
         assert!(card.chart_show_legend);
-        assert!(!card.chart_show_grid);
+        assert!(card.chart_show_grid);
         assert!(card.chart_raw_data.contains("Tahun,Pertanian,Industri,Jasa"));
 
         // Modify options
@@ -7921,7 +7939,7 @@ mod tests {
         card.chart_series_2_col = "C".into();
         card.chart_series_2_label_id = "Industri Olahan".into();
         card.chart_value_format = "Percentage (%)".into();
-        card.chart_show_grid = true;
+        card.chart_show_grid = false;
         card.chart_max_value_override = "100".into();
 
         let mut state = OrchestratorWorkspaceState::default();
@@ -7934,7 +7952,7 @@ mod tests {
         assert_eq!(meta_chart.settings.get("chart_series_2_col").and_then(|v| v.as_str()), Some("C"));
         assert_eq!(meta_chart.settings.get("chart_series_2_label_id").and_then(|v| v.as_str()), Some("Industri Olahan"));
         assert_eq!(meta_chart.settings.get("chart_value_format").and_then(|v| v.as_str()), Some("Percentage (%)"));
-        assert_eq!(meta_chart.settings.get("chart_show_grid").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(meta_chart.settings.get("chart_show_grid").and_then(|v| v.as_bool()), Some(false));
         assert_eq!(meta_chart.settings.get("chart_max_value_override").and_then(|v| v.as_str()), Some("100"));
 
         // Roundtrip back to state via apply_ingest_report_to_state
@@ -7954,7 +7972,7 @@ mod tests {
         assert_eq!(res_chart.chart_series_2_col, "C");
         assert_eq!(res_chart.chart_series_2_label_id, "Industri Olahan");
         assert_eq!(res_chart.chart_value_format, "Percentage (%)");
-        assert!(res_chart.chart_show_grid);
+        assert!(!res_chart.chart_show_grid);
         assert_eq!(res_chart.chart_max_value_override, "100");
     }
 

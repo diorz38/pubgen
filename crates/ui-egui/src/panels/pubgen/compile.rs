@@ -2142,7 +2142,7 @@ fn save_project_with(app: &mut DesignApp, p: &Value, force_ask: bool) -> Result<
 
 /// Default file name for a Save/Save As dialog: the publication title, else `publication.pubgen`.
 fn package_file_name(app: &DesignApp) -> String {
-    let title = app.egui_ctx.as_ref().map(|ctx| crate::dock::pubgen::workspace::get_state(ctx).meta_title).unwrap_or_default();
+    let title = app.egui_ctx.as_ref().map(|ctx| crate::dock::pubgen::workspace::with_state_read(ctx, |st| st.meta_title.clone())).unwrap_or_default();
     if title.trim().is_empty() {
         return "publication.pubgen".into();
     }

@@ -219,7 +219,8 @@ pub fn menu_enabled(app: &DesignApp, id: &str) -> bool {
     }
     #[cfg(feature = "pubgen")]
     if id == "pubgen.saveProject" || id == "pubgen.saveProjectAs" || id == "pubgen.savePackageAs" || id == "pubgen.exportXlsx" {
-        let has_orchestrator = app.egui_ctx.as_ref().is_some_and(|ctx| crate::dock::pubgen::workspace::get_state(ctx).has_active_workspace());
+        let has_orchestrator =
+            app.egui_ctx.as_ref().is_some_and(|ctx| crate::dock::pubgen::workspace::with_state_read(ctx, |ws| ws.has_active_workspace()));
         return app.session.active().is_some()
             || has_orchestrator
             || !app.session.prefs.pubgen_project_path.trim().is_empty()
@@ -238,7 +239,8 @@ pub fn menu_enabled(app: &DesignApp, id: &str) -> bool {
     }
     #[cfg(feature = "pubgen")]
     if id == "pubgen.compileProject" {
-        let has_orchestrator = app.egui_ctx.as_ref().is_some_and(|ctx| crate::dock::pubgen::workspace::get_state(ctx).has_active_workspace());
+        let has_orchestrator =
+            app.egui_ctx.as_ref().is_some_and(|ctx| crate::dock::pubgen::workspace::with_state_read(ctx, |ws| ws.has_active_workspace()));
         return app.session.active().is_some()
             || has_orchestrator
             || !app.session.prefs.pubgen_project_path.trim().is_empty()

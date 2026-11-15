@@ -88,17 +88,21 @@ fn show_preflight(app: &mut DesignApp) {
 #[cfg(feature = "pubgen")]
 fn orchestrator_status(app: &mut DesignApp, ui: &mut egui::Ui, t: &Tokens, small: &egui::FontId) {
     let lang = app.ui.language.clone();
-    let state = crate::dock::pubgen::workspace::get_state(ui.ctx());
+    let (meta_title, is_dirty, cards_len, view_home, status_message) = crate::dock::pubgen::workspace::with_state_read(ui.ctx(), |state| {
+        (
+            state.meta_title.trim().to_string(),
+            state.is_dirty,
+            state.cards.len(),
+            state.view == crate::dock::pubgen::workspace::OrchestratorView::Home,
+            state.status_message.as_ref().map(|(m, _)| m.clone()),
+        )
+    });
     let mode = crate::i18n::tr(&lang, "Publication Orchestrator");
     ui.label(egui::RichText::new(mode).font(small.clone()).color(t.text));
     ui.add_space(12.0);
 
-    let title = if state.meta_title.trim().is_empty() {
-        crate::i18n::tr(&lang, "Untitled publication").to_string()
-    } else {
-        state.meta_title.trim().to_string()
-    };
-    let shown = format!("{}{}", if state.is_dirty { "*" } else { "" }, title);
+    let title = if meta_title.is_empty() { crate::i18n::tr(&lang, "Untitled publication").to_string() } else { meta_title };
+    let shown = format!("{}{}", if is_dirty { "*" } else { "" }, title);
     let color = t.text_strong;
     let galley = crate::rtl::truncated(ui.ctx(), &shown, small.clone(), color, 320.0);
     let (r, resp) = ui.allocate_exact_size(galley.size(), Sense::hover());
@@ -110,17 +114,14 @@ fn orchestrator_status(app: &mut DesignApp, ui: &mut egui::Ui, t: &Tokens, small
     }
 
     ui.add_space(12.0);
-    let items = crate::i18n::tr(&lang, "{n} items").replace("{n}", &state.cards.len().to_string());
+    let items = crate::i18n::tr(&lang, "{n} items").replace("{n}", &cards_len.to_string());
     ui.label(egui::RichText::new(items).font(small.clone()).color(t.text_dim));
 
     ui.add_space(12.0);
-    let view = match state.view {
-        crate::dock::pubgen::workspace::OrchestratorView::Home => crate::i18n::tr(&lang, "Home"),
-        crate::dock::pubgen::workspace::OrchestratorView::Studio => crate::i18n::tr(&lang, "Worksheet"),
-    };
+    let view = if view_home { crate::i18n::tr(&lang, "Home") } else { crate::i18n::tr(&lang, "Worksheet") };
     ui.label(egui::RichText::new(view).font(small.clone()).color(t.text_dim));
 
-    if let Some((message, _ok)) = &state.status_message {
+    if let Some(message) = &status_message {
         ui.add_space(12.0);
         ui.label(egui::RichText::new(message).font(small.clone()).color(t.text_dim));
     }
