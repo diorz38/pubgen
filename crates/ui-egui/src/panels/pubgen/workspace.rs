@@ -5895,7 +5895,31 @@ fn render_card_edit_modal(app: &mut DesignApp, ctx: &egui::Context, state: &mut 
                                             ui.horizontal(|ui| {
                                                 ui.label(RichText::new("📊").size(18.0));
                                                 ui.vertical(|ui| {
-                                                    ui.label(RichText::new(format!("{}: {}", crate::i18n::tr(lang, "Chart Archetype"), card.chart_type)).font(semibold(11.0)).color(t.text_strong));
+                                                    ui.horizontal(|ui| {
+                                                        ui.label(RichText::new(crate::i18n::tr(lang, "Chart Archetype:")).font(semibold(11.0)).color(t.text_strong));
+                                                        craft_ui::ComboBox::from_id_salt(format!("card_quick_archetype_{}", card.chapter_id))
+                                                            .selected_text(&card.chart_type)
+                                                            .width(220.0)
+                                                            .show_ui(ui, |ui| {
+                                                                for (ct_val, ct_display) in [
+                                                                    ("Line Chart (Markers)", "Line Chart (Markers)"),
+                                                                    ("Smooth Line Chart (Spline)", "Smooth Line Chart (Spline)"),
+                                                                    ("Vertical Clustered Bar", "Vertical Clustered Bar"),
+                                                                    ("Vertical Stacked Bar", "Vertical Stacked Bar"),
+                                                                    ("100% Stacked Bar / Column", "100% Stacked Bar / Column"),
+                                                                    ("Dual-Axis Combo (Bar + Line)", "Dual-Axis Combo (Bar + Line)"),
+                                                                    ("Horizontal Bar (Ranked)", "Horizontal Bar (Ranked)"),
+                                                                    ("Area Chart (Filled)", "Area Chart (Filled)"),
+                                                                    ("Donut / Ring Chart", "Donut / Ring Chart"),
+                                                                    ("Population Pyramid (Piramida Penduduk)", "Population Pyramid (Piramida Penduduk)"),
+                                                                    ("Gauge / Speedometer Chart", "Gauge / Speedometer Chart"),
+                                                                ] {
+                                                                    if ui.selectable_label(card.chart_type == ct_val || card.chart_type == ct_display, ct_display).clicked() {
+                                                                        card.chart_type = ct_val.into();
+                                                                    }
+                                                                }
+                                                            });
+                                                    });
                                                     let row_count = card.chart_data_end_row.saturating_sub(card.chart_data_start_row).saturating_add(1);
                                                     ui.label(RichText::new(format!("Source: {} · {} baris data", if card.source.is_empty() { "Tanpa sumber" } else { &card.source }, row_count)).font(FontId::proportional(11.0)).color(t.text_dim));
                                                 });
