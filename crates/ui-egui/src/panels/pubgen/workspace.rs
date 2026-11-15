@@ -329,7 +329,7 @@ impl Default for PublicationCard {
             chart_max_value_override: String::new(),
             chart_show_value_labels: true,
             chart_show_legend: true,
-            chart_show_grid: false,
+            chart_show_grid: true,
             chart_raw_data: super::charts::dialog::DEFAULT_SAMPLE_CSV.into(),
             chart_csv_grid_preview: true,
             map_chart_type: "Choropleth".into(),
@@ -4797,6 +4797,12 @@ fn chart_type_display_name(value: &str) -> Option<&'static str> {
         "Gauge / Speedometer Chart"
     } else if v.contains("donut") || v.contains("ring") || v == "pie" {
         "Donut / Ring Chart"
+    } else if v.contains("100") {
+        "100% Stacked Bar / Column"
+    } else if v.contains("combo") || v.contains("dual") {
+        "Dual-Axis Combo Chart (Bar + Line)"
+    } else if v.contains("spline") || v.contains("smooth") || v.contains("linespline") {
+        "Smooth Line Chart (Spline)"
     } else if v.contains("stacked") {
         "Vertical Stacked Bar"
     } else if v.contains("horizontal") || v.contains("hbar") {
@@ -9446,5 +9452,128 @@ Plawad,8.83,7,103.18\n";
         refresh_detected_slots(&mut state);
         assert!(state.slots.iter().any(|s| s.name == "monograph_title"), "academic profile must have monograph_title");
         assert!(state.slots.iter().any(|s| s.name == "cover_agency"), "academic profile must have cover_agency");
+    }
+
+    #[test]
+    fn test_render_visual_samples_new_chart_archetypes() {
+        let spline_csv = "Tahun,Ekspor,Impor\n\
+2020,45.2,38.1\n\
+2021,58.7,42.5\n\
+2022,72.4,51.8\n\
+2023,65.1,49.2\n\
+2024,84.9,56.7\n";
+        let mut card1 = PublicationCard::new_with(
+            CardKind::Chart,
+            "Grafik 01.01 Perkembangan Ekspor dan Impor Karawang Timur (Spline Curve)",
+            "",
+            "csv/01_01.csv",
+            1,
+            true,
+        );
+        card1.chapter_id = "C01_01".into();
+        card1.chart_type = "Smooth Line Chart (Spline)".into();
+        card1.chart_category_col = "A".into();
+        card1.chart_series_1_col = "B".into();
+        card1.chart_series_1_label_id = "Ekspor".into();
+        card1.chart_series_1_label_en = "Export".into();
+        card1.chart_series_2_enabled = true;
+        card1.chart_series_2_col = "C".into();
+        card1.chart_series_2_label_id = "Impor".into();
+        card1.chart_series_2_label_en = "Import".into();
+        card1.chart_data_start_row = 2;
+        card1.chart_data_end_row = 6;
+        card1.chart_raw_data = spline_csv.to_string();
+        card1.title_en = "Chart 01.01 Development of Export and Import in East Karawang (Spline Curve)".into();
+        card1.settings.insert("title_en".into(), card1.title_en.clone());
+        card1.table_theme = "BPS Blue".into();
+
+        let stacked_csv = "Sektor Lapangan Usaha,Laki-laki,Perempuan\n\
+Pertanian,65.4,34.6\n\
+Industri Pengolahan,55.8,44.2\n\
+Perdagangan,42.1,57.9\n\
+Jasa Pendidikan,32.5,67.5\n";
+        let mut card2 = PublicationCard::new_with(
+            CardKind::Chart,
+            "Grafik 01.02 Distribusi Lapangan Kerja Menurut Jenis Kelamin (100% Stacked)",
+            "",
+            "csv/01_02.csv",
+            2,
+            true,
+        );
+        card2.chapter_id = "C01_02".into();
+        card2.chart_type = "100% Stacked Bar / Column".into();
+        card2.chart_category_col = "A".into();
+        card2.chart_series_1_col = "B".into();
+        card2.chart_series_1_label_id = "Laki-laki".into();
+        card2.chart_series_1_label_en = "Male".into();
+        card2.chart_series_2_enabled = true;
+        card2.chart_series_2_col = "C".into();
+        card2.chart_series_2_label_id = "Perempuan".into();
+        card2.chart_series_2_label_en = "Female".into();
+        card2.chart_series_3_enabled = false;
+        card2.chart_data_start_row = 2;
+        card2.chart_data_end_row = 5;
+        card2.chart_raw_data = stacked_csv.to_string();
+        card2.title_en = "Chart 01.02 Employment Distribution by Sex (100% Stacked)".into();
+        card2.settings.insert("title_en".into(), card2.title_en.clone());
+        card2.table_theme = "BPS Blue".into();
+
+        let combo_csv = "Kuartal,Volume Produksi (Ribu Ton),Laju Pertumbuhan (%)\n\
+Triwulan I,120.5,4.8\n\
+Triwulan II,145.2,6.5\n\
+Triwulan III,138.0,3.2\n\
+Triwulan IV,162.7,8.2\n";
+        let mut card3 =
+            PublicationCard::new_with(CardKind::Chart, "Grafik 01.03 Produksi dan Laju Pertumbuhan (Dual-Axis Combo)", "", "csv/01_03.csv", 3, true);
+        card3.chapter_id = "C01_03".into();
+        card3.chart_type = "Dual-Axis Combo Chart (Bar + Line)".into();
+        card3.chart_category_col = "A".into();
+        card3.chart_series_1_col = "B".into();
+        card3.chart_series_1_label_id = "Volume Produksi (Ribu Ton)".into();
+        card3.chart_series_1_label_en = "Production Volume (Thousand Tons)".into();
+        card3.chart_series_2_enabled = true;
+        card3.chart_series_2_col = "C".into();
+        card3.chart_series_2_label_id = "Laju Pertumbuhan (%)".into();
+        card3.chart_series_2_label_en = "Growth Rate (%)".into();
+        card3.chart_series_3_enabled = false;
+        card3.chart_data_start_row = 2;
+        card3.chart_data_end_row = 5;
+        card3.chart_raw_data = combo_csv.to_string();
+        card3.title_en = "Chart 01.03 Production and Growth Rate (Dual-Axis Combo)".into();
+        card3.settings.insert("title_en".into(), card3.title_en.clone());
+        card3.table_theme = "BPS Blue".into();
+
+        let state = OrchestratorWorkspaceState {
+            selected_profile: "bps_dda".into(),
+            doc_language: "Bilingual".into(),
+            cards: vec![card1, card2, card3],
+            ..Default::default()
+        };
+
+        let mut app = DesignApp::new(designcraft_engine::Session::new(), crate::Services::default());
+        let res = generate_from_workspace(&mut app, &state);
+        assert!(res.is_ok(), "worksheet compilation failed: {res:?}");
+
+        let active = app.session.active().unwrap();
+        let mut r = designcraft_render::Renderer::new();
+        let render_opts = designcraft_render::RenderOptions { printing_only: true, ..Default::default() };
+        let brain_dir = std::path::PathBuf::from(r"C:\Users\user\.gemini\antigravity\brain\baf17205-dc65-4b15-b998-4d5e82cc4f85");
+
+        let mut rendered_count = 0;
+        for page_idx in 0..active.doc.pages().count() {
+            if let Some(rendered) = r.render_page(&active.doc, &app.session.cache, page_idx, 2.0, true, &render_opts) {
+                let png_bytes = rendered.to_png();
+                let filename = match page_idx {
+                    1 => "visual_chart_1_spline.png",
+                    2 => "visual_chart_2_stacked100.png",
+                    3 => "visual_chart_3_combo.png",
+                    _ => continue,
+                };
+                let out_path = brain_dir.join(filename);
+                let _ = std::fs::write(&out_path, png_bytes);
+                rendered_count += 1;
+            }
+        }
+        assert!(rendered_count >= 3, "must render at least 3 chart pages, rendered {rendered_count}");
     }
 }

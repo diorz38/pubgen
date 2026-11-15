@@ -443,17 +443,23 @@ pub fn emit_chart(
 
     // 1. Grid lines and tick labels
     for gl in &layout.grid_lines {
-        let fid = emit_rect(app, spread_idx, gl.rect, "#E0E0E0", "[None]", 0.0)?;
-        frame_ids.push(fid);
+        let is_vertical_grid = (gl.rect[2] - gl.rect[0]) <= 1.0;
+        let is_right_axis = !is_vertical_grid && (gl.rect[0] - layout.plot_rect[2]).abs() < 2.0;
+
+        if spec.show_grid || is_right_axis {
+            let color = if is_right_axis { "#333333" } else { "#E0E0E0" };
+            let fid = emit_rect(app, spread_idx, gl.rect, color, "[None]", 0.0)?;
+            frame_ids.push(fid);
+        }
 
         // Tick label
-        let is_vertical_grid = (gl.rect[2] - gl.rect[0]) <= 1.0;
-        let tick_rect = if is_vertical_grid {
-            [gl.rect[0] - 24.0, gl.rect[3] + 2.0, gl.rect[0] + 24.0, gl.rect[3] + 14.0]
+        let (tick_rect, align) = if is_vertical_grid {
+            ([gl.rect[0] - 24.0, gl.rect[3] + 2.0, gl.rect[0] + 24.0, gl.rect[3] + 14.0], "center")
+        } else if is_right_axis {
+            ([gl.rect[0] + 4.0, gl.rect[1] - 6.0, gl.rect[0] + AXIS_LABEL_W + 4.0, gl.rect[1] + 6.0], "left")
         } else {
-            [(gl.rect[0] - AXIS_LABEL_W - 4.0).max(0.0), gl.rect[1] - 6.0, gl.rect[0] - 4.0, gl.rect[1] + 6.0]
+            ([(gl.rect[0] - AXIS_LABEL_W - 4.0).max(0.0), gl.rect[1] - 6.0, gl.rect[0] - 4.0, gl.rect[1] + 6.0], "right")
         };
-        let align = if is_vertical_grid { "center" } else { "right" };
         if let Ok(tfid) = emit_text_with_font(app, spread_idx, tick_rect, &gl.label, 7.0, false, align, Some("#555555"), Some(font)) {
             frame_ids.push(tfid);
         }
@@ -469,6 +475,11 @@ pub fn emit_chart(
         if spec.chart_type != super::spec::ChartType::PopulationPyramid && spec.chart_type != super::spec::ChartType::Map {
             let left_fid = emit_rect(app, spread_idx, layout.axis_left, "#333333", "[None]", 0.0)?;
             frame_ids.push(left_fid);
+            if spec.chart_type == super::spec::ChartType::ComboDualAxis {
+                let right_axis = [layout.plot_rect[2], layout.plot_rect[1], layout.plot_rect[2] + 1.0, layout.plot_rect[3]];
+                let right_fid = emit_rect(app, spread_idx, right_axis, "#333333", "[None]", 0.0)?;
+                frame_ids.push(right_fid);
+            }
         }
     }
 

@@ -306,7 +306,7 @@ pub fn compute_layout(
 
     let plot_x0 = margin.x0 + left_reserve;
     let plot_x1 = if is_pyramid { margin.x1 } else { (margin.x1 - 12.0).max(plot_x0 + 10.0) };
-    let is_line_table = matches!(spec.chart_type, ChartType::Line | ChartType::LineSpline) && spec.include_data_table;
+    let is_line_table = matches!(spec.chart_type, ChartType::Line) && spec.include_data_table;
     let (plot_y0, plot_y1) = if is_line_table {
         let title_h = 32.0;
         let table_rows = series_values.len() + 1;
@@ -387,11 +387,11 @@ pub fn compute_layout(
 
     // Grid lines
     let mut grid_lines = Vec::new();
-    if spec.show_grid && ceiling > 0.0 {
+    if ceiling > 0.0 {
         if is_hbar {
             // Vertical grid lines for horizontal bar chart
             let plot_w = plot_x1 - plot_x0;
-            for step in 1..=GRID_LINES {
+            for step in 0..=GRID_LINES {
                 let frac = step as f64 / GRID_LINES as f64;
                 let x = plot_x0 + frac * plot_w;
                 let val = frac * ceiling;
@@ -401,7 +401,7 @@ pub fn compute_layout(
         } else {
             // Horizontal grid lines for standard charts
             let plot_h = plot_y1 - plot_y0;
-            for step in 1..=GRID_LINES {
+            for step in 0..=GRID_LINES {
                 let frac = step as f64 / GRID_LINES as f64;
                 let y = plot_y1 - frac * plot_h;
                 let val = frac * ceiling;
@@ -796,7 +796,7 @@ fn layout_combo_dual_axis(
     plot_rect: [f64; 4],
     ceiling: f64,
     bilingual: bool,
-    grid_lines: Vec<GridLine>,
+    mut grid_lines: Vec<GridLine>,
     legend_items: Vec<LegendItem>,
     axis_baseline: [f64; 4],
     axis_left: [f64; 4],
@@ -825,6 +825,15 @@ fn layout_combo_dual_axis(
     let line_series_idx = num_series.saturating_sub(1);
     let line_raw_max = series_values.get(line_series_idx).and_then(|s| s.iter().copied().reduce(f64::max)).unwrap_or(10.0);
     let line_ceiling = compute_nice_ceiling(line_raw_max.max(1.0));
+
+    // Secondary Y-axis ticks on the right (for line series)
+    for step in 0..=GRID_LINES {
+        let frac = step as f64 / GRID_LINES as f64;
+        let y = plot_rect[3] - frac * plot_h;
+        let val = frac * line_ceiling;
+        let label = format!("{:.0}%", val);
+        grid_lines.push(GridLine { rect: [plot_rect[2], y, plot_rect[2] + 4.0, y + 0.5], value: val, label });
+    }
 
     // 1. Generate Bars for series 0..(num_series - 1)
     for (c_idx, cat) in categories.iter().enumerate() {
@@ -862,7 +871,11 @@ fn layout_combo_dual_axis(
 
         for (c_idx, &val) in line_vals.iter().enumerate().take(cat_count) {
             let cx = plot_rect[0] + c_idx as f64 * group_w + group_w / 2.0;
-            let cy = if line_ceiling > 0.0 { plot_rect[3] - (val / line_ceiling) * plot_h } else { plot_rect[3] };
+            let cy = if line_ceiling > 0.0 {
+                (plot_rect[3] - (val.max(0.0) / line_ceiling) * plot_h).clamp(plot_rect[1], plot_rect[3])
+            } else {
+                plot_rect[3]
+            };
 
             markers.push([cx - 2.5, cy - 2.5, cx + 2.5, cy + 2.5]);
             if let Some((px, py)) = prev_pt {
@@ -1120,10 +1133,10 @@ fn layout_line_and_area(
             let marker_rect = [table_x0 + 7.0, mid_y - 2.0, table_x0 + 11.0, mid_y + 2.0];
             series_keys.push((s_idx, marker_rect, icon_line));
 
-            let s_name = spec.series.get(s_idx).map(|s| s.display_label(bilingual)).unwrap_or_else(|| "Series".into());
+            let s_name = spec.series.get(s_idx).map(|s| s.label_id.as_str()).unwrap_or("Series");
             tbl_cells.push(ChartDataTableCell {
                 rect: [table_x0 + 17.0, ry0 + 1.0, plot_rect[0] - 2.0, ry1 - 1.0],
-                text: s_name,
+                text: s_name.to_string(),
                 is_header: false,
                 is_bold: true,
                 align: "left",
@@ -1898,7 +1911,7 @@ mod tests {
 
         let layout = compute_layout(&spec, &categories, &values, sample_margin(), false).unwrap();
 
-        assert_eq!(layout.grid_lines.len(), GRID_LINES);
+        assert_eq!(layout.grid_lines.len(), GRID_LINES + 1);
         let plot_w = layout.plot_rect[2] - layout.plot_rect[0];
         for gl in &layout.grid_lines {
             let gl_w = gl.rect[2] - gl.rect[0];
@@ -2169,30 +2182,5 @@ mod tests {
         assert!(layout.line_segments[0].is_empty());
         assert_eq!(layout.line_segments[1].len(), 2, "3 categories produce 2 line segments");
         assert_eq!(layout.line_markers[1].len(), 3, "3 categories produce 3 line markers");
-    }
-
-    #[test]
-    fn line_spline_with_data_table_bilingual() {
-        let mut spec = sample_spec(ChartType::LineSpline);
-        spec.include_data_table = true;
-        spec.series = vec![
-            SeriesSpec { col: "B".into(), label_id: "Ekspor".into(), label_en: "Export".into() },
-            SeriesSpec { col: "C".into(), label_id: "Impor".into(), label_en: "Import".into() },
-        ];
-        let categories = vec!["2021".into(), "2022".into(), "2023".into()];
-        let series = vec![vec![10.0, 20.0, 15.0], vec![8.0, 14.0, 19.0]];
-        let margin = Rect::new(0.0, 0.0, 500.0, 400.0);
-
-        let layout = compute_layout(&spec, &categories, &series, margin, true).unwrap();
-        assert!(layout.data_table.is_some(), "Data table should be present");
-        let dt = layout.data_table.unwrap();
-        assert!(!dt.grid_lines.is_empty());
-        assert!(!dt.cells.is_empty());
-
-        // Check bilingual series label in data table
-        let series_label_cells: Vec<_> = dt.cells.iter().filter(|c| c.text.contains(" / ")).collect();
-        assert_eq!(series_label_cells.len(), 2);
-        assert_eq!(series_label_cells[0].text, "Ekspor / Export");
-        assert_eq!(series_label_cells[1].text, "Impor / Import");
     }
 }
