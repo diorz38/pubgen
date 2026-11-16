@@ -7912,7 +7912,7 @@ mod tests {
         assert_eq!(card.chart_value_format, "Number (1.234,5)");
         assert!(card.chart_show_value_labels);
         assert!(card.chart_show_legend);
-        assert!(!card.chart_show_grid);
+        assert!(card.chart_show_grid);
         assert!(card.chart_raw_data.contains("Tahun,Pertanian,Industri,Jasa"));
 
         // Modify options
@@ -7921,7 +7921,7 @@ mod tests {
         card.chart_series_2_col = "C".into();
         card.chart_series_2_label_id = "Industri Olahan".into();
         card.chart_value_format = "Percentage (%)".into();
-        card.chart_show_grid = true;
+        card.chart_show_grid = false;
         card.chart_max_value_override = "100".into();
 
         let mut state = OrchestratorWorkspaceState::default();
@@ -7934,7 +7934,7 @@ mod tests {
         assert_eq!(meta_chart.settings.get("chart_series_2_col").and_then(|v| v.as_str()), Some("C"));
         assert_eq!(meta_chart.settings.get("chart_series_2_label_id").and_then(|v| v.as_str()), Some("Industri Olahan"));
         assert_eq!(meta_chart.settings.get("chart_value_format").and_then(|v| v.as_str()), Some("Percentage (%)"));
-        assert_eq!(meta_chart.settings.get("chart_show_grid").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(meta_chart.settings.get("chart_show_grid").and_then(|v| v.as_bool()), Some(false));
         assert_eq!(meta_chart.settings.get("chart_max_value_override").and_then(|v| v.as_str()), Some("100"));
 
         // Roundtrip back to state via apply_ingest_report_to_state
@@ -7954,7 +7954,7 @@ mod tests {
         assert_eq!(res_chart.chart_series_2_col, "C");
         assert_eq!(res_chart.chart_series_2_label_id, "Industri Olahan");
         assert_eq!(res_chart.chart_value_format, "Percentage (%)");
-        assert!(res_chart.chart_show_grid);
+        assert!(!res_chart.chart_show_grid);
         assert_eq!(res_chart.chart_max_value_override, "100");
     }
 

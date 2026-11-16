@@ -2844,7 +2844,14 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                     italicize_story(app, sid);
                 }
             } else {
-                let header_h = if has_chapter_prefix { 90.0 } else { 44.0 };
+                let has_header = has_chapter_prefix || !clean_id_title.is_empty();
+                let header_h = if has_chapter_prefix {
+                    90.0
+                } else if !clean_id_title.is_empty() {
+                    44.0
+                } else {
+                    0.0
+                };
 
                 if has_chapter_prefix {
                     // 1st Textbox: "BAB 01" (font Arial Black, size 24.0) -> first row
@@ -2875,16 +2882,21 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                     }
                 } else if !clean_id_title.is_empty() {
                     // Front matter: the title alone, centered across the page margins.
+                    let title_text = if type_val.eq_ignore_ascii_case("Note") {
+                        clean_id_title.to_string()
+                    } else {
+                        clean_id_title.to_uppercase()
+                    };
                     if let Some(sid) = frame_with_font_and_style(
                         app,
                         spread_idx,
                         [margin.x0, margin.y0, margin.x1, margin.y0 + 40.0],
-                        &clean_id_title.to_uppercase(),
+                        &title_text,
                         "Arial",
                         12.0,
                         Some(TOC_NARRATIVE_STYLE),
                     ) {
-                        let _ = app.run("text.select", json!({"story": sid, "anchor": 0, "focus": clean_id_title.chars().count() as u64}));
+                        let _ = app.run("text.select", json!({"story": sid, "anchor": 0, "focus": title_text.chars().count() as u64}));
                         let _ = app.run("type.alignCenter", json!({}));
                     }
                 }
@@ -2931,6 +2943,9 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                                 placed_rtf_fid = Some(fid);
                                 if !has_chapter_prefix {
                                     harmonize_signatory_block(app, fid, margin);
+                                    if !has_header && let Some(sid) = story_of_frame(app, fid) {
+                                        tag_page_title(app, sid, TOC_NARRATIVE_STYLE);
+                                    }
                                 }
                             }
                         }
