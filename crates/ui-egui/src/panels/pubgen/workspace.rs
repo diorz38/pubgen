@@ -494,6 +494,14 @@ pub struct OrchestratorWorkspaceState {
     // Generation & Thumbnail Pre-warm Progress Modal state
     #[serde(skip)]
     pub compile_progress: Option<CompileProgressState>,
+    /// A Generate / Generate & Publish click queued for the next frame: `Some(publish)` while
+    /// the generation buttons render disabled and the loading modal is shown.
+    #[serde(skip)]
+    pub generation_pending: Option<bool>,
+    /// The queued generation has already had its loading-state frame painted; it runs on the
+    /// next frame, so the disabled buttons and the modal stay on screen while it blocks.
+    #[serde(skip)]
+    pub generation_armed: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -684,6 +692,8 @@ impl Default for OrchestratorWorkspaceState {
             translate_glossary_pairs: Vec::new(),
             translate_reused: 0,
             compile_progress: None,
+            generation_pending: None,
+            generation_armed: false,
         };
         default_state.slots = detect_translation_rule_units(&default_state);
         default_state
@@ -2333,6 +2343,16 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
         return;
     }
 
+    // A Generate click waits one paint frame so its disabled buttons and loading modal are on
+    // screen, then runs on the following frame: the generator blocks the interface thread, so
+    // starting it in the click frame would leave nothing to show while it works.
+    if state.generation_pending.is_some() {
+        match advance_generation_pending(&mut state) {
+            Some(publish) => start_compile_job(app, ui.ctx(), &mut state, publish, &lang),
+            None => ui.ctx().request_repaint(),
+        }
+    }
+
     let avail_rect = ui.available_rect_before_wrap();
     let total_width = avail_rect.width();
     let total_height = avail_rect.height();
@@ -2402,6 +2422,11 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
     // Render AI Translation Guard Dialog if triggered
     if state.show_translate_guard_dialog {
         render_translate_guard_dialog(app, ui.ctx(), &mut state, &t, &lang);
+    }
+
+    // Render the loading state of a generation that starts on the next frame.
+    if let Some(publish) = state.generation_pending {
+        render_generation_loading_modal(ui.ctx(), publish, &t, &lang);
     }
 
     // Render Compile & Thumbnail Pre-warm Progress Modal if active
@@ -4560,43 +4585,32 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
     }
     // The job itself is polled once per frame in `show`, whichever tab is open.
 
-    // Generate Button (Deep Cyan)
-    if ui
-        .add_sized(
-            [ui.available_width(), btn_h],
-            egui::Button::new(RichText::new(crate::i18n::tr(lang, "Generate Publication")).font(semibold(12.0)).color(Color32::WHITE))
-                .fill(t.accent_strong)
-                .corner_radius(CornerRadius::same(t.radius)),
-        )
-        .on_hover_text(crate::i18n::tr(lang, "Generate Publication"))
-        .clicked()
-    {
+    // Generate Button (Deep Cyan). Both action buttons share one in-flight guard so a
+    // generation cannot be started twice; `generation_action_button` paints the hover,
+    // pressed and disabled states that an explicit `Button::fill` would otherwise suppress.
+    let generation_idle = generation_controls_enabled(state);
+    let generate = generation_action_button(ui, crate::i18n::tr(lang, "Generate Publication"), generation_idle, t)
+        .on_hover_text(crate::i18n::tr(lang, "Generate Publication"));
+    if generate.clicked() {
         let doc_has_pages = app.session.doc().map(|d| d.doc.pages().next().is_some()).unwrap_or(false);
         if doc_has_pages {
             state.show_guard_dialog = true;
             state.guard_is_publish = false;
         } else {
-            execute_compile(app, ui.ctx(), state, false, lang);
+            request_generation(ui.ctx(), state, false);
         }
     }
 
     // Generate & Publish Button (Emerald Green)
-    if ui
-        .add_sized(
-            [ui.available_width(), btn_h],
-            egui::Button::new(RichText::new(crate::i18n::tr(lang, "Generate & Publish PDF")).font(semibold(12.0)).color(Color32::WHITE))
-                .fill(t.accent_strong)
-                .corner_radius(CornerRadius::same(t.radius)),
-        )
-        .on_hover_text(crate::i18n::tr(lang, "Generate & Publish PDF"))
-        .clicked()
-    {
+    let publish = generation_action_button(ui, crate::i18n::tr(lang, "Generate & Publish PDF"), generation_idle, t)
+        .on_hover_text(crate::i18n::tr(lang, "Generate & Publish PDF"));
+    if publish.clicked() {
         let doc_has_pages = app.session.doc().map(|d| d.doc.pages().next().is_some()).unwrap_or(false);
         if doc_has_pages {
             state.show_guard_dialog = true;
             state.guard_is_publish = true;
         } else {
-            execute_compile(app, ui.ctx(), state, true, lang);
+            request_generation(ui.ctx(), state, true);
         }
     }
 
@@ -4676,6 +4690,87 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
                 });
             }
         }
+    });
+}
+
+/// Whether the right dock's Generate buttons may start a run. A queued generation, the safety
+/// guard that asks before overwriting an existing layout, and the thumbnail pre-warm that
+/// follows a generation all count as "generation in progress".
+fn generation_controls_enabled(state: &OrchestratorWorkspaceState) -> bool {
+    state.generation_pending.is_none() && state.compile_progress.is_none() && !state.show_guard_dialog
+}
+
+/// Queue a publication generation and show the loading state now.
+///
+/// The page generator mutates the active document on the interface thread, so running it inside
+/// the click frame would paint the enabled button and then freeze with no feedback. The click
+/// queues it here; `show` gives the disabled buttons and the loading modal one painted frame
+/// before it runs the generator.
+fn request_generation(ctx: &egui::Context, state: &mut OrchestratorWorkspaceState, publish: bool) {
+    state.generation_pending = Some(publish);
+    state.generation_armed = false;
+    ctx.request_repaint();
+}
+
+/// One frame of the queued-generation handshake. The first frame after a click only arms the
+/// run (so the loading state it painted stays on screen); the next returns the publish flag for
+/// `show` to run the generator.
+fn advance_generation_pending(state: &mut OrchestratorWorkspaceState) -> Option<bool> {
+    let publish = state.generation_pending?;
+    if !state.generation_armed {
+        state.generation_armed = true;
+        return None;
+    }
+    state.generation_pending = None;
+    state.generation_armed = false;
+    Some(publish)
+}
+
+/// Full-width accent action button for the right dock's generation actions.
+///
+/// An explicit `Button::fill` overrides egui's hover and pressed visuals (its own documentation
+/// says so), so the three states are painted here: hover lightens the fill and draws a white rim,
+/// pressing darkens it, and a disabled button drops to the panel colour with a dim label and no
+/// click sense. The pointer cursor is an extra hover cue the themed egui buttons do not set.
+fn generation_action_button(ui: &mut Ui, label: &str, enabled: bool, t: &Tokens) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), if enabled { Sense::click() } else { Sense::hover() });
+    if ui.is_rect_visible(rect) {
+        let (bg, fg, stroke) = if !enabled {
+            (t.panel_darker, t.text_dim, Stroke::NONE)
+        } else if resp.is_pointer_button_down_on() {
+            (darken_color(t.accent_strong, 35), Color32::WHITE, Stroke::new(1.5, t.accent_strong))
+        } else if resp.hovered() {
+            (lighten_color(t.accent_strong, 30), Color32::WHITE, Stroke::new(1.2, Color32::WHITE))
+        } else {
+            (t.accent_strong, Color32::WHITE, Stroke::NONE)
+        };
+        ui.painter().rect(rect, CornerRadius::same(t.radius), bg, stroke, StrokeKind::Inside);
+        crate::rtl::paint(ui.painter(), rect.center(), Align2::CENTER_CENTER, label, semibold(12.0), fg);
+    }
+    let resp = if enabled { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp };
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
+    resp
+}
+
+/// The loading state painted from the Generate click until the queued generation finishes.
+fn render_generation_loading_modal(ctx: &egui::Context, publish: bool, t: &Tokens, lang: &str) {
+    let title = if publish {
+        crate::i18n::tr(lang, "Generating & publishing the publication…")
+    } else {
+        crate::i18n::tr(lang, "Generating publication…")
+    };
+    let _modal = egui::Modal::new(egui::Id::unique("pubgen_generation_loading")).show(ctx, |ui| {
+        ui.set_width(340.0);
+        ui.horizontal(|ui| {
+            ui.add(egui::Spinner::new().size(16.0));
+            ui.label(RichText::new(title).font(semibold(12.5)).color(t.text_strong));
+        });
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(crate::i18n::tr(lang, "Building the pages from the worksheet. This can take a while for a long publication."))
+                .font(FontId::proportional(11.0))
+                .color(t.text_dim),
+        );
     });
 }
 
@@ -7294,10 +7389,6 @@ fn render_compile_progress_modal(app: &mut DesignApp, ctx: &egui::Context, state
     }
 }
 
-fn execute_compile(app: &mut DesignApp, ctx: &egui::Context, state: &mut OrchestratorWorkspaceState, publish: bool, lang: &str) {
-    start_compile_job(app, ctx, state, publish, lang);
-}
-
 /// File-stem-safe version of a title for the output PDF name.
 fn sanitize_file_stem(title: &str) -> String {
     let stem: String = title.trim().chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == ' ' { c } else { ' ' }).collect();
@@ -7393,11 +7484,11 @@ fn render_guard_dialog(app: &mut DesignApp, ctx: &egui::Context, state: &mut Orc
             state.execution_log.push(format!("[{now}] {}", crate::i18n::tr(lang, "Saving old layout to: {path}").replace("{path}", &v2)));
             let _ = app.run("file.saveAs", serde_json::json!({ "path": v2 }));
             let _ = app.run("file.new", serde_json::json!({}));
-            start_compile_job(app, ctx, state, is_publish, lang);
+            request_generation(ctx, state, is_publish);
         } else if act == 2 {
             state.execution_log.push(format!("[{now}] Menimpa tata letak aktif dengan hasil generate segar dari worksheet..."));
             let _ = app.run("file.new", serde_json::json!({}));
-            start_compile_job(app, ctx, state, is_publish, lang);
+            request_generation(ctx, state, is_publish);
         }
     }
 }
@@ -7735,6 +7826,131 @@ mod tests {
         // Cancel dialog
         state.show_guard_dialog = false;
         assert!(!state.show_guard_dialog);
+    }
+
+    /// The right-dock Generate buttons stay disabled from the click until the queued generation
+    /// and the thumbnail pre-warm it starts have both finished.
+    #[test]
+    fn generation_controls_disable_for_the_pending_run_and_the_prewarm() {
+        let mut state = OrchestratorWorkspaceState::default();
+        assert!(generation_controls_enabled(&state));
+
+        state.generation_pending = Some(false);
+        assert!(!generation_controls_enabled(&state), "a queued generation disables both buttons");
+
+        state.generation_pending = None;
+        state.compile_progress = Some(CompileProgressState::default());
+        assert!(!generation_controls_enabled(&state), "the pre-warm progress window keeps them disabled");
+
+        state.compile_progress = None;
+        assert!(generation_controls_enabled(&state));
+
+        state.show_guard_dialog = true;
+        assert!(!generation_controls_enabled(&state), "the overwrite guard disables them while it asks");
+
+        state.show_guard_dialog = false;
+        assert!(generation_controls_enabled(&state));
+    }
+
+    /// A click only queues the run: the generator is synchronous on the interface thread, so it
+    /// must not start in the same frame that still has to paint the loading state.
+    #[test]
+    fn request_generation_queues_the_publish_flag_without_compiling() {
+        let ctx = egui::Context::default();
+        let mut state = OrchestratorWorkspaceState::default();
+
+        request_generation(&ctx, &mut state, true);
+        assert_eq!(state.generation_pending, Some(true));
+        assert!(!state.generation_armed);
+        assert!(state.compile_progress.is_none(), "nothing runs in the click frame");
+
+        request_generation(&ctx, &mut state, false);
+        assert_eq!(state.generation_pending, Some(false));
+    }
+
+    /// The queued generation gets one painted frame of loading state before it runs, so the
+    /// disabled buttons and the loading modal are what stays on screen while it blocks.
+    #[test]
+    fn queued_generation_paints_one_frame_of_loading_state_before_it_runs() {
+        let ctx = egui::Context::default();
+        let mut state = OrchestratorWorkspaceState::default();
+        request_generation(&ctx, &mut state, true);
+
+        assert_eq!(advance_generation_pending(&mut state), None, "the first frame only paints the loading state");
+        assert!(state.generation_pending.is_some());
+        assert!(!generation_controls_enabled(&state));
+
+        assert_eq!(advance_generation_pending(&mut state), Some(true), "the next frame runs the generator");
+        assert!(state.generation_pending.is_none());
+        assert!(generation_controls_enabled(&state));
+    }
+
+    /// The generation button paints its own hover, pressed and disabled states (an explicit
+    /// `Button::fill` would suppress egui's), and a disabled button does not register clicks.
+    #[test]
+    fn generation_action_button_hovers_presses_clicks_and_ignores_clicks_when_disabled() {
+        let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx, "en");
+        let t = Tokens::for_brightness(crate::theme::Brightness::MediumDark);
+        let pos = pos2(60.0, 20.0);
+
+        // egui's hit test lands one frame after a widget first appears, so an input sequence
+        // runs a warm-up frame and is asserted on the next one — like the two steps a real UI
+        // gets between moving the pointer and the state painting. `click_frame` asserts on the
+        // warm-up itself instead: a click is only reported in the frame the button is released.
+        let frame = |events: Vec<egui::Event>, enabled: bool, click_frame: bool| {
+            let mut flags = (false, false, false);
+            let mut seq = vec![events];
+            if !click_frame {
+                seq.push(Vec::new());
+            }
+            let last = seq.len() - 1;
+            for (i, events) in seq.into_iter().enumerate() {
+                let raw =
+                    egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(300.0, 80.0))), events, ..Default::default() };
+                let mut output = ctx.run_ui(raw, |ui| {
+                    let resp = generation_action_button(ui, "Generate Publication", enabled, &t);
+                    if i == last {
+                        flags = (resp.hovered(), resp.is_pointer_button_down_on(), resp.clicked());
+                    }
+                });
+                output.textures_delta.clear();
+            }
+            flags
+        };
+
+        // One clean frame first so the widget's hit test exists.
+        let warm = frame(Vec::new(), true, false);
+        assert!(!warm.0 && !warm.2, "no pointer, no hover and no click");
+
+        let flags = frame(vec![egui::Event::PointerMoved(pos)], true, false);
+        assert!(flags.0, "the pointer over the button reports a hover");
+        assert!(!flags.2);
+
+        let flags = frame(
+            vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }],
+            true,
+            false,
+        );
+        assert!(flags.1, "holding the pointer on the button reports the pressed state");
+
+        let flags = frame(
+            vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }],
+            true,
+            true,
+        );
+        assert!(flags.2, "releasing over the button reports the click");
+
+        let flags = frame(
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
+                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE },
+            ],
+            false,
+            true,
+        );
+        assert!(!flags.2, "a disabled button must not register a click");
     }
 
     #[test]
