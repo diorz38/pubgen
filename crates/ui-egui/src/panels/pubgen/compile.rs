@@ -3503,7 +3503,7 @@ mod tests {
         assert_eq!(job.front_matter_rows, 2, "the G and Ulasan rows both precede the first table");
         let active = app.session.active().unwrap();
         let text: String = active.doc.stories.values().map(|s| s.text.clone()).collect();
-        assert!(text.contains("Sambutan"), "the narrative page is emitted before the body");
+        assert!(text.contains("SAMBUTAN"), "the narrative page is emitted before the body");
         assert!(job.body_start.unwrap() > 2);
     }
 

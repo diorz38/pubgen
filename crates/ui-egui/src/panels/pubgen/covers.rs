@@ -264,8 +264,8 @@ fn convert_asset_id_to_grayscale_mode(
     is_light: bool,
 ) -> Option<designcraft_doc::AssetId> {
     let asset = doc.assets.get(&aid)?.clone();
-    let raw_bytes: Option<Vec<u8>> = if !asset.data.is_empty() {
-        Some((*asset.data).clone())
+    let raw_bytes: Option<Vec<u8>> = if let Ok(bytes) = asset.data.load() {
+        Some((*bytes).clone())
     } else if let Some(link) = &asset.link {
         std::fs::read(link).ok()
     } else {
@@ -303,11 +303,12 @@ fn convert_asset_id_to_grayscale_mode(
         mime: "image/png".into(),
         link: None,
         link_fingerprint: None,
-        data: std::sync::Arc::new(out_bytes),
+        data: designcraft_doc::AssetData::embedded(out_bytes),
         pixels: Some((w, h)),
         page: 0,
         pdf_crop: asset.pdf_crop,
         pdf_box: asset.pdf_box,
+        ..Default::default()
     };
     doc.assets.insert(new_aid, std::sync::Arc::new(new_asset));
     Some(new_aid)
@@ -3559,7 +3560,8 @@ pub(crate) mod tests {
         if let designcraft_doc::Content::Graphic(g) = &inside_bg.content {
             let asset = active.doc.assets.get(&g.asset).expect("inside bg asset");
             assert!(asset.name.contains("light_gray"), "Inside cover asset name: {}", asset.name);
-            let img = image::load_from_memory(&asset.data).expect("load inside asset");
+            let bytes = asset.data.load().expect("load inside asset");
+            let img = image::load_from_memory(&bytes).expect("load inside asset");
             for p in img.to_rgba8().pixels() {
                 if p[3] > 0 {
                     assert!(p[0] >= 210, "Light gray-scale pixel value {} must be >= 210 for readability", p[0]);

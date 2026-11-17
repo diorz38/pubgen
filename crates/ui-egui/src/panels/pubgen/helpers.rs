@@ -330,6 +330,11 @@ pub(crate) fn harmonize_signatory_block(app: &mut DesignApp, fid: u64, margin: d
             return Ok(serde_json::Value::Null);
         };
 
+        // If the last paragraph has a hanging indent (first_line_indent < -1.0), this is NOT a signatory block.
+        if story.paras[last_pi].para.first_line_indent.unwrap_or(0.0) < -1.0 {
+            return Ok(serde_json::Value::Null);
+        }
+
         // Walk backwards to find the start of the signatory block.
         // Identify the first non-empty signatory line (the date line like "Karawang, September 2025").
         let mut first_sig_non_empty = last_pi;
@@ -338,6 +343,9 @@ pub(crate) fn harmonize_signatory_block(app: &mut DesignApp, fid: u64, margin: d
             if t.is_empty() {
                 continue;
             }
+            if story.paras[i].para.first_line_indent.unwrap_or(0.0) < -1.0 {
+                break;
+            }
             let is_sig = t.contains("Karawang")
                 || t.contains("Kepala")
                 || t.contains("Head of")
@@ -345,7 +353,8 @@ pub(crate) fn harmonize_signatory_block(app: &mut DesignApp, fid: u64, margin: d
                 || t.contains("Office")
                 || t.contains("BPS")
                 || (t.contains(',') && (t.contains("202") || t.contains("203")))
-                || story.paras[i].para.left_indent.unwrap_or(0.0) > 80.0;
+                || (story.paras[i].para.left_indent.unwrap_or(0.0) > 80.0
+                    && story.paras[i].para.first_line_indent.unwrap_or(0.0) >= 0.0);
             if is_sig {
                 first_sig_non_empty = i;
             } else {
@@ -353,6 +362,11 @@ pub(crate) fn harmonize_signatory_block(app: &mut DesignApp, fid: u64, margin: d
             }
         }
         let start_pi = first_sig_non_empty;
+
+        // A signatory block is typically 2-6 paragraphs at the end of the preface. If it spans more than 8 paragraphs, it is not a signatory block.
+        if last_pi - start_pi > 8 {
+            return Ok(serde_json::Value::Null);
+        }
 
         for pi in (start_pi..=last_pi).rev() {
             let r = story.para_ranges()[pi].clone();
@@ -723,7 +737,7 @@ pub(crate) fn is_ulasan_type(type_val: &str) -> bool {
         return false;
     }
     let lower = s.to_lowercase();
-    if lower == "ulasan" || lower == "review" || lower == "editorial" || lower == "chapter" {
+    if lower == "ulasan" || lower == "review" || lower == "editorial" {
         return true;
     }
     if (lower.starts_with('r') || lower.starts_with('b') || lower.starts_with('u')) && lower[1..].chars().all(|c| c.is_ascii_digit() || c == '_') {

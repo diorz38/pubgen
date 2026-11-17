@@ -9,7 +9,6 @@
 #![forbid(unsafe_code)]
 
 mod docx;
-mod docx_numbering;
 pub mod export;
 mod markdown;
 mod rtf;
@@ -30,20 +29,15 @@ pub fn xlsx_records(bytes: &[u8], sheet: Option<&str>) -> Result<Vec<Vec<String>
 
 use designcraft_doc::{CharAttrs, ParaAttrs, Story};
 
-/// Characters kept of a style name read from a file: each paragraph that uses a style carries a
-/// copy of its name, so a long one would be multiplied by the paragraph count.
-pub(crate) const MAX_NAME_CHARS: usize = 256;
-
-pub(crate) fn capped_name(mut name: String) -> String {
-    if let Some((at, _)) = name.char_indices().nth(MAX_NAME_CHARS) {
-        name.truncate(at);
-    }
-    name
+/// A paragraph or character style found in the source.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ImportedStyle {
+    pub name: String,
+    pub based_on: Option<String>,
+    pub para: ParaAttrs,
+    pub chars: CharAttrs,
 }
 
-/// Joins UTF-16 code units that arrive one at a time (RTF `\uN`, Tagged Text `<0xNNNN>`) into
-/// characters. A character past U+FFFF comes as two units, a surrogate pair: the first half
-/// waits for the second.
 #[derive(Default)]
 pub(crate) struct Utf16Units {
     high: Option<u32>,
@@ -66,15 +60,6 @@ impl Utf16Units {
     pub(crate) fn reset(&mut self) {
         self.high = None;
     }
-}
-
-/// A paragraph or character style found in the source.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ImportedStyle {
-    pub name: String,
-    pub based_on: Option<String>,
-    pub para: ParaAttrs,
-    pub chars: CharAttrs,
 }
 
 /// The imported text.
@@ -104,30 +89,35 @@ impl std::fmt::Display for ImportError {
 
 /// Text files this crate reads, by extension.
 pub fn is_text_file(name: &str) -> bool {
-    let l = name.to_ascii_lowercase();
-    l.ends_with(".txt") || l.ends_with(".text") || l.ends_with(".md") || l.ends_with(".docx") || l.ends_with(".rtf") || l.ends_with(".xlsx")
+    matches!(
+        craft_file_formats::detect(name, &[]),
+        Some(
+            craft_file_formats::Format::PlainText
+                | craft_file_formats::Format::Docx
+                | craft_file_formats::Format::Rtf
+                | craft_file_formats::Format::Xlsx
+        )
+    ) || {
+        let l = name.to_ascii_lowercase();
+        l.ends_with(".md") || l.ends_with(".markdown")
+    }
 }
 
 /// Import `bytes` (format from the file name, else sniffed).
 pub fn import(name: &str, bytes: &[u8]) -> Result<Imported, ImportError> {
+    match craft_file_formats::detect(name, bytes) {
+        Some(craft_file_formats::Format::Xlsx) => return xlsx::import(bytes),
+        Some(craft_file_formats::Format::Docx) => return docx::import(bytes),
+        Some(craft_file_formats::Format::Rtf) => return rtf::import(bytes),
+        Some(craft_file_formats::Format::TaggedText) => return tagged::import(bytes),
+        Some(craft_file_formats::Format::LegacyDoc) => {
+            return Err(ImportError::Unsupported("legacy Word .doc (save it as .docx)".into()));
+        }
+        _ => {}
+    }
     let l = name.to_ascii_lowercase();
-    if l.ends_with(".xlsx") {
-        return xlsx::import(bytes);
-    }
-    if l.ends_with(".docx") || bytes.starts_with(b"PK\x03\x04") {
-        return docx::import(bytes);
-    }
-    if l.ends_with(".rtf") || bytes.starts_with(b"{\\rtf") {
-        return rtf::import(bytes);
-    }
     if l.ends_with(".md") || l.ends_with(".markdown") {
         return Ok(markdown::import(&tagged::decode(bytes)));
-    }
-    if tagged::is_tagged(bytes) {
-        return tagged::import(bytes);
-    }
-    if l.ends_with(".doc") {
-        return Err(ImportError::Unsupported("legacy Word .doc (save it as .docx)".into()));
     }
     Ok(plain(&tagged::decode(bytes)))
 }
