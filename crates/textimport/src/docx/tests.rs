@@ -2,6 +2,14 @@ use super::*;
 use std::io::Write;
 
 #[test]
+fn paragraph_alignment_is_imported() {
+    let document =
+        format!(r#"<w:document {W}><w:body><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:t>Tengah</w:t></w:r></w:p></w:body></w:document>"#);
+    let imported = import(&docx(&document, "", "")).unwrap();
+    assert_eq!(imported.story.paras[0].para.align, Some(designcraft_doc::Align::Center));
+}
+
+#[test]
 fn table_adds_no_empty_paragraph() {
     let document = format!(
         r#"<w:document {W}><w:body>

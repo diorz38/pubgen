@@ -1999,7 +1999,7 @@ mod tests {
         // A Word source becomes RTF so the page generator keeps the paragraph layout.
         let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
         w.start_file("word/document.xml", zip::write::SimpleFileOptions::default()).expect("zip entry");
-        let xml = "<w:document><w:body>\
+        let xml = "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>\
             <w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r><w:t>Tengah</w:t></w:r></w:p>\
             <w:p><w:r><w:t>Kiri</w:t></w:r></w:p>\
             </w:body></w:document>";
