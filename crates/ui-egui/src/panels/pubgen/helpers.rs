@@ -353,8 +353,7 @@ pub(crate) fn harmonize_signatory_block(app: &mut DesignApp, fid: u64, margin: d
                 || t.contains("Office")
                 || t.contains("BPS")
                 || (t.contains(',') && (t.contains("202") || t.contains("203")))
-                || (story.paras[i].para.left_indent.unwrap_or(0.0) > 80.0
-                    && story.paras[i].para.first_line_indent.unwrap_or(0.0) >= 0.0);
+                || (story.paras[i].para.left_indent.unwrap_or(0.0) > 80.0 && story.paras[i].para.first_line_indent.unwrap_or(0.0) >= 0.0);
             if is_sig {
                 first_sig_non_empty = i;
             } else {

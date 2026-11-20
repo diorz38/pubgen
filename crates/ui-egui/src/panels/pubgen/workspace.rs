@@ -4595,17 +4595,8 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
     } else {
         crate::i18n::tr(lang, "Generate Publication")
     };
-    let gen_resp = custom_styled_button(
-        ui,
-        [ui.available_width(), btn_h],
-        &gen_label,
-        12.0,
-        gen_color,
-        Color32::WHITE,
-        generate_enabled,
-        t,
-    )
-    .on_hover_text(gen_tip);
+    let gen_resp = custom_styled_button(ui, [ui.available_width(), btn_h], &gen_label, 12.0, gen_color, Color32::WHITE, generate_enabled, t)
+        .on_hover_text(gen_tip);
     if gen_resp.clicked() {
         let doc_has_pages = app.session.doc().map(|d| d.doc.pages().next().is_some()).unwrap_or(false);
         if doc_has_pages {
@@ -4630,17 +4621,8 @@ fn render_right_panel(app: &mut DesignApp, ui: &mut Ui, state: &mut Orchestrator
     } else {
         crate::i18n::tr(lang, "Generate & Publish PDF")
     };
-    let pub_resp = custom_styled_button(
-        ui,
-        [ui.available_width(), btn_h],
-        &pub_label,
-        12.0,
-        pub_color,
-        Color32::WHITE,
-        generate_enabled,
-        t,
-    )
-    .on_hover_text(pub_tip);
+    let pub_resp = custom_styled_button(ui, [ui.available_width(), btn_h], &pub_label, 12.0, pub_color, Color32::WHITE, generate_enabled, t)
+        .on_hover_text(pub_tip);
     if pub_resp.clicked() {
         let doc_has_pages = app.session.doc().map(|d| d.doc.pages().next().is_some()).unwrap_or(false);
         if doc_has_pages {
@@ -7485,18 +7467,10 @@ fn custom_styled_button(
             (base_color, text_color, Stroke::NONE)
         };
         ui.painter().rect(rect, CornerRadius::same(t.radius), bg, stroke, StrokeKind::Inside);
-        let text_center = if is_pressed {
-            pos2(rect.center().x, rect.center().y + 1.0)
-        } else {
-            rect.center()
-        };
+        let text_center = if is_pressed { pos2(rect.center().x, rect.center().y + 1.0) } else { rect.center() };
         crate::rtl::paint(ui.painter(), text_center, Align2::CENTER_CENTER, label, semibold(font_size), fg);
     }
-    let resp = if enabled {
-        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
-    } else {
-        resp.on_hover_cursor(egui::CursorIcon::NotAllowed)
-    };
+    let resp = if enabled { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp.on_hover_cursor(egui::CursorIcon::NotAllowed) };
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
     resp
 }

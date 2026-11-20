@@ -2,8 +2,7 @@ use super::common::{bool_s, p, pct, pkg_root, with_props};
 use super::item::text_frame_pref;
 use super::story::with_list_tab;
 use super::{
-    CHAR_BUILTINS, El, Ex, NO_PARA_ID, OBJECT_BUILTINS, PARA_BUILTINS, Rule, document, escape_id, names, num, st, toc_style_id,
-    toc_style_name,
+    CHAR_BUILTINS, El, Ex, NO_PARA_ID, OBJECT_BUILTINS, PARA_BUILTINS, Rule, document, escape_id, names, num, st, toc_style_id, toc_style_name,
 };
 
 impl<'a> Ex<'a> {

@@ -2882,11 +2882,7 @@ pub(crate) fn execute_generate_pages(app: &mut DesignApp, st: &PubgenState) -> R
                     }
                 } else if !clean_id_title.is_empty() {
                     // Front matter: the title alone, centered across the page margins.
-                    let title_text = if type_val.eq_ignore_ascii_case("Note") {
-                        clean_id_title.to_string()
-                    } else {
-                        clean_id_title.to_uppercase()
-                    };
+                    let title_text = if type_val.eq_ignore_ascii_case("Note") { clean_id_title.to_string() } else { clean_id_title.to_uppercase() };
                     if let Some(sid) = frame_with_font_and_style(
                         app,
                         spread_idx,
