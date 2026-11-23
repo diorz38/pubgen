@@ -33,14 +33,44 @@ pub mod enroll {
         pub _no_online_feature: (),
     }
 
+    #[derive(Clone, Debug, Default)]
+    pub struct Registration {
+        pub device_id: String,
+        pub active_device_count: Option<i64>,
+        pub max_active_devices: Option<i64>,
+    }
+
+    #[derive(Clone, Debug, Default)]
+    pub struct Device {
+        pub id: String,
+        pub device_label: String,
+        pub revoked_at: Option<String>,
+    }
+
+    impl Device {
+        pub fn active(&self) -> bool {
+            false
+        }
+    }
+
+    #[derive(Clone, Debug, Default)]
+    pub struct DeviceList {
+        pub devices: Vec<Device>,
+        pub active_device_count: Option<i64>,
+        pub max_active_devices: Option<i64>,
+    }
+
     pub fn keypair() -> Result<DeviceKeypair> {
         Err(Error::Unavailable)
     }
-    pub fn register(_device_label: &str, _app_version: &str) -> Result<String> {
+    pub fn register(_device_label: &str, _app_version: &str) -> Result<Registration> {
         Err(Error::Unavailable)
     }
-    pub fn list_mine() -> Result<serde_json::Value> {
+    pub fn list_mine() -> Result<DeviceList> {
         Err(Error::Unavailable)
+    }
+    pub fn device_id() -> Result<Option<String>> {
+        Ok(None)
     }
     pub fn unregister(_device_id: Option<&str>) -> Result<()> {
         Err(Error::Unavailable)
@@ -56,7 +86,7 @@ pub mod creds {
     pub const CACHE_FILE: &str = "simentor_credentials.json";
 
     /// Placeholder row type: the stub cache is always empty.
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, Default)]
     pub struct CachedCred {
         pub service_name: String,
         pub credential_name: String,
@@ -70,6 +100,9 @@ pub mod creds {
     }
     pub fn cached_services(_settings_dir: &Path) -> Vec<String> {
         Vec::new()
+    }
+    pub fn decrypt_any(_settings_dir: &Path, _service: &str) -> Result<Vec<u8>> {
+        Err(Error::Unavailable)
     }
     pub fn groq_key(_settings_dir: &Path) -> Result<String> {
         Err(Error::Unavailable)

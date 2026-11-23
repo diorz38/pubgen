@@ -334,16 +334,32 @@ pub(crate) struct SimentorFields {
     pub device_label: String,
     /// `(message, ok)` from the last Simentor action.
     pub status: Option<(String, bool)>,
+    /// `(active, max)` device slots, from the last register/list_mine reply.
+    pub slots: Option<(i64, i64)>,
+    /// This Windows account's registered device id, when one is stored.
+    pub device_id: Option<String>,
+    /// Services whose credential decrypted successfully in this dialog session
+    /// (handoff §8.4: `Copy` enabled only after a decrypt succeeded).
+    pub decrypted: Vec<String>,
 }
 
 impl SimentorFields {
     pub fn open(prefs: &designcraft_engine::Prefs) -> Self {
         let host = std::env::var("COMPUTERNAME").ok().filter(|h| !h.trim().is_empty()).unwrap_or_else(|| "PC".into());
-        Self { email: prefs.simentor_email.clone(), password: String::new(), device_label: format!("Pubgen · {host}"), status: None }
+        Self {
+            email: prefs.simentor_email.clone(),
+            password: String::new(),
+            device_label: format!("Pubgen · {host}"),
+            status: None,
+            slots: None,
+            device_id: simentor::enroll::device_id().ok().flatten(),
+            decrypted: Vec::new(),
+        }
     }
 
-    /// The account/enroll/fetch rows. Network actions run synchronously on click,
-    /// like the Groq/Cloudflare verify buttons (seconds, bounded timeouts).
+    /// The account/enroll/fetch rows, the credential list and the permanent
+    /// revocation caveat (handoff §8). Network actions run on click, like the
+    /// Groq/Cloudflare verify buttons (bounded 15 s timeouts).
     pub fn section(&mut self, app: &mut DesignApp, wants: &str, ui: &mut egui::Ui) {
         let signed_in = simentor::auth::signed_in();
         ui.horizontal(|ui| {
@@ -354,23 +370,31 @@ impl SimentorFields {
             ui.label("Password:");
             ui.add(egui::TextEdit::singleline(&mut self.password).password(true).desired_width(180.0));
         });
-        ui.label(
-            RichText::new(if signed_in { format!("Signed in as {}", app.session.prefs.simentor_email) } else { "Not signed in.".into() }).size(10.0),
-        );
+        let who = app.session.prefs.simentor_email.trim().to_string();
+        ui.label(RichText::new(if signed_in { format!("Signed in as {who}") } else { "Not signed in.".into() }).size(10.0));
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.label("Device:");
             ui.add(egui::TextEdit::singleline(&mut self.device_label).desired_width(180.0));
         });
+        if let Some(id) = &self.device_id {
+            let slots = self.slots.map(|(a, m)| format!(" · slot {a}/{m}")).unwrap_or_default();
+            ui.label(RichText::new(format!("Registered device {}{slots}", short_id(id))).size(9.5));
+        }
         ui.horizontal(|ui| {
             let can_login = !self.email.trim().is_empty() && !self.password.is_empty();
-            if ui.add_enabled(can_login, egui::Button::new("Sign in & register device")).clicked() {
-                self.status = Some(simentor_login_and_register(app, self));
+            if ui.add_enabled(can_login, egui::Button::new("Sign in & enroll device")).clicked() {
+                self.run_login(app);
             }
             if ui.add_enabled(signed_in, egui::Button::new("Fetch credentials")).clicked() {
                 self.status = Some(simentor_fetch());
+                if self.status.as_ref().is_some_and(|(_, ok)| *ok) {
+                    self.decrypted.clear();
+                }
             }
             if ui.add_enabled(signed_in, egui::Button::new("Sign out")).clicked() {
+                // Handoff §7: the session goes; the device key and cache stay so
+                // already-downloaded credentials keep working offline.
                 self.status = Some((
                     match simentor::auth::logout() {
                         Ok(()) => "Signed out. Cached credentials stay on this device; new fetches need a new sign-in.".to_string(),
@@ -379,30 +403,125 @@ impl SimentorFields {
                     true,
                 ));
             }
+            if ui.add_enabled(signed_in && self.device_id.is_some(), egui::Button::new("Unregister device")).clicked() {
+                self.status = Some(match simentor::enroll::unregister(None) {
+                    Ok(()) => {
+                        self.device_id = None;
+                        (
+                            "Device unregistered: one slot is free and future downloads stop. Keys already downloaded stay usable until the provider key is rotated."
+                                .to_string(),
+                            true,
+                        )
+                    }
+                    Err(e) => (format!("Unregister failed: {e}"), false),
+                });
+            }
         });
         if let Some((msg, ok)) = &self.status {
             let color = if *ok { Color32::from_rgb(120, 200, 120) } else { Color32::from_rgb(220, 80, 80) };
-            ui.label(RichText::new(msg).size(10.0).color(color));
+            ui.add(egui::Label::new(RichText::new(msg).size(10.0).color(color)).wrap());
         }
-        ui.label(RichText::new(format!("Admin grants the {wants} credential in Simentor after this device registers (max 2 devices).")).size(9.5));
+        self.credential_list(wants, ui);
+        // Handoff §8.7: permanent, not only in a modal.
+        ui.add(egui::Label::new(
+            RichText::new(
+                "Revoking a device, credential or Simentor account blocks future downloads only: a credential already downloaded stays usable until the provider key is rotated.",
+            )
+            .size(9.5)
+            .color(Color32::from_rgb(200, 150, 80)),
+        ).wrap());
+    }
+
+    /// Auto-enrol after login (handoff §8.2), then surface slot usage or the
+    /// exact `409` text.
+    fn run_login(&mut self, app: &mut DesignApp) {
+        self.status = Some(match simentor::auth::login(&self.email, &self.password) {
+            Ok(email) => {
+                let _ = app.run("prefs.set", json!({ "simentorEmail": email }));
+                self.after_login()
+            }
+            Err(e) => (login_error_text(&e), false),
+        });
+        self.password.clear();
+    }
+
+    fn after_login(&mut self) -> (String, bool) {
+        match simentor::enroll::device_id().ok().flatten() {
+            Some(id) => {
+                self.device_id = Some(id);
+                match simentor::enroll::list_mine() {
+                    Ok(list) => {
+                        self.slots = Some((list.active_device_count.unwrap_or(0), list.max_active_devices.unwrap_or(2)));
+                        ("Signed in. Ask the admin to issue the credential, then Fetch credentials.".into(), true)
+                    }
+                    Err(e) => (format!("Signed in, but the device list failed: {e}"), false),
+                }
+            }
+            None => match simentor::enroll::register(&self.device_label, env!("CARGO_PKG_VERSION")) {
+                Ok(reg) => {
+                    self.device_id = Some(reg.device_id);
+                    self.slots = Some((reg.active_device_count.unwrap_or(1), reg.max_active_devices.unwrap_or(2)));
+                    ("Signed in and device enrolled. Ask the admin to issue the credential, then Fetch credentials.".into(), true)
+                }
+                Err(e) => (login_error_text(&e), false),
+            },
+        }
+    }
+
+    /// The cached credential rows: ciphertext-only until an explicit decrypt.
+    fn credential_list(&mut self, wants: &str, ui: &mut egui::Ui) {
+        let Some(dir) = simentor_cache_dir() else { return };
+        let rows = simentor::creds::cached(&dir);
+        if rows.is_empty() {
+            ui.label(
+                RichText::new(format!(
+                    "No cached credential yet — the admin issues the {wants} credential in Simentor (enrolment alone grants nothing)."
+                ))
+                .size(9.5),
+            );
+            return;
+        }
+        ui.add_space(4.0);
+        ui.label(RichText::new("Cached credentials (ciphertext only):").size(10.0));
+        for row in rows {
+            ui.horizontal(|ui| {
+                let name = if row.credential_name.trim().is_empty() {
+                    row.service_name.clone()
+                } else {
+                    format!("{} · {}", row.service_name, row.credential_name)
+                };
+                let unlocked = self.decrypted.iter().any(|s| s == &row.service_name);
+                ui.label(RichText::new(format!("{name}  {}", if unlocked { "· decrypted" } else { "· Offline · locked" })).size(9.5));
+                if ui.add_enabled(unlocked, egui::Button::new("Copy")).clicked()
+                    && let Ok(bytes) = simentor::creds::decrypt_any(&dir, &row.service_name)
+                {
+                    ui.ctx().copy_text(String::from_utf8_lossy(&bytes).to_string());
+                }
+                if ui.button("Decrypt").clicked() {
+                    match simentor::creds::decrypt_any(&dir, &row.service_name) {
+                        Ok(_) => self.decrypted.push(row.service_name.clone()),
+                        Err(e) => self.status = Some((format!("Decrypt failed: {e}"), false)),
+                    }
+                }
+            });
+        }
     }
 }
 
-/// Sign in, keep the keypair ready, register this device. One status line either way.
-fn simentor_login_and_register(app: &mut DesignApp, f: &mut SimentorFields) -> (String, bool) {
-    let outcome = (|| -> Result<String, String> {
-        let email = simentor::auth::login(&f.email, &f.password).map_err(|e| e.to_string())?;
-        let _ = app.run("prefs.set", json!({ "simentorEmail": email }));
-        if let Err(e) = simentor::enroll::register(f.device_label.trim(), env!("CARGO_PKG_VERSION")) {
-            return Err(format!("Signed in, but device registration failed: {e}"));
+/// The message for a status code (handoff §4.3): what the user can do next.
+fn login_error_text(e: &simentor::Error) -> String {
+    match e {
+        simentor::Error::DeviceLimit => "Maksimal 2 perangkat aktif. Cabut perangkat lama di Simentor/Desktop Credential Manager.".to_string(),
+        simentor::Error::NotConfigured => {
+            "Simentor is not configured: put appsettings.json (SupabaseUrl, PublishableKey) beside the executable.".to_string()
         }
-        Ok("Signed in and device registered. Ask the admin to grant the credential, then Fetch credentials.".into())
-    })();
-    f.password.clear();
-    match outcome {
-        Ok(msg) => (msg, true),
-        Err(msg) => (msg, false),
+        simentor::Error::Unavailable => "This build has no Simentor support.".to_string(),
+        other => format!("Simentor: {other}"),
     }
+}
+
+fn short_id(id: &str) -> String {
+    id.chars().take(8).collect()
 }
 
 /// Fetch and cache the credential ciphertext for this device.

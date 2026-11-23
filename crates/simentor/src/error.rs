@@ -16,9 +16,20 @@ pub enum Error {
     /// The account is not eligible (unconfirmed email, wrong domain).
     #[error("Not eligible: {0}")]
     Eligibility(String),
-    /// The 2-active-device limit was hit.
+    /// The 2-active-device limit was hit (`409`). Never retried blindly.
     #[error("Maksimal 2 perangkat aktif. Cabut perangkat lama di Simentor/Desktop Credential Manager.")]
     DeviceLimit,
+    /// `400`: the request is malformed (label, app version, key length, base64).
+    /// Retrying it unchanged cannot help.
+    #[error("Simentor rejected the request: {0}")]
+    BadRequest(String),
+    /// `403`: not a verified `@bps.go.id` account, no Simentor profile, or the
+    /// device/credential was revoked on the server.
+    #[error("Not allowed: {0}")]
+    Forbidden(String),
+    /// `404`: the device is unknown or belongs to someone else (no ownership leak).
+    #[error("Not found: {0}")]
+    NotFound(String),
     /// The OS credential vault is missing, locked or unwritable.
     #[error("Secure storage error: {0}")]
     Vault(String),
@@ -38,14 +49,19 @@ impl Error {
     /// else a short body excerpt. Secrets never appear in these fields by contract
     /// (the server plan forbids logging or returning them).
     pub fn from_status(status: u16, body: &str) -> Self {
-        let message = serde_json::from_str::<serde_json::Value>(body)
+        let message = Self::message_field(body).unwrap_or_else(|| {
+            let cut = body.char_indices().take(160).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(0);
+            body.get(..cut).unwrap_or_default().trim().to_string()
+        });
+        Error::Server { status, message }
+    }
+
+    /// The reply's own human-readable `message` / `error` / `msg`, when it has one.
+    pub fn message_field(body: &str) -> Option<String> {
+        serde_json::from_str::<serde_json::Value>(body)
             .ok()
             .and_then(|v| ["message", "error", "msg"].iter().find_map(|k| v.get(k).and_then(|m| m.as_str()).map(str::to_string)))
-            .unwrap_or_else(|| {
-                let cut = body.char_indices().take(160).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(0);
-                body.get(..cut).unwrap_or_default().trim().to_string()
-            });
-        Error::Server { status, message }
+            .filter(|m| !m.trim().is_empty())
     }
 }
 

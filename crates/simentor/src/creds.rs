@@ -1,12 +1,15 @@
 //! Service-credential fetch, local ciphertext cache and decrypt-at-use.
 //!
-//! The cache file holds ciphertext + metadata only (ciphertext is useless on
-//! another device); plaintext exists only in the caller's memory, produced by
-//! [`decrypt_service`] right before use and dropped after. The cache survives
-//! sign-out and works offline, matching the server plan's compromise model.
+//! Handoff §4.2 (`fetch_mine`) and §6: the cache holds ciphertext + metadata
+//! only, encrypted at rest with a key kept in the OS vault, and plaintext exists
+//! in caller memory just long enough to use it. Ciphertext survives sign-out,
+//! unregister and revocation, and works offline — that is the documented
+//! compromise model: only rotating the upstream key invalidates it.
 
 use std::path::Path;
 
+use chacha20poly1305::aead::{Aead, KeyInit};
+use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
 use serde_json::Value;
 
 use crate::{Error, Result, auth, client, crypto, enroll, vault};
@@ -17,9 +20,11 @@ pub const SERVICE_GROQ: &str = "groq";
 pub const SERVICE_CLOUDFLARE: &str = "cloudflare";
 /// The cache file name inside the app settings directory.
 pub const CACHE_FILE: &str = "simentor_credentials.json";
+/// The vault entry holding the cache's own encryption key (32 random bytes).
+pub const CACHE_KEY_ENTRY: &str = "cache_key";
 
 /// One cached credential row: ciphertext plus the metadata the UI shows.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct CachedCred {
     pub service_name: String,
@@ -30,25 +35,13 @@ pub struct CachedCred {
     pub cached_at: i64,
 }
 
-impl Default for CachedCred {
-    fn default() -> Self {
-        Self {
-            service_name: String::new(),
-            credential_name: String::new(),
-            ciphertext: String::new(),
-            cipher_alg: String::new(),
-            key_version: 1,
-            cached_at: 0,
-        }
-    }
-}
-
-/// Fetch the caller's credential ciphertext for their active device and replace
+/// Fetch the caller's credential ciphertext for this active device and replace
 /// the local cache. Returns how many credentials were stored.
 pub fn fetch_and_cache(settings_dir: &Path) -> Result<usize> {
     let token = auth::access_token()?;
-    let device_id = vault::get(enroll::DEVICE_ID_ENTRY)?.unwrap_or_default();
-    let reply = client::post("/functions/v1/service-credentials", &serde_json::json!({ "action": "fetch", "device_id": device_id }), Some(&token))?;
+    let device_id = enroll::device_id()?.ok_or_else(|| Error::NotFound("this device is not registered — sign in again".into()))?;
+    let reply =
+        client::post("/functions/v1/service-credentials", &serde_json::json!({ "action": "fetch_mine", "device_id": device_id }), Some(&token))?;
     let list = reply.get("credentials").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
     let creds: Vec<CachedCred> = list
@@ -64,21 +57,17 @@ pub fn fetch_and_cache(settings_dir: &Path) -> Result<usize> {
                 cached_at: now,
             }
         })
-        .filter(|c| !c.service_name.is_empty() && !c.ciphertext.is_empty())
+        .filter(|c| !c.service_name.is_empty() && !c.ciphertext.is_empty() && c.cipher_alg.eq_ignore_ascii_case(crate::KEY_ALG))
         .collect();
     if creds.is_empty() {
-        return Err(Error::Cache("the server returned no credentials for this device — ask the admin to grant one".into()));
+        // Handoff §4.1: enrolment grants nothing; a grant is a separate admin step.
+        return Err(Error::Cache("no credential is addressed to this device yet — ask the admin to issue one in Simentor".into()));
     }
-    let doc = serde_json::json!({ "version": 1, "credentials": creds });
-    let path = settings_dir.join(CACHE_FILE);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| Error::Cache(e.to_string()))?;
-    }
-    std::fs::write(&path, doc.to_string()).map_err(|e| Error::Cache(e.to_string()))?;
+    write_cache(settings_dir, &creds)?;
     Ok(creds.len())
 }
 
-/// The cached rows (cheap: no decrypt, no vault). Empty when no cache exists.
+/// The cached rows (cheap: no decrypt). Empty when no cache exists.
 pub fn cached(settings_dir: &Path) -> Vec<CachedCred> {
     read_cache(settings_dir).unwrap_or_default()
 }
@@ -97,6 +86,13 @@ pub fn groq_key(settings_dir: &Path) -> Result<String> {
         return Err(Error::Cache("the stored groq credential is empty".into()));
     }
     Ok(key)
+}
+
+/// Any cached credential, decrypted for an explicit user action (handoff §8.4:
+/// `Copy` is enabled only after a successful decrypt). Callers must not persist
+/// the bytes.
+pub fn decrypt_any(settings_dir: &Path, service: &str) -> Result<Vec<u8>> {
+    decrypt_service(settings_dir, service)
 }
 
 /// The managed Cloudflare credentials (account id, api token), decrypted in
@@ -123,15 +119,72 @@ pub fn parse_cloudflare_plaintext(text: &str) -> Result<(String, String)> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Cache at rest: AEAD with a key held in the OS vault (handoff §6)
+// ---------------------------------------------------------------------------
+
+/// Encrypt and store the rows. Legacy plaintext caches from an earlier build are
+/// overwritten in the same step, so the upgrade needs no user action.
+fn write_cache(settings_dir: &Path, creds: &[CachedCred]) -> Result<()> {
+    let doc = serde_json::json!({ "version": 2, "credentials": creds }).to_string();
+    let sealed = seal_local(doc.as_bytes())?;
+    let path = settings_dir.join(CACHE_FILE);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| Error::Cache(e.to_string()))?;
+    }
+    std::fs::write(&path, sealed.to_string()).map_err(|e| Error::Cache(e.to_string()))?;
+    Ok(())
+}
+
 fn read_cache(settings_dir: &Path) -> Result<Vec<CachedCred>> {
     let text = std::fs::read_to_string(settings_dir.join(CACHE_FILE)).map_err(|e| Error::Cache(e.to_string()))?;
     let v: Value = serde_json::from_str(&text).map_err(|e| Error::Cache(e.to_string()))?;
-    let list = v.get("credentials").and_then(|c| c.as_array()).cloned().unwrap_or_default();
+    let doc = if v.get("version").and_then(|n| n.as_u64()) == Some(2) {
+        let plain = open_local(&v)?;
+        serde_json::from_slice::<Value>(&plain).map_err(|e| Error::Cache(e.to_string()))?
+    } else {
+        v // a pre-encryption cache: ciphertext only, re-encrypted on the next fetch
+    };
+    let list = doc.get("credentials").and_then(|c| c.as_array()).cloned().unwrap_or_default();
     Ok(list
         .into_iter()
         .filter_map(|row| serde_json::from_value::<CachedCred>(row).ok())
         .filter(|c| !c.service_name.is_empty() && !c.ciphertext.is_empty())
         .collect())
+}
+
+/// AEAD envelope: `{"version":2,"nonce":b64,"data":b64}`, key in the vault.
+fn seal_local(plain: &[u8]) -> Result<Value> {
+    let key = cache_key()?;
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
+    let mut nonce_bytes = [0u8; 12];
+    getrandom::fill(&mut nonce_bytes).map_err(|e| Error::Vault(format!("no random source: {e}")))?;
+    let data = cipher.encrypt(Nonce::from_slice(&nonce_bytes), plain).map_err(|_| Error::Cache("cannot encrypt the cache".into()))?;
+    Ok(serde_json::json!({ "version": 2, "nonce": crate::crypto_b64(&nonce_bytes), "data": crate::crypto_b64(&data) }))
+}
+
+fn open_local(v: &Value) -> Result<Vec<u8>> {
+    let field = |k: &str| v.get(k).and_then(|f| f.as_str()).unwrap_or_default().to_string();
+    let nonce = decode(&field("nonce"))?;
+    let data = decode(&field("data"))?;
+    if nonce.len() != 12 {
+        return Err(Error::Cache("the cache nonce has the wrong length".into()));
+    }
+    let key = cache_key()?;
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
+    cipher.decrypt(Nonce::from_slice(&nonce), data.as_slice()).map_err(|_| Error::Cache("cannot decrypt the cache on this device".into()))
+}
+
+/// The cache key: 32 random bytes in the vault, created on first use.
+fn cache_key() -> Result<[u8; 32]> {
+    if let Some(stored) = vault::get(CACHE_KEY_ENTRY)? {
+        let raw = decode(&stored)?;
+        return raw.try_into().map_err(|_| Error::Vault("the stored cache key has the wrong length".into()));
+    }
+    let mut key = [0u8; 32];
+    getrandom::fill(&mut key).map_err(|e| Error::Vault(format!("no random source: {e}")))?;
+    vault::set(CACHE_KEY_ENTRY, &crate::crypto_b64(&key))?;
+    Ok(key)
 }
 
 fn decrypt_service(settings_dir: &Path, service: &str) -> Result<Vec<u8>> {
@@ -147,18 +200,58 @@ fn decrypt_service(settings_dir: &Path, service: &str) -> Result<Vec<u8>> {
 
 fn decode(text: &str) -> Result<Vec<u8>> {
     use base64::Engine as _;
-    base64::engine::general_purpose::STANDARD.decode(text).map_err(|e| Error::Crypto(format!("ciphertext is not valid base64: {e}")))
+    base64::engine::general_purpose::STANDARD.decode(text).map_err(|e| Error::Crypto(format!("not valid base64: {e}")))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn dir() -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("simentor-creds-{}", std::process::id()));
+    /// A folder of this test's own: two tests run in parallel and each removes
+    /// what it made, so the pid alone would let them delete each other's files.
+    fn dir(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("simentor-creds-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    fn row(service: &str) -> CachedCred {
+        CachedCred {
+            service_name: service.into(),
+            credential_name: "shared".into(),
+            ciphertext: "AA".into(),
+            cipher_alg: crate::KEY_ALG.into(),
+            key_version: 1,
+            cached_at: 7,
+        }
+    }
+
+    /// The cache on disk must not contain the ciphertext or the metadata in
+    /// clear text (handoff §6), and must round-trip through the vault key.
+    #[cfg(windows)]
+    #[test]
+    fn cache_is_encrypted_at_rest_and_round_trips() {
+        let d = dir("encrypted");
+        write_cache(&d, &[row("groq"), row("cloudflare")]).unwrap();
+        let raw = std::fs::read_to_string(d.join(CACHE_FILE)).unwrap();
+        assert!(!raw.contains("groq"), "service name must not be plaintext: {raw}");
+        assert!(!raw.contains("AA"), "ciphertext must not be plaintext: {raw}");
+        assert_eq!(cached_services(&d), vec!["groq".to_string(), "cloudflare".to_string()]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A cache file copied from another Windows account cannot be opened.
+    #[cfg(windows)]
+    #[test]
+    fn a_cache_written_with_another_key_does_not_open() {
+        let d = dir("other-key");
+        write_cache(&d, &[row("groq")]).unwrap();
+        let mut text: Value = serde_json::from_str(&std::fs::read_to_string(d.join(CACHE_FILE)).unwrap()).unwrap();
+        text["data"] = serde_json::json!(crate::crypto_b64(&[0u8; 32]));
+        std::fs::write(d.join(CACHE_FILE), text.to_string()).unwrap();
+        assert!(read_cache(&d).is_err());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
@@ -170,8 +263,8 @@ mod tests {
     }
 
     #[test]
-    fn cache_round_trip_lists_services_without_decrypting() {
-        let d = dir();
+    fn a_legacy_plaintext_cache_still_lists_its_services() {
+        let d = dir("legacy");
         let doc = serde_json::json!({
             "version": 1,
             "credentials": [

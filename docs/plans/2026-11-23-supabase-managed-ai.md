@@ -1,6 +1,6 @@
 # Desktop side — Simentor service credentials for AI providers — mini plan
 
-Companion to [`desktop-service-credentials-plan.md`](../../desktop-service-credentials-plan.md) (server side, source of truth). This plan covers only the Pubgen desktop app; schema, RLS, and Edge Functions live there.
+Companion to [`desktop-service-credentials-plan.md`](../../desktop-service-credentials-plan.md) (server side) and its integration contract [`DESKTOP_TEAM_HANDOFF.md`](../../DESKTOP_TEAM_HANDOFF.md), which wins on every wire detail. This plan covers only the Pubgen desktop app; schema, RLS, and Edge Functions live on the server side.
 
 ## Goal
 
@@ -10,29 +10,30 @@ Add **Simentor Managed** as an independent option for AI translation (Groq) and 
 
 ```text
 Once per device:
-  login (email/password, confirmed @bps.go.id)
-    → generate libsodium keypair locally; private key stays in Windows secure storage
+  login (email/password, verified @bps.go.id, linked public.users row)
+    → generate libsodium keypair locally; private key stays in the Windows vault
     → POST /functions/v1/device-enroll {action: register, device_label, public_key, key_alg, app_version}
-    → super-admin grants service credential to user+device (Simentor web)
-    → POST /functions/v1/service-credentials (fetch) with JWT → ciphertext + metadata
+    → super-admin issues a credential to this user+device (Simentor web)
+    → POST /functions/v1/service-credentials {action: fetch_mine, device_id} with JWT → ciphertext + metadata
 
 AI use (online or offline):
   cached ciphertext → crypto_box_seal_open with device private key (memory only)
     → direct provider request (Groq / Cloudflare)
 ```
 
-- Server stores ciphertext + metadata only (`public.service_credentials`); no plaintext in the DB, no decrypt path server-side. Ciphertext is addressed to one enrolled device; a copied cache is useless on another device.
-- App ships only Simentor Supabase URL + anon/publishable key. No `service_role`, no shared decrypt key, no hardcoded secrets.
-- Enrollment auto-approves for confirmed `@bps.go.id` (identity by exact `auth_id`, never email-as-ownership). Credential access is a separate super-admin grant; enrollment alone grants nothing.
-- Max 2 active devices per Simentor user. `409` from `device-enroll` shows: “Maksimal 2 perangkat aktif. Cabut perangkat lama di Simentor/Desktop Credential Manager.” Provide `list_mine` and `unregister` actions in the app.
+- Configuration is `appsettings.json` beside the executable (`SupabaseUrl`, `PublishableKey`), per handoff §2; a source checkout may instead set `SIMENTOR_URL` / `SIMENTOR_ANON_KEY`. HTTPS only (loopback HTTP for a local stack). Never a `service_role` key.
+- Server stores ciphertext + metadata only; no plaintext in the DB, no decrypt path server-side. Ciphertext is sealed to one enrolled device; a copied cache is useless on another PC.
+- Enrollment auto-approves for a verified `@bps.go.id` account (identity by exact `auth_id`, never email-as-ownership). Enrollment grants **no** credential: a super-admin issues each one.
+- Max 2 active devices per Simentor user; `409` is authoritative (`active_device_count` may be stale). The app shows the handoff's exact `409` message and offers `unregister`.
 - Translation and cover selections stay independent: managed translation uses the `groq` service credential, managed covers the `cloudflare` one. No automatic fallback between providers.
 
 ## Security boundary
 
 - Fetch requires a valid authenticated session; **use does not**: cached ciphertext works offline, matching the server plan.
-- Unregister, device/account revocation or deletion block future fetches only. An already-decrypted key stays usable until the upstream provider key is rotated — upstream rotation is the only kill switch; document this in the runbook and UI warnings.
-- Private key lives in Windows secure storage (DPAPI/Credential Locker; TPM-backed CNG is the upgrade path, `ponytail:` note in code). Never uploaded, never in `Prefs`, `.env`, `.pubgen`, logs, or `Debug` output.
-- Cache ciphertext + metadata only. Never write decrypted keys to disk; decrypt in memory at use time and clear after. No temp plaintext files.
+- Unregister, device/credential/account revocation and deletion block future fetches only. An already-downloaded key stays usable until the upstream provider key is rotated — upstream rotation is the only kill switch. The UI states this permanently, not only in a modal.
+- Private key and refresh token live in Windows Credential Manager (DPAPI, current user). Never uploaded, never in `Prefs`, `.env`, `.pubgen`, logs, or `Debug` output.
+- The ciphertext cache is encrypted at rest with a ChaCha20-Poly1305 key held in the same vault (handoff §6), and holds ciphertext + metadata only. Plaintext exists in memory just long enough to use it; no temp files, no clipboard write without an explicit user action.
+- Losing the Windows profile or the vault entries means the cache is unrecoverable: the fix is unregister + re-enroll + re-issue, not key recovery.
 
 ## Crypto compatibility
 
@@ -45,10 +46,11 @@ AI use (online or offline):
 
 1. **Auth:** email/password sign-in against the Simentor project, sign-out, session restore/refresh; session tokens in Windows Credential Manager; network off the UI thread; wasm stubs return unavailable.
 2. **Device keypair + enrollment:** generate the keypair on first run; store the private key in the credential vault; call `device-enroll` register/list_mine/unregister after login; handle the 2-device `409`.
-3. **Credential fetch + cache:** call `service-credentials` with JWT; store returned ciphertext + metadata in a local cache (ciphertext is safe at rest); refresh on login or manual sync.
+3. **Credential fetch + cache:** `service-credentials {action: fetch_mine, device_id}` with the JWT; cache ciphertext + metadata encrypted at rest with a vault-held AEAD key; refresh on login or explicit sync.
 4. **Decrypt-at-use plumbing:** load the private key from the vault, `crypto_box_seal_open` in memory, use, clear; redacted errors; never a plaintext-at-rest path.
 5. **Provider options:** add the managed choice to the translation selector and cover setup; resolve the managed credential through steps 3–4 and reuse the existing Groq transport and Cloudflare cover path. Leave Local, Custom, and user-configured Groq/Cloudflare untouched.
-6. **Ops:** rotation/compromise runbook (revoke blocks fetches; rotate upstream key to kill issued ones), no-secret audit/diagnostics, portable x64 Windows packaging only.
+6. **UX (handoff §8):** email/password login with the BPS hint; auto-enrol after login with slot usage (`1/2`); the exact `409` message; cached credential list marked `Offline · locked` until a decrypt succeeds, with `Copy` enabled only then; `Unregister device` with the revocation warning; and the revocation caveat shown permanently.
+7. **Ops:** rotation/compromise runbook (revoke blocks fetches; rotate upstream key to kill issued ones), no-secret audit/diagnostics, portable x64 Windows packaging only.
 
 ## Verification
 
@@ -65,7 +67,7 @@ AI use (online or offline):
 
 ## Open items (server side will propose)
 
-- Simentor project URL + publishable key distribution for the shipped binary.
-- Exact `service_name` values for the two managed credentials (assumed `groq`, `cloudflare`).
+- Delivery of `appsettings.json` (`SupabaseUrl`, `PublishableKey`) with the shipped portable build, and who updates it when the project changes (handoff §12.1).
+- Exact `service_name` values for the two managed credentials (assumed `groq`, `cloudflare`); the issuer must encrypt the Cloudflare one as `{"account_id","api_token"}` JSON.
 - Shared sealed-box test vectors and pinned libsodium version compatibility.
-- UX copy and timing for “waiting for super-admin grant” state before first fetch is possible.
+- Whether the app should adopt a `last_seen_at` heartbeat action (handoff §12.5) — not implemented; the server currently sets it at registration only.
