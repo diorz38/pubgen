@@ -1,70 +1,71 @@
-# Supabase-distributed AI keys — mini plan
+# Desktop side — Simentor service credentials for AI providers — mini plan
+
+Companion to [`desktop-service-credentials-plan.md`](../../desktop-service-credentials-plan.md) (server side, source of truth). This plan covers only the Pubgen desktop app; schema, RLS, and Edge Functions live there.
 
 ## Goal
 
-Add **Supabase Managed** as an independent option for AI translation and cover generation. On first setup, a signed-in user downloads the assigned provider credentials once. The app stores credentials in the operating-system secure credential store and uses them for direct provider requests. Keep current Groq + Cloudflare, Local AI, and Custom AI workflows unchanged.
-
-## Security boundary — read before implementation
-
-This design distributes usable provider credentials to desktop users. It cannot guarantee that credentials are usable only inside this app: once the app can decrypt/use a key, an authorized user or malware on that user's PC can extract it and call the provider outside the app. OS secure storage protects credentials at rest, not from their owner or a compromised account.
-
-A login/session check can gate downloading keys, but cannot revoke a downloaded key or make it stop working after logout/session expiry. A one-time fetch therefore means **offline reuse until the provider key is rotated/revoked**, not continued Supabase-enforced authorization. If strict app-only use, immediate logout enforcement, or central per-user limits are required, use the server-side AI proxy architecture instead; do not distribute provider keys.
+Add **Simentor Managed** as an independent option for AI translation (Groq) and cover generation (Cloudflare). The app signs in with Simentor Supabase Auth, enrolls its device with a locally generated keypair, fetches per-device encrypted credential ciphertext, decrypts at use time, and calls providers directly. Keep current Groq + Cloudflare, Local AI, and Custom AI workflows unchanged.
 
 ## Architecture
 
 ```text
-First setup:
-Pubgen Studio ── Supabase Auth + HTTPS ──> Edge Function ──> authorized provider credentials
-       └── store credentials in OS credential vault
+Once per device:
+  login (email/password, confirmed @bps.go.id)
+    → generate libsodium keypair locally; private key stays in Windows secure storage
+    → POST /functions/v1/device-enroll {action: register, device_label, public_key, key_alg, app_version}
+    → super-admin grants service credential to user+device (Simentor web)
+    → POST /functions/v1/service-credentials (fetch) with JWT → ciphertext + metadata
 
-AI use:
-Pubgen Studio ── provider request + locally retrieved credential ──> Groq / Cloudflare
+AI use (online or offline):
+  cached ciphertext → crypto_box_seal_open with device private key (memory only)
+    → direct provider request (Groq / Cloudflare)
 ```
 
-- Use an authenticated Edge Function as the only key-delivery endpoint; app does not connect to Postgres or read key tables directly. Store shared provider credentials as Edge Function secrets, not in an exposed database table. Function validates the user's JWT and confirmed email, then requires the normalized email domain to equal exactly `bps.go.id`. Email eligibility alone grants access; no separate entitlement is planned. Never authorize from editable `user_metadata`.
-- Keep Supabase project URL + publishable key in the app; never ship `service_role`, secret keys, or provider keys in the binary.
-- Deliver keys only over HTTPS. Store downloaded keys in Windows Credential Manager/DPAPI. Do not add custom client-side encryption with a decryption key embedded in the app; OS storage protects keys at rest but not from the authorized PC user.
-- Store each credential separately by provider; never save keys in `Prefs`, `.env`, `.pubgen`, ordinary settings files, logs, or error text. Redact credentials in `Debug` output.
-- Use separate managed selections for translation and covers. Translation uses the managed Groq credential; cover generation uses the managed Cloudflare credential. No automatic fallback between providers.
-- Assume credentials are shared across eligible app users unless providers support issuing per-user keys. Shared credentials mean one leak can affect all users; define rotation and abuse response before release.
+- Server stores ciphertext + metadata only (`public.service_credentials`); no plaintext in the DB, no decrypt path server-side. Ciphertext is addressed to one enrolled device; a copied cache is useless on another device.
+- App ships only Simentor Supabase URL + anon/publishable key. No `service_role`, no shared decrypt key, no hardcoded secrets.
+- Enrollment auto-approves for confirmed `@bps.go.id` (identity by exact `auth_id`, never email-as-ownership). Credential access is a separate super-admin grant; enrollment alone grants nothing.
+- Max 2 active devices per Simentor user. `409` from `device-enroll` shows: “Maksimal 2 perangkat aktif. Cabut perangkat lama di Simentor/Desktop Credential Manager.” Provide `list_mine` and `unregister` actions in the app.
+- Translation and cover selections stay independent: managed translation uses the `groq` service credential, managed covers the `cloudflare` one. No automatic fallback between providers.
 
-## Authentication and local behavior
+## Security boundary
 
-- Sign-in is required to retrieve/download managed keys. Supabase Auth refresh-token/session storage must use the OS credential vault.
-- Fetch keys only during authenticated setup/refresh—not for each AI request. Store them in Windows Credential Manager, which encrypts secrets using OS-protected storage. The app reads a managed key into memory only while a valid signed-in session exists; on sign-out/session expiry, clear plaintext keys from memory and block managed AI use. Keep encrypted vault entries for later signed-in use; require fresh login before reading them again. This app-level gate cannot stop a user extracting keys.
-- Do not promise 12-hour session expiry on Free tier. Default Auth sessions may persist/refresh. Session validity gates managed use inside the app, but cannot revoke keys copied from the PC; provider-side revocation is needed to invalidate copied keys.
-- Target is the portable x64 Windows app only. Use Windows Credential Manager/DPAPI-backed secure storage; no Linux/macOS vault support is needed for this release. Fail closed if Windows secure storage is unavailable; do not fall back to plaintext.
+- Fetch requires a valid authenticated session; **use does not**: cached ciphertext works offline, matching the server plan.
+- Unregister, device/account revocation or deletion block future fetches only. An already-decrypted key stays usable until the upstream provider key is rotated — upstream rotation is the only kill switch; document this in the runbook and UI warnings.
+- Private key lives in Windows secure storage (DPAPI/Credential Locker; TPM-backed CNG is the upgrade path, `ponytail:` note in code). Never uploaded, never in `Prefs`, `.env`, `.pubgen`, logs, or `Debug` output.
+- Cache ciphertext + metadata only. Never write decrypted keys to disk; decrypt in memory at use time and clear after. No temp plaintext files.
+
+## Crypto compatibility
+
+- Sealed boxes: `crypto_box_seal` (issuance) / `crypto_box_seal_open` (desktop) — Curve25519 + XSalsa20-Poly1305.
+- Rust implementation via a libsodium-compatible crate (e.g. `dryoc` pure-Rust or `libsodium-sys`); pick one, check its licence against the AGENTS.md allowlist before adding, and pin the exact version.
+- Sealed boxes do not authenticate the sender; authorization and audit live in the issuance API, not in ciphertext.
+- Cross-platform test vectors shared with Simentor before implementation; desktop decrypt must pass them before any fetch code lands.
 
 ## Implementation steps
 
-1. **Auth and key retrieval:** Add email/password sign-in, sign-out, and session restore. Require confirmed email and normalized domain exactly `bps.go.id`. Implement an Edge Function that validates JWT and domain eligibility, retrieves configured shared provider credentials server-side, and returns only the required credentials. Keep provider secrets server-side and key tables unavailable to direct Data API roles.
-2. **Secure local storage:** Add a Windows Credential Manager/DPAPI-backed vault for provider keys and Supabase refresh credentials. Add save/read/delete behavior and clear UI for missing, locked, revoked, or stale credentials. Never serialize secrets into application prefs or project files.
-3. **Translation option:** Add Supabase Managed choice to the translation selector. Fetch keys on explicit setup/refresh; resolve the managed key from the vault and reuse existing online Groq transport. Leave Local, Custom, and user-configured Groq unchanged.
-4. **Cover option:** Add Supabase Managed choice to cover setup. Resolve the managed Cloudflare credential from the vault and reuse the current cover generation path. Leave direct user-configured Cloudflare unchanged.
-5. **Operations and release:** Treat upstream provider quotas/rate limits as usage limits; add no separate per-user quota initially. Add provider-key rotation/revocation runbook, abuse response, TLS requirements, and redacted diagnostics. Explain that downloaded credentials are OS-encrypted at rest but extractable by the authorized PC user; the app blocks their use after logout/session expiry, but cannot disable copies outside the app. Package/test for portable x64 Windows only.
+1. **Auth:** email/password sign-in against the Simentor project, sign-out, session restore/refresh; session tokens in Windows Credential Manager; network off the UI thread; wasm stubs return unavailable.
+2. **Device keypair + enrollment:** generate the keypair on first run; store the private key in the credential vault; call `device-enroll` register/list_mine/unregister after login; handle the 2-device `409`.
+3. **Credential fetch + cache:** call `service-credentials` with JWT; store returned ciphertext + metadata in a local cache (ciphertext is safe at rest); refresh on login or manual sync.
+4. **Decrypt-at-use plumbing:** load the private key from the vault, `crypto_box_seal_open` in memory, use, clear; redacted errors; never a plaintext-at-rest path.
+5. **Provider options:** add the managed choice to the translation selector and cover setup; resolve the managed credential through steps 3–4 and reuse the existing Groq transport and Cloudflare cover path. Leave Local, Custom, and user-configured Groq/Cloudflare untouched.
+6. **Ops:** rotation/compromise runbook (revoke blocks fetches; rotate upstream key to kill issued ones), no-secret audit/diagnostics, portable x64 Windows packaging only.
 
 ## Verification
 
-- Unit tests: provider selection remains independent; signed-out/expired session cannot read vault keys or start managed requests; sign-out clears plaintext keys from memory but retains encrypted vault entries; vault round-trip/delete; no secret in serialized prefs, package files, logs, `Debug`, or errors.
-- Edge Function tests: reject missing/invalid JWT, unconfirmed email, and non-`@bps.go.id` user; return only configured credentials; reject unknown provider names; never log secrets. Verify app has no direct key-table access.
-- Regression: existing Groq, Custom, Local AI, direct Cloudflare, and offline workflows continue unchanged without Supabase.
-- Manual staging test: sign in → retrieve/store keys → restart app → sign in and generate translation/cover without another Supabase key fetch → sign out/session expire and confirm managed use is blocked → rotate/revoke provider key and confirm copied old keys stop working only after provider revocation.
+- Unit tests: sealed-box decrypt against published test vectors; 409/unregister/list_mine handling; ciphertext-only cache (assert no plaintext key bytes on disk after a use); `Debug`/error redaction; provider selection independence.
+- Regression: existing Groq, Custom, Local AI, direct Cloudflare, and offline workflows unchanged without Simentor.
+- End-to-end staging (server plan Phase 4): BPS login → auto-enroll → super-admin grant → fetch ciphertext → decrypt → use; copied ciphertext fails on another device; revoke/unregister blocks new fetches but not local use; upstream rotation invalidates old keys.
 
 ## Not in scope
 
-- Guaranteeing provider keys are usable only inside this app or inaccessible to the authorized PC user.
-- Immediate server-side revocation of a previously downloaded key through Supabase logout.
-- Guaranteed 12-hour session limit on unsupported Supabase plans.
-- Billing, automatic cross-provider failover, or plaintext key storage as a fallback.
+- Server schema, RLS, Edge Functions, and the super-admin web page (see the server plan).
+- Guaranteeing keys are unusable outside this app after download; upstream rotation is the enforcement point.
+- Separate app-level per-user quotas (upstream provider limits apply, shared across eligible users).
+- Linux/macOS vaults (portable x64 Windows only for this release).
 
-## Confirmed choices
+## Open items (server side will propose)
 
-- Sign-in: email/password with confirmed email.
-- Eligibility: confirmed email domain exactly `bps.go.id`; no separate entitlement.
-- Usage limits: upstream provider quotas/rate limits; no additional app per-user cap initially.
-- Distribution: portable x64 Windows only; Windows Credential Manager/DPAPI.
-- Local cache: keep encrypted vault entries; require active sign-in before the app reads/uses keys; clear plaintext keys from memory and block managed AI after sign-out/session expiry.
-
-## Remaining operational decision
-
-- Provider keys appear to be shared app-level credentials. Confirm upstream key type and document shared quota, rotation owner, and abuse response before release. Even if the app gates use on sign-in, any user can extract and reuse a downloaded key outside the app; use Edge Function proxying if that risk is unacceptable.
+- Simentor project URL + publishable key distribution for the shipped binary.
+- Exact `service_name` values for the two managed credentials (assumed `groq`, `cloudflare`).
+- Shared sealed-box test vectors and pinned libsodium version compatibility.
+- UX copy and timing for “waiting for super-admin grant” state before first fetch is possible.
