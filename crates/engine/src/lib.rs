@@ -300,6 +300,15 @@ pub struct Prefs {
     /// Cloudflare Workers AI API token (scope: Workers AI Edit). Same plaintext-prefs
     /// ponytail as the Groq key above.
     pub cover_ai_cloudflare_api_token: String,
+    /// Pubgen AI Base cover credential source: "user" (the Cloudflare fields above)
+    /// or "simentor" (docs/plans/2026-11-23-supabase-managed-ai.md — per-device
+    /// ciphertext fetched from Simentor; the key itself never touches Prefs).
+    #[serde(default = "default_cover_ai_provider")]
+    pub cover_ai_provider: String,
+    /// Simentor account email of the last successful sign-in (identifier only —
+    /// tokens and keys live in the OS credential vault, never in Prefs).
+    #[serde(default)]
+    pub simentor_email: String,
 }
 
 /// The most recent files Preferences lets File › Open Recent keep.
@@ -308,6 +317,11 @@ pub const MAX_RECENT_FILES: u32 = 100;
 /// Default base URL of the local OpenAI-compatible translation server (Ollama's port).
 fn default_local_base_url() -> String {
     "http://localhost:11434/v1".to_string()
+}
+
+/// The AI Base cover credential source before anyone picks one.
+fn default_cover_ai_provider() -> String {
+    "user".to_string()
 }
 
 impl Prefs {
@@ -448,6 +462,8 @@ impl Default for Prefs {
             pubgen_project_path: String::new(),
             cover_ai_cloudflare_account_id: String::new(),
             cover_ai_cloudflare_api_token: String::new(),
+            cover_ai_provider: default_cover_ai_provider(),
+            simentor_email: String::new(),
         }
     }
 }

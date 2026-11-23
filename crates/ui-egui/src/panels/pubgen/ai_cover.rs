@@ -11,6 +11,7 @@ use serde_json::json;
 use super::{PubgenState, Tokens};
 use crate::DesignApp;
 use designcraft_imagegen as imagegen;
+use designcraft_simentor as simentor;
 
 /// Cover styles `AI_STYLE_BASE + i` map to `AI_PRESETS[i]` and to
 /// `assets/templates/covers/100_ai_base.designcraft`.
@@ -143,6 +144,11 @@ pub struct AiCoverSetupDialog {
     pub error: Option<String>,
     /// Set by a successful verify: the dialog closes and stays closed.
     pub close_requested: bool,
+    /// Credential source: "user" (the Cloudflare fields above) or "simentor"
+    /// (docs/plans/2026-11-23-supabase-managed-ai.md).
+    pub provider: String,
+    /// Simentor sign-in/enroll/fetch rows, shared with the translation dialog.
+    pub(crate) simentor: super::ai::SimentorFields,
 }
 
 /// Parse Cloudflare credentials from `.env` content.
@@ -235,15 +241,34 @@ pub fn get_credentials(prefs: &designcraft_engine::Prefs) -> (String, String) {
 
 impl AiCoverSetupDialog {
     pub fn open(app: &DesignApp) -> Self {
-        let (account_id, token) = get_credentials(&app.session.prefs);
-        Self { account_id, token, error: None, close_requested: false }
+        let provider = if app.session.prefs.cover_ai_provider.eq_ignore_ascii_case("simentor") { "simentor" } else { "user" }.to_string();
+        let (account_id, token) = if provider == "simentor" { (String::new(), String::new()) } else { get_credentials(&app.session.prefs) };
+        Self { account_id, token, error: None, close_requested: false, simentor: super::ai::SimentorFields::open(&app.session.prefs), provider }
     }
 
-    /// Is a usable-looking key configured? (Checked without the network; the real
-    /// proof is the Verify call.)
+    /// Is a usable-looking credential configured? (Checked without the network and,
+    /// for Simentor, without decrypting — the ciphertext cache merely has to hold a
+    /// cloudflare row; a wrong-device cache surfaces its error at use time.)
     pub fn key_configured(app: &DesignApp) -> bool {
+        if app.session.prefs.cover_ai_provider.eq_ignore_ascii_case("simentor") {
+            return super::ai::simentor_cache_dir().is_some_and(|dir| {
+                simentor::creds::cached_services(&dir).iter().any(|s| s.eq_ignore_ascii_case(simentor::creds::SERVICE_CLOUDFLARE))
+            });
+        }
         let (acct, tok) = get_credentials(&app.session.prefs);
         !acct.is_empty() && !tok.is_empty()
+    }
+
+    /// The credentials covers should generate with right now, decrypting the
+    /// managed ciphertext at call time when `coverAiProvider` is "simentor".
+    /// `None` when the selected source is not configured; callers must not
+    /// fall back to the other source.
+    pub fn cover_credentials(prefs: &designcraft_engine::Prefs) -> Option<(String, String)> {
+        if prefs.cover_ai_provider.eq_ignore_ascii_case("simentor") {
+            return super::ai::simentor_cache_dir().and_then(|dir| simentor::creds::cloudflare(&dir).ok());
+        }
+        let (acct, tok) = get_credentials(prefs);
+        (!acct.is_empty() && !tok.is_empty()).then_some((acct, tok))
     }
 
     /// Prove the credentials with one tiny real generation (256 px, one step: a few
@@ -255,18 +280,35 @@ impl AiCoverSetupDialog {
             self.error = Some("This build has no online image generation (compile with --features ai-cover-online).".into());
             return false;
         }
-        let client = imagegen::cloudflare::CloudflareClient::new(&self.account_id, &self.token);
+        let managed = self.provider.eq_ignore_ascii_case("simentor");
+        let (account_id, token) = if managed {
+            match Self::cover_credentials(&app.session.prefs) {
+                Some(pair) => pair,
+                None => {
+                    self.error = Some("No usable Simentor cloudflare credential — sign in, register this device and fetch credentials first.".into());
+                    return false;
+                }
+            }
+        } else {
+            (self.account_id.clone(), self.token.clone())
+        };
+        let client = imagegen::cloudflare::CloudflareClient::new(&account_id, &token);
         let req = imagegen::GenRequest::new("flat grey rectangle", "", imagegen::Aspect::Iso, 1);
         let cancel = std::sync::atomic::AtomicBool::new(false);
         match client.generate(&req, &cancel) {
             Ok(_) => {
-                let _ = app.run(
-                    "prefs.set",
+                // The managed mode persists only the provider choice — the
+                // credential stays in the OS vault / ciphertext cache, never Prefs.
+                let prefs = if managed {
+                    json!({ "coverAiProvider": "simentor" })
+                } else {
                     json!({
+                        "coverAiProvider": "user",
                         "coverAiCloudflareAccountId": self.account_id.trim(),
                         "coverAiCloudflareApiToken": self.token.trim(),
-                    }),
-                );
+                    })
+                };
+                let _ = app.run("prefs.set", prefs);
                 self.close_requested = true;
                 true
             }
@@ -341,18 +383,28 @@ pub(crate) fn ai_cover_options_pane(app: &mut DesignApp, ui: &mut egui::Ui, st: 
     if let Some(dialog) = &mut st.cover_ai_dialog {
         let mut close = false;
         egui::Window::new("AI Base Cover Setup").collapsible(false).resizable(false).show(ui.ctx(), |ui| {
-            ui.label("Cloudflare Workers AI (free tier: ~45 images/day).");
-            ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.label("Account ID:");
-                ui.add(egui::TextEdit::singleline(&mut dialog.account_id).desired_width(220.0));
+                ui.radio_value(&mut dialog.provider, "user".to_string(), "Cloudflare account (own key)");
+                ui.radio_value(&mut dialog.provider, "simentor".to_string(), "Simentor Managed (@bps.go.id)");
             });
-            ui.horizontal(|ui| {
-                ui.label("API Token:");
-                ui.add(egui::TextEdit::singleline(&mut dialog.token).password(true).hint_text("Workers AI · Edit").desired_width(220.0));
-            });
-            ui.hyperlink_to("Create a token", "https://dash.cloudflare.com/profile/api-tokens");
-            ui.label(RichText::new("Stored locally in DesignCraft settings.").size(10.0));
+            ui.separator();
+            if dialog.provider == "simentor" {
+                dialog.simentor.section(app, simentor::creds::SERVICE_CLOUDFLARE, ui);
+                ui.label(RichText::new("The managed credential is encrypted for this device and never written to settings.").size(10.0));
+            } else {
+                ui.label("Cloudflare Workers AI (free tier: ~45 images/day).");
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label("Account ID:");
+                    ui.add(egui::TextEdit::singleline(&mut dialog.account_id).desired_width(220.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("API Token:");
+                    ui.add(egui::TextEdit::singleline(&mut dialog.token).password(true).hint_text("Workers AI · Edit").desired_width(220.0));
+                });
+                ui.hyperlink_to("Create a token", "https://dash.cloudflare.com/profile/api-tokens");
+                ui.label(RichText::new("Stored locally in DesignCraft settings.").size(10.0));
+            }
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 if ui.button("Verify & Use").clicked() {
@@ -424,7 +476,9 @@ pub(crate) fn execute_generate_ai_cover(app: &mut DesignApp, st: &PubgenState) -
         return Err("AI Base covers need a build with --features ai-cover-online.".into());
     }
     if !AiCoverSetupDialog::key_configured(app) {
-        return Err("AI Base needs a Cloudflare account: pick AI Setup\u{2026} under Cover Images and verify your key.".into());
+        return Err(
+            "AI Base needs a credential: pick AI Setup\u{2026} under Cover Images and verify (own Cloudflare key, or Simentor Managed).".into()
+        );
     }
 
     let dir = super::covers::ai_cover_output_dir();
@@ -432,7 +486,9 @@ pub(crate) fn execute_generate_ai_cover(app: &mut DesignApp, st: &PubgenState) -
     let bg_path = match cached {
         Some(path) => path,
         None => {
-            let (account_id, token) = get_credentials(&app.session.prefs);
+            let Some((account_id, token)) = AiCoverSetupDialog::cover_credentials(&app.session.prefs) else {
+                return Err("The selected cover credential source is not usable — sign in and fetch the Simentor credential, or verify your own Cloudflare key.".into());
+            };
             let palette = p.palettes.get(st.cover_ai_palette).unwrap_or(&p.palettes[0]);
             let prompt = build_prompt(p, palette);
             let neg = imagegen::GenRequest::clean_cover_negative_prompt();

@@ -17,20 +17,23 @@ use super::{
     file_en_same_as_file, parse_csv_content_with_delim, resolve_catalog_related_file, set_en_frame_label,
 };
 use crate::DesignApp;
+use designcraft_simentor as simentor;
 use designcraft_translate as translate;
 
 pub const PROVIDER_OFFLINE: usize = 0;
 pub const PROVIDER_GROQ: usize = 1;
 pub const PROVIDER_CUSTOM: usize = 2;
 pub const PROVIDER_LOCAL: usize = 3;
+pub const PROVIDER_SIMENTOR: usize = 4;
 
-/// The user-facing name of a provider id ("groq"/"custom"/"local"): status lines and
+/// The user-facing name of a provider id ("groq"/"custom"/"local"/"simentor"): status lines and
 /// the quota popup say which backend actually ran.
 pub(crate) fn provider_label(provider: &str) -> &'static str {
     match provider {
         "groq" => "Groq",
         "custom" => "Custom API",
         "local" => "Local AI",
+        "simentor" => "Simentor",
         _ => "AI",
     }
 }
@@ -62,6 +65,12 @@ pub struct AiSetupDialog {
     pub mem: Option<translate::system::MemoryInfo>,
     pub cores: usize,
     pub error: Option<String>,
+    /// Simentor Managed (docs/plans/2026-11-23-supabase-managed-ai.md): sign-in,
+    /// device enrollment and credential fetch, shared with the cover setup dialog.
+    pub(crate) simentor: SimentorFields,
+    /// Whether a cached managed Groq credential decrypts on this device. Refreshed
+    /// when the dialog opens and after each fetch; never per frame.
+    pub simentor_ready: bool,
     /// Set by a successful Use AI: the dialog closes and stays closed.
     pub close_requested: bool,
     pub tab: usize,
@@ -85,6 +94,7 @@ impl AiSetupDialog {
             "groq" => PROVIDER_GROQ,
             "custom" => PROVIDER_CUSTOM,
             "local" => PROVIDER_LOCAL,
+            "simentor" => PROVIDER_SIMENTOR,
             _ => {
                 if !groq_key.is_empty() {
                     PROVIDER_GROQ
@@ -93,6 +103,8 @@ impl AiSetupDialog {
                 }
             }
         };
+        let simentor_ready = simentor_cache_dir()
+            .is_some_and(|d| simentor::creds::cached_services(&d).iter().any(|s| s.eq_ignore_ascii_case(simentor::creds::SERVICE_GROQ)));
         Self {
             provider,
             groq_key,
@@ -115,6 +127,8 @@ impl AiSetupDialog {
             mem: translate::system::memory_info(),
             cores: translate::system::cpu_cores(),
             error: None,
+            simentor: SimentorFields::open(prefs),
+            simentor_ready,
             close_requested: false,
             tab: DIALOG_TAB_SETUP,
             terms: sorted_terms(&st.glossary),
@@ -236,6 +250,38 @@ impl AiSetupDialog {
         )
     }
 
+    /// Simentor Managed: decrypt the cached managed Groq credential, prove it with
+    /// the same tiny live request, then persist the provider choice — the key
+    /// itself stays in the OS vault and the ciphertext cache, never in Prefs.
+    pub fn verify_and_accept_simentor(&mut self, app: &mut DesignApp, st: &mut PubgenState) -> bool {
+        self.error = None;
+        let Some(dir) = simentor_cache_dir() else {
+            self.error = Some("The app settings folder is unavailable.".into());
+            return false;
+        };
+        let key = match simentor::creds::groq_key(&dir) {
+            Ok(k) => k,
+            Err(e) => {
+                self.error = Some(format!("Simentor: {e}"));
+                return false;
+            }
+        };
+        let model = if self.groq_model.trim().is_empty() { "llama-3.3-70b-versatile".to_string() } else { self.groq_model.trim().to_string() };
+        let mut t = translate::OnlineTranslator::with_endpoint(&key, &model, "https://api.groq.com/openai/v1");
+        let email = app.session.prefs.simentor_email.trim().to_string();
+        self.verify_and_accept_with(
+            app,
+            st,
+            &mut t,
+            json!({
+                "translationProvider": "simentor",
+                "translationGroqModel": model,
+                "simentorEmail": email,
+            }),
+            "sign in, register this device and fetch the Simentor credential first",
+        )
+    }
+
     /// The shared accept path of every online provider: one tiny live request, then the
     /// prefs write and the armed flag. `hint` names what to fix in the error line.
     fn verify_and_accept_with(
@@ -267,6 +313,105 @@ impl AiSetupDialog {
 fn translation_capable(id: &str) -> bool {
     let l = id.to_lowercase();
     !["whisper", "guard", "orpheus", "tts", "embed", "moderation", "distil"].iter().any(|x| l.contains(x))
+}
+
+/// The app settings folder that holds the Simentor ciphertext cache
+/// (`profile::config_dir`, beside `prefs.json`). `None` also when the managed
+/// client is a stub — callers treat that as "not configured".
+pub(crate) fn simentor_cache_dir() -> Option<std::path::PathBuf> {
+    if !simentor::online_available() {
+        return None;
+    }
+    designcraft_engine::profile::config_dir()
+}
+
+/// Sign-in / device-enrollment / fetch fields shared by the translation and cover
+/// setup dialogs (docs/plans/2026-11-23-supabase-managed-ai.md).
+#[derive(Clone, Debug)]
+pub(crate) struct SimentorFields {
+    pub email: String,
+    pub password: String,
+    pub device_label: String,
+    /// `(message, ok)` from the last Simentor action.
+    pub status: Option<(String, bool)>,
+}
+
+impl SimentorFields {
+    pub fn open(prefs: &designcraft_engine::Prefs) -> Self {
+        let host = std::env::var("COMPUTERNAME").ok().filter(|h| !h.trim().is_empty()).unwrap_or_else(|| "PC".into());
+        Self { email: prefs.simentor_email.clone(), password: String::new(), device_label: format!("Pubgen · {host}"), status: None }
+    }
+
+    /// The account/enroll/fetch rows. Network actions run synchronously on click,
+    /// like the Groq/Cloudflare verify buttons (seconds, bounded timeouts).
+    pub fn section(&mut self, app: &mut DesignApp, wants: &str, ui: &mut egui::Ui) {
+        let signed_in = simentor::auth::signed_in();
+        ui.horizontal(|ui| {
+            ui.label("Email:");
+            ui.add(egui::TextEdit::singleline(&mut self.email).hint_text("nama@bps.go.id").desired_width(180.0));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Password:");
+            ui.add(egui::TextEdit::singleline(&mut self.password).password(true).desired_width(180.0));
+        });
+        ui.label(
+            RichText::new(if signed_in { format!("Signed in as {}", app.session.prefs.simentor_email) } else { "Not signed in.".into() }).size(10.0),
+        );
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label("Device:");
+            ui.add(egui::TextEdit::singleline(&mut self.device_label).desired_width(180.0));
+        });
+        ui.horizontal(|ui| {
+            let can_login = !self.email.trim().is_empty() && !self.password.is_empty();
+            if ui.add_enabled(can_login, egui::Button::new("Sign in & register device")).clicked() {
+                self.status = Some(simentor_login_and_register(app, self));
+            }
+            if ui.add_enabled(signed_in, egui::Button::new("Fetch credentials")).clicked() {
+                self.status = Some(simentor_fetch());
+            }
+            if ui.add_enabled(signed_in, egui::Button::new("Sign out")).clicked() {
+                self.status = Some((
+                    match simentor::auth::logout() {
+                        Ok(()) => "Signed out. Cached credentials stay on this device; new fetches need a new sign-in.".to_string(),
+                        Err(e) => format!("Sign-out problem: {e}"),
+                    },
+                    true,
+                ));
+            }
+        });
+        if let Some((msg, ok)) = &self.status {
+            let color = if *ok { Color32::from_rgb(120, 200, 120) } else { Color32::from_rgb(220, 80, 80) };
+            ui.label(RichText::new(msg).size(10.0).color(color));
+        }
+        ui.label(RichText::new(format!("Admin grants the {wants} credential in Simentor after this device registers (max 2 devices).")).size(9.5));
+    }
+}
+
+/// Sign in, keep the keypair ready, register this device. One status line either way.
+fn simentor_login_and_register(app: &mut DesignApp, f: &mut SimentorFields) -> (String, bool) {
+    let outcome = (|| -> Result<String, String> {
+        let email = simentor::auth::login(&f.email, &f.password).map_err(|e| e.to_string())?;
+        let _ = app.run("prefs.set", json!({ "simentorEmail": email }));
+        if let Err(e) = simentor::enroll::register(f.device_label.trim(), env!("CARGO_PKG_VERSION")) {
+            return Err(format!("Signed in, but device registration failed: {e}"));
+        }
+        Ok("Signed in and device registered. Ask the admin to grant the credential, then Fetch credentials.".into())
+    })();
+    f.password.clear();
+    match outcome {
+        Ok(msg) => (msg, true),
+        Err(msg) => (msg, false),
+    }
+}
+
+/// Fetch and cache the credential ciphertext for this device.
+fn simentor_fetch() -> (String, bool) {
+    let Some(dir) = simentor_cache_dir() else { return ("Simentor is unavailable in this build.".into(), false) };
+    match simentor::creds::fetch_and_cache(&dir) {
+        Ok(n) => (format!("{n} credential(s) cached on this device."), true),
+        Err(e) => (format!("Fetch failed: {e}"), false),
+    }
 }
 
 fn groq_pane(app: &mut DesignApp, st: &mut PubgenState, dialog: &mut AiSetupDialog, ui: &mut egui::Ui) {
@@ -311,6 +456,34 @@ fn groq_pane(app: &mut DesignApp, st: &mut PubgenState, dialog: &mut AiSetupDial
     // arms AI or shows the provider error in the dialog.
     if ui.add_enabled(can_use, egui::Button::new("Use AI")).clicked() {
         dialog.verify_and_accept_groq(app, st);
+    }
+    if let Some(err) = &dialog.error {
+        ui.add_space(4.0);
+        ui.label(RichText::new(err).size(10.5).color(Color32::from_rgb(220, 80, 80)));
+    }
+}
+
+/// Simentor Managed pane: the shared sign-in/enroll/fetch rows, then the same
+/// live "Use AI" proof with the managed Groq credential.
+fn simentor_pane(app: &mut DesignApp, st: &mut PubgenState, dialog: &mut AiSetupDialog, ui: &mut egui::Ui) {
+    if !simentor::online_available() {
+        ui.label(RichText::new("This build has no Simentor support (compile with --features ai-translate-online).").size(10.0));
+        return;
+    }
+    dialog.simentor.section(app, simentor::creds::SERVICE_GROQ, ui);
+    // A successful fetch may have just cached the credential: re-check cheaply.
+    if dialog.simentor.status.as_ref().is_some_and(|(_, ok)| *ok)
+        && let Some(dir) = simentor_cache_dir()
+    {
+        dialog.simentor_ready = simentor::creds::cached_services(&dir).iter().any(|s| s.eq_ignore_ascii_case(simentor::creds::SERVICE_GROQ));
+    }
+    ui.add_space(6.0);
+    ui.label(RichText::new("Managed credentials are encrypted per device; catalog text still goes to Groq's cloud.").size(10.0));
+    if ui.add_enabled(dialog.simentor_ready, egui::Button::new("Use AI")).clicked() {
+        dialog.verify_and_accept_simentor(app, st);
+    }
+    if !dialog.simentor_ready {
+        ui.label(RichText::new("Fetch credentials first — the admin must grant the groq credential to this device.").size(9.5));
     }
     if let Some(err) = &dialog.error {
         ui.add_space(4.0);
@@ -710,6 +883,9 @@ pub fn dialog_ui(app: &mut DesignApp, st: &mut PubgenState, ui: &mut egui::Ui) {
         });
         ui.horizontal(|ui| {
             ui.radio_value(&mut dialog.provider, PROVIDER_LOCAL, "Local AI (Ollama, LM Studio…)");
+            ui.radio_value(&mut dialog.provider, PROVIDER_SIMENTOR, "Simentor Managed (@bps.go.id)");
+        });
+        ui.horizontal(|ui| {
             ui.radio_value(&mut dialog.provider, PROVIDER_OFFLINE, "Offline on this computer");
         });
         ui.separator();
@@ -719,6 +895,7 @@ pub fn dialog_ui(app: &mut DesignApp, st: &mut PubgenState, ui: &mut egui::Ui) {
             PROVIDER_GROQ => groq_pane(app, st, &mut dialog, ui),
             PROVIDER_CUSTOM => custom_pane(app, st, &mut dialog, ui),
             PROVIDER_LOCAL => local_pane(app, st, &mut dialog, ui),
+            PROVIDER_SIMENTOR => simentor_pane(app, st, &mut dialog, ui),
             _ => offline_pane(app, st, &mut dialog, ui),
         }
 
@@ -1867,6 +2044,7 @@ pub fn backend_config_from_prefs(app: &DesignApp) -> Option<BackendConfig> {
         "groq" => "groq",
         "custom" => "custom",
         "local" => "local",
+        "simentor" => "simentor",
         _ => {
             if !env_groq_key.is_empty() {
                 "groq"
@@ -1898,9 +2076,32 @@ pub fn backend_config_from_prefs(app: &DesignApp) -> Option<BackendConfig> {
                 p.translation_local_base_url.trim().trim_end_matches('/').to_string()
             },
         },
+        "simentor" => {
+            let (key, model) = match simentor_cache_dir() {
+                Some(dir) => match simentor::creds::groq_key(&dir) {
+                    Ok(k) => (
+                        k,
+                        if p.translation_groq_model.trim().is_empty() {
+                            "llama-3.3-70b-versatile".to_string()
+                        } else {
+                            p.translation_groq_model.trim().to_string()
+                        },
+                    ),
+                    Err(_) => (String::new(), String::new()),
+                },
+                None => (String::new(), String::new()),
+            };
+            BackendConfig { provider: "simentor".into(), key, model, base_url: "https://api.groq.com/openai/v1".into() }
+        }
         // NLLB is a stub; resolving it would promise a backend that cannot run.
         _ => return None,
     };
+    // Simentor Managed: the key is decrypted from the per-device ciphertext cache
+    // right here, at job-spawn time, and never persisted. Unconfigured (no cache,
+    // wrong device, stub build) resolves to None — never a fallback to Groq.
+    if cfg.provider == "simentor" && cfg.key.is_empty() {
+        return None;
+    }
     if cfg.model.is_empty() || cfg.base_url.is_empty() {
         return None;
     }

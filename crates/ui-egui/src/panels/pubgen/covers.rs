@@ -2464,7 +2464,10 @@ pub fn trigger_generate_cover(app: &mut DesignApp, st: &mut PubgenState, ctx: eg
     let seed = super::ai_cover_job::seed_from_title(title_text);
     let req = imagegen::GenRequest::new(prompt, neg_prompt, aspect, 18).with_seed(seed);
 
-    let (account_id, token) = super::ai_cover::get_credentials(&app.session.prefs);
+    let Some((account_id, token)) = super::ai_cover::AiCoverSetupDialog::cover_credentials(&app.session.prefs) else {
+        st.cover_status = Some(("The selected cover credential source is not usable — open AI Setup\u{2026} and verify again.".into(), false));
+        return;
+    };
 
     let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let filename = format!("ai_cover_{}_{}_{}.png", st.cover_style, st.cover_ai_palette, timestamp);
@@ -2601,7 +2604,10 @@ pub fn trigger_generate_cover_batch_confirmed(
     items: Vec<super::ai_cover_job::CoverBatchItem>,
     ctx: egui::Context,
 ) {
-    let (account_id, token) = super::ai_cover::get_credentials(&app.session.prefs);
+    let Some((account_id, token)) = super::ai_cover::AiCoverSetupDialog::cover_credentials(&app.session.prefs) else {
+        st.cover_status = Some(("The selected cover credential source is not usable — open AI Setup\u{2026} and verify again.".into(), false));
+        return;
+    };
     let job = super::ai_cover_job::CoverJob::spawn_batch(&account_id, &token, items, ctx);
     st.cover_job = Some(job);
     st.cover_status = Some(("Generating AI covers\u{2026}".into(), true));

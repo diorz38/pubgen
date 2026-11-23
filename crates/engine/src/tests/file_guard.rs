@@ -75,6 +75,14 @@ const ALLOWED: &[(&str, &str)] = &[
         "the AI quota tracker reads the developer's local `.env` for the Supabase counter credentials (environment variables win), never a path a command names",
     ),
     (
+        "simentor/src/config.rs",
+        "the Simentor client reads the developer's local `.env` for the project URL and anon key (environment variables win), never a path a command names — same policy as imagegen/src/quota.rs",
+    ),
+    (
+        "simentor/src/creds.rs",
+        "the Simentor ciphertext cache lives only in the settings folder the caller injects (`profile::config_dir`, never a command parameter or document field): it writes ciphertext there and reads it back for decrypt-at-use; plaintext never touches disk",
+    ),
+    (
         "translate/src/download.rs",
         "downloads and caches offline NLLB translation model weights and vocabulary files into the user-configured model directory",
     ),

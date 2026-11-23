@@ -26,6 +26,7 @@ designcraft-engine = { workspace = true }
 pubgen-core = { workspace = true }
 designcraft-imagegen = { workspace = true }
 designcraft-translate = { workspace = true }
+designcraft-simentor = { workspace = true }
 craft-prepress = { workspace = true }
 # The UI draws monochrome icon glyphs from egui's bundled emoji faces (☰, ⚠, 📋); 0.37 moved
 # them behind this feature. They stay bundled copies of OSI/CC0 faces from `epaint_default_fonts`.
@@ -63,9 +64,9 @@ toml = "1"
 pubgen = []
 # AI translation backends for the Pubgen panel (see docs/plans/2026-10-22-offline-ai-translation-pubgen.md).
 ai-translate = ["designcraft-translate/nllb"]
-ai-translate-online = ["designcraft-translate/online"]
+ai-translate-online = ["designcraft-translate/online", "designcraft-simentor/online"]
 # AI Base cover generation for the Pubgen panel (docs/plans/2026-10-26-ai-base-cover-pubgen.md).
-ai-cover-online = ["designcraft-imagegen/cloudflare"]
+ai-cover-online = ["designcraft-imagegen/cloudflare", "designcraft-simentor/online"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 craft-update = { workspace = true }
