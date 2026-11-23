@@ -67,6 +67,8 @@ AI use (online or offline):
 
 ## Open items (server side will propose)
 
+- **Deployment status (2026-11-23):** project `https://gwkowacuvtnaapzkqcnf.supabase.co` answers `/auth/v1/settings` with the project's anon key and email auth enabled, but `device-enroll` and `service-credentials` both return `404 Requested function was not found`. The migration and both functions still have to be deployed before any end-to-end run. Verified with `crates/simentor/tests/live.rs` (`-- --ignored`).
+
 - Delivery of `appsettings.json` (`SupabaseUrl`, `PublishableKey`) with the shipped portable build, and who updates it when the project changes (handoff §12.1).
 - Exact `service_name` values for the two managed credentials (assumed `groq`, `cloudflare`); the issuer must encrypt the Cloudflare one as `{"account_id","api_token"}` JSON.
 - Shared sealed-box test vectors and pinned libsodium version compatibility.
