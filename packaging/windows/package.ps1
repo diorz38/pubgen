@@ -155,6 +155,12 @@ foreach ($f in 'README.md', 'LICENSE', 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE'
   $p = Join-Path $Root $f
   if (Test-Path $p) { Copy-Item $p $Portable }
 }
+# Simentor project config: the template always ships, the real appsettings.json only when the
+# build machine has one (DESKTOP_TEAM_HANDOFF.md §2). It holds a publishable key, never a secret.
+$SettingsTemplate = Join-Path $PSScriptRoot 'appsettings.example.json'
+if (Test-Path $SettingsTemplate) { Copy-Item $SettingsTemplate $Portable }
+$SettingsReal = Join-Path $PSScriptRoot 'appsettings.json'
+if (Test-Path $SettingsReal) { Copy-Item $SettingsReal $Portable }
 # Builds made with craft-fonts (CRAFT_FONTS_DIR) embed its fonts: ship their licences.
 if ($env:CRAFT_FONTS_DIR) {
   foreach ($ofl in Get-ChildItem -Path (Join-Path $env:CRAFT_FONTS_DIR 'fonts\*\OFL.txt') -ErrorAction SilentlyContinue) {

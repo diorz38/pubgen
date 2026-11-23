@@ -62,6 +62,7 @@ designcraft-ui-egui = { path = "crates/ui-egui" }
 designcraft-mcp = { path = "crates/mcp" }
 designcraft-translate = { path = "crates/translate" }
 designcraft-imagegen = { path = "crates/imagegen" }
+designcraft-simentor = { path = "crates/simentor" }
 designcraft-testkit = { path = "crates/testkit" }
 pubgen-core = { path = "crates/pubgen-core" }
 

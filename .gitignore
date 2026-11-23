@@ -19,6 +19,10 @@
 ~$*
 /.kilo/
 .env
+# The Simentor project config ships beside the executable; the real one holds a
+# publishable key only, but it is per-deployment, not repository content.
+appsettings.json
+!packaging/windows/appsettings.example.json
 /ai_image_cover/
 /ai_cover_generation/old/
 /ai_cover_generation/test01/

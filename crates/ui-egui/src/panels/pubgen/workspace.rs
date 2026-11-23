@@ -2320,8 +2320,8 @@ pub fn show(app: &mut DesignApp, ui: &mut Ui) {
     let checked_cover_quota = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("pubgen_cf_quota_initial_queried"))).unwrap_or(false);
     if !checked_cover_quota {
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("pubgen_cf_quota_initial_queried"), true));
-        let (acct, _) = super::ai_cover::get_credentials(&app.session.prefs);
-        if !acct.is_empty() {
+        let acct = super::ai_cover::AiCoverSetupDialog::cover_credentials(&app.session.prefs).map(|(acct, _)| acct);
+        if let Some(acct) = acct {
             let ctx = ui.ctx().clone();
             let _ = std::thread::Builder::new().name("pubgen-cf-quota-init".into()).spawn(move || {
                 if let Some(neurons) = designcraft_imagegen::quota::check_remaining(&acct) {

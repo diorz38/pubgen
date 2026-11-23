@@ -50,7 +50,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Preferences",
             [],
             None,
-            "{showHiddenCharacters?, typographersQuotes?, polygonSides?, starInset?, scaleStrokes?, dimensionsIncludeStroke?, transformationsAreTotals?, absolutePageNumbers?, highlightHj?, highlightKeeps?, highlightCustomTracking?, highlightSubstitutedFonts?, richBlackOutput?, favoriteFonts?: [family], recentFonts?: [family], showFontNamesInEnglish?, smartTextReflow?, autocorrect?, autocorrectList?: [[word, correction]], showAddedText?, showNoteAnchors?, cjkFeatures?: bool|null (CJK-only menu items and dialogs shown; null follows the interface language), linkTextFiles? (Create Links When Placing Text Files), recoveryMinutes?, recentFilesMax?: 0–100, defaultUnits?: {horizontalUnits?, verticalUnits?, rulerOrigin?, keyboardIncrement? (pt), kerningIncrement? (1/1000 em)} (Units & Increments of new documents), translationModelDir?: path, translationModelId?: id, translationProvider?: \"offline\"|\"groq\"|\"custom\"|\"local\", translationGroqApiKey?: string, translationGroqModel?: id, translationCustomBaseUrl?: url, translationCustomApiKey?: string, translationCustomModel?: id, translationLocalBaseUrl?: url (default http://localhost:11434/v1), translationLocalModel?: id, pubgenGlossaryPath?: path (custom BPS terminology JSON; empty = bundled), pubgenProjectPath?: path (last Pubgen publication manifest), coverAiCloudflareAccountId?: string, coverAiCloudflareApiToken?: string (Pubgen AI Base cover, Workers AI Edit scope)} → all application preferences",
+            "{showHiddenCharacters?, typographersQuotes?, polygonSides?, starInset?, scaleStrokes?, dimensionsIncludeStroke?, transformationsAreTotals?, absolutePageNumbers?, highlightHj?, highlightKeeps?, highlightCustomTracking?, highlightSubstitutedFonts?, richBlackOutput?, favoriteFonts?: [family], recentFonts?: [family], showFontNamesInEnglish?, smartTextReflow?, autocorrect?, autocorrectList?: [[word, correction]], showAddedText?, showNoteAnchors?, cjkFeatures?: bool|null (CJK-only menu items and dialogs shown; null follows the interface language), linkTextFiles? (Create Links When Placing Text Files), recoveryMinutes?, recentFilesMax?: 0–100, defaultUnits?: {horizontalUnits?, verticalUnits?, rulerOrigin?, keyboardIncrement? (pt), kerningIncrement? (1/1000 em)} (Units & Increments of new documents), translationModelDir?: path, translationModelId?: id, translationProvider?: \"offline\"|\"groq\"|\"custom\"|\"local\", translationGroqApiKey?: string, translationGroqModel?: id, translationCustomBaseUrl?: url, translationCustomApiKey?: string, translationCustomModel?: id, translationLocalBaseUrl?: url (default http://localhost:11434/v1), translationLocalModel?: id, pubgenGlossaryPath?: path (custom BPS terminology JSON; empty = bundled), pubgenProjectPath?: path (last Pubgen publication manifest), coverAiCloudflareAccountId?: string, coverAiCloudflareApiToken?: string (Pubgen AI Base cover, Workers AI Edit scope), coverAiProvider?: \"user\"|\"simentor\" (cover credential source; simentor keys live in the OS vault), simentorEmail?: string (last Simentor sign-in email; identifier only)} → all application preferences",
             super::always,
             |s, p| {
                 let cur = serde_json::to_value(&s.prefs).map_err(|e| bad("prefs.set", e.to_string()))?;
@@ -181,6 +181,17 @@ mod tests {
         assert_eq!(p.translation_provider, "offline");
         assert!(p.translation_custom_base_url.is_empty());
         assert_eq!(p.translation_local_base_url, "http://localhost:11434/v1");
+        assert_eq!(p.cover_ai_provider, "user");
+        assert!(p.simentor_email.is_empty());
+    }
+
+    #[test]
+    fn prefs_set_accepts_the_simentor_fields() {
+        let mut s = Session::new();
+        s.execute("prefs.set", &json!({"coverAiProvider": "simentor", "simentorEmail": "user@bps.go.id"}))
+            .expect("prefs.set accepts the Simentor keys");
+        assert_eq!(s.prefs.cover_ai_provider, "simentor");
+        assert_eq!(s.prefs.simentor_email, "user@bps.go.id");
     }
 }
 

@@ -1,0 +1,36 @@
+[package]
+name = "designcraft-simentor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true }
+# Simentor Auth + device-enroll share one TLS stack with the translate client.
+ureq = { version = "2", optional = true, default-features = false, features = ["tls"] }
+# libsodium-compatible sealed boxes (crypto_box_seal, X25519 + XSalsa20-Poly1305),
+# matching the Simentor issuance side. MIT since 0.6 (0.5.x was LGPL — not allowed).
+dryoc = { version = "2", optional = true, default-features = false, features = ["std"] }
+base64 = { version = "0.22", optional = true, default-features = false, features = ["std"] }
+# Ciphertext cache at rest: AEAD with a key held in the OS vault (handoff §6).
+chacha20poly1305 = { version = "0.10", optional = true }
+getrandom = { version = "0.3", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+# The device private key and the Supabase refresh token live in Credential
+# Manager (DPAPI-protected). The app ships as portable x64 Windows only.
+keyring = { version = "3", optional = true, default-features = false, features = ["windows-native"] }
+
+[features]
+default = []
+# Native client: Auth, device enrollment, ciphertext fetch and decrypt-at-use.
+# Never enabled on wasm builds.
+online = ["dep:ureq", "dep:serde", "dep:dryoc", "dep:base64", "dep:keyring", "dep:chacha20poly1305", "dep:getrandom"]
